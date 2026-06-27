@@ -15,6 +15,13 @@ ARCH ?= amd64
 test:
 	$(PYTHON) -m pytest -q
 
+# Cross-project end-to-end: spin up openschool + tftpjail and drive the
+# real boot-policy wire (TFTP + HTTP). Requires tftpjail checked out at
+# ../tftpjail. Not part of `make test`.
+.PHONY: functional-test
+functional-test:
+	$(PYTHON) -m pytest tests/functional -v -o addopts=
+
 .PHONY: lint
 lint:
 	$(PYTHON) -m compileall -q openschool tests
