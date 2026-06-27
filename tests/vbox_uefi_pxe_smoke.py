@@ -40,8 +40,13 @@ from contextlib import contextmanager
 from typing import Iterator
 
 
-# Where VBox's NAT engine puts the host, viewed from inside the guest.
-HOST_AS_SEEN_FROM_NAT = "10.0.2.2"
+# VBox NAT puts the host at 10.0.2.2 from inside the guest. But VBox slirp
+# *intercepts* UDP/69 to that alias for its built-in TFTP server when
+# EnableTFTP=1 -- meaning external TFTP at 10.0.2.2 is unreachable from the
+# guest. To actually hit our host-side listener, the next-server IP must be
+# OUTSIDE the NAT alias range so slirp NATs the packet through to the real
+# network. We use the host's LAN IP for that.
+HOST_LAN_IP_DEFAULT = "192.168.25.13"
 
 # Bootfile name we ask VBox to advertise. We do NOT have to actually serve
 # anything for it — we just want to see whether the guest tries to fetch
@@ -118,13 +123,31 @@ def create_vm(vm_name: str, bootfile: str) -> None:
     run_vbox("modifyvm", vm_name, "--memory", "512", "--cpus", "1")
     # NAT networking with our DHCP override pointing the guest at the host.
     run_vbox("modifyvm", vm_name, "--nic1", "nat")
-    run_vbox("modifyvm", vm_name, "--nattftpserver1", HOST_AS_SEEN_FROM_NAT)
+    run_vbox("modifyvm", vm_name, "--nattftpserver1", HOST_LAN_IP_DEFAULT)
     run_vbox("modifyvm", vm_name, "--nattftpfile1", bootfile)
+    # VBox 7.x's NAT engine needs three extradata keys to actually advertise
+    # bootp options in DHCP replies. The --nattftp* modifyvm options *write*
+    # these to the VM XML, but in 7.2 the runtime NAT config only picks up
+    # NextServer; BootFile and EnableTFTP must be set directly here for the
+    # DHCP server to include them in the OFFER. Path is keyed by NIC device.
+    nic_cfg = "VBoxInternal/Devices/virtio-net/0/LUN#0/Config"
+    run_vbox("setextradata", vm_name, f"{nic_cfg}/EnableTFTP", "1")
+    run_vbox("setextradata", vm_name, f"{nic_cfg}/BootFile", bootfile)
+    run_vbox("setextradata", vm_name, f"{nic_cfg}/NextServer",
+             HOST_LAN_IP_DEFAULT)
     # Boot from network only — no disk, no anything else.
     run_vbox("modifyvm", vm_name, "--boot1", "net", "--boot2", "none",
              "--boot3", "none", "--boot4", "none")
     # Headless friendly: virtio NIC is well-supported by EDK2 PXE.
     run_vbox("modifyvm", vm_name, "--nictype1", "virtio")
+    # Serial console to a host file so we can see what UEFI / iPXE is doing
+    # when it boots. Without this, headless leaves us blind to PXE failures.
+    serial_path = f"/tmp/{vm_name}-serial.log"
+    # Truncate any prior log so we only see this run.
+    open(serial_path, "w").close()
+    run_vbox("modifyvm", vm_name, "--uart1", "0x3F8", "4",
+             "--uartmode1", "file", serial_path)
+    print(f"smoke: serial log at {serial_path}", flush=True)
 
 
 @contextmanager
