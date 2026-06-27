@@ -96,6 +96,15 @@ class MachineEnrolment(BaseModel):
         ..., description="CPU architecture: x86_64, arm64, or i386."
     )
     platform: str = Field(..., description="Firmware platform: efi or pc.")
+    # Off by default — real student desktops do not have or need a serial.
+    # Tests and headless lab boxes opt in.
+    serial_console: bool = Field(
+        default=False,
+        description=(
+            "If true, the renderer adds console=ttyS0 to the kernel cmdline. "
+            "Enable for VMs and headless hardware; leave off for desktops."
+        ),
+    )
 
 
 class MachineRecord(BaseModel):
@@ -105,6 +114,7 @@ class MachineRecord(BaseModel):
     profile_name: str
     architecture: str
     platform: str
+    serial_console: bool
     created_at: str
 
     @classmethod
@@ -114,6 +124,7 @@ class MachineRecord(BaseModel):
             profile_name=machine.profile_name,
             architecture=machine.architecture,
             platform=machine.platform,
+            serial_console=machine.serial_console,
             created_at=machine.created_at,
         )
 
@@ -202,12 +213,17 @@ def create_app(
         session = store.mint(request.mac)
         return MintResponse(token=session.token, mac=session.mac)
 
-    @app.get("/boot/{filename}")
+    @app.get("/boot/{token}/{filename}")
     def serve_boot_file(
+        token: str,
         filename: str,
-        t: str = Query(..., description="Per-boot session token."),
         store: BootSessionStore = Depends(get_store),
     ) -> FileResponse:
+        """Token in the path (not the query string) so live-boot's URL parser
+        sees the real file extension. live-boot's mount-http.sh determines
+        the archive type by ``sed 's/.*\\.\\(.*\\)/\\1/'`` on the URL — a
+        query string like ``?t=...`` would put the token AFTER the dot and
+        the file would be unrecognised."""
         if boot_dir is None:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -220,7 +236,7 @@ def create_app(
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND, detail="not found"
             )
-        if store.lookup(t) is None:
+        if store.lookup(token) is None:
             # Uniform 401: same as /status.
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
@@ -266,6 +282,7 @@ def create_app(
             profile_name=body.profile_name,
             architecture=body.architecture,
             platform=body.platform,
+            serial_console=body.serial_console,
         )
         return MachineRecord.from_machine(machine)
 

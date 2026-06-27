@@ -25,13 +25,26 @@ from typing import Optional
 # change we'll add an explicit migration step that runs alongside this.
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS machines (
-    mac           TEXT PRIMARY KEY NOT NULL,
-    profile_name  TEXT NOT NULL,
-    architecture  TEXT NOT NULL,
-    platform      TEXT NOT NULL,
-    created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+    mac             TEXT PRIMARY KEY NOT NULL,
+    profile_name    TEXT NOT NULL,
+    architecture    TEXT NOT NULL,
+    platform        TEXT NOT NULL,
+    serial_console  INTEGER NOT NULL DEFAULT 0,
+    created_at      TEXT NOT NULL DEFAULT (datetime('now'))
 );
 """
+
+
+# Migration step: older databases didn't have the serial_console column.
+# Add it idempotently — SQLite has no `IF NOT EXISTS` for ALTER TABLE so we
+# catch the duplicate-column error and shrug it off.
+def _add_serial_console_column_if_missing(connection: sqlite3.Connection) -> None:
+    try:
+        connection.execute(
+            "ALTER TABLE machines ADD COLUMN serial_console INTEGER NOT NULL DEFAULT 0"
+        )
+    except sqlite3.OperationalError:
+        pass
 
 
 @dataclass(frozen=True)
@@ -43,6 +56,10 @@ class Machine:
     architecture: str
     platform: str
     created_at: str  # ISO-8601 UTC, stored as text
+    # True when the kernel cmdline should include `console=ttyS0`. Set on VMs
+    # and headless debug hardware; left False on student-facing desktops so
+    # the OS doesn't burn cycles on a non-existent serial port.
+    serial_console: bool = False
 
 
 class MachineRegistry:
@@ -58,6 +75,7 @@ class MachineRegistry:
         self._write_lock = threading.Lock()
         with self._connect() as connection:
             connection.executescript(_SCHEMA)
+            _add_serial_console_column_if_missing(connection)
             # WAL gives us safer concurrent reads without sacrificing
             # durability on writes. Harmless on in-memory databases.
             try:
@@ -80,15 +98,19 @@ class MachineRegistry:
         profile_name: str,
         architecture: str,
         platform: str,
+        serial_console: bool = False,
     ) -> Machine:
         """Insert (or replace) a machine. Returns the canonical row."""
         normalised_mac = _normalise_mac(mac)
         with self._write_lock, self._connect() as connection:
             connection.execute(
                 "INSERT OR REPLACE INTO machines "
-                "(mac, profile_name, architecture, platform) "
-                "VALUES (?, ?, ?, ?)",
-                (normalised_mac, profile_name, architecture, platform),
+                "(mac, profile_name, architecture, platform, serial_console) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (
+                    normalised_mac, profile_name, architecture,
+                    platform, 1 if serial_console else 0,
+                ),
             )
         result = self.lookup(normalised_mac)
         # lookup must succeed -- we just wrote the row inside the lock.
@@ -100,7 +122,8 @@ class MachineRegistry:
         normalised_mac = _normalise_mac(mac)
         with self._connect() as connection:
             row = connection.execute(
-                "SELECT mac, profile_name, architecture, platform, created_at "
+                "SELECT mac, profile_name, architecture, platform, "
+                "       serial_console, created_at "
                 "FROM machines WHERE mac = ?",
                 (normalised_mac,),
             ).fetchone()
@@ -111,7 +134,8 @@ class MachineRegistry:
     def list_all(self) -> list[Machine]:
         with self._connect() as connection:
             rows = connection.execute(
-                "SELECT mac, profile_name, architecture, platform, created_at "
+                "SELECT mac, profile_name, architecture, platform, "
+                "       serial_console, created_at "
                 "FROM machines ORDER BY created_at, mac"
             ).fetchall()
         return [_row_to_machine(r) for r in rows]
@@ -140,5 +164,6 @@ def _row_to_machine(row: sqlite3.Row) -> Machine:
         profile_name=row["profile_name"],
         architecture=row["architecture"],
         platform=row["platform"],
+        serial_console=bool(row["serial_console"]),
         created_at=row["created_at"],
     )

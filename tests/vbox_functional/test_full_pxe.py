@@ -1,23 +1,27 @@
 """End-to-end PXE chain through a real VirtualBox UEFI guest.
 
-What this proves:
+What this proves, when it passes:
 
-  - VBox UEFI guest does DHCP, gets bootp options pointing at our tftpjail.
-  - The guest TFTP-fetches /jail/<mac>/<arch>/<platform> from tftpjail.
-  - tftpjail parses identity, runs policy, calls fleetboot's /resolve to
-    confirm the MAC is registered, then /sessions to mint a per-boot token,
-    then renders a grub.cfg with that token stamped in.
-  - The grub.cfg bytes go back to the VM as TFTP DATA blocks.
+  1. VBox UEFI fetches grubnetx64.efi (our built chainload binary) from
+     tftpjail's public-asset directory — no identity / registry check yet.
+  2. GRUB starts. Its embedded config fetches
+     /jail/<mac>/x86_64/efi from tftpjail over TFTP.
+  3. tftpjail parses identity, runs policy, calls fleetboot's /resolve to
+     confirm the MAC is registered, then /sessions to mint a per-boot token,
+     then renders a grub.cfg with that token stamped into every URL.
+  4. GRUB executes the cfg: fetches vmlinuz + initrd.img from fleetboot's
+     /boot/*?t=TOKEN over HTTP, then boots the kernel with the cmdline the
+     renderer produced (includes console=ttyS0 because we enrol with
+     serial_console=True).
+  5. live-boot inside the initrd HTTP-fetches the squashfs, sets up the
+     tmpfs overlay, switch_roots, and starts systemd.
+  6. The fleetboot reporter inside the booted image POSTs network_up to
+     fleetboot once networking comes up.
 
-What we DO NOT test here:
+We assert on step 6 — the strongest signal that everything upstream worked.
 
-  - GRUB then executing the cfg, fetching kernel/initrd/squashfs over HTTP.
-    The cfg we serve points at fleetboot's /boot/* URLs but the guest is a
-    blank disk: it has no GRUB binary loaded, so it'll fail right after the
-    cfg arrives. That's fine — proving the cfg arrived (the session was
-    minted for our enrolled MAC) is enough to prove the whole brain works.
-
-Slow (UEFI cold boot + DHCP timing). Run with: ``make vbox-functional-test``.
+Slow: a UEFI cold boot + DHCP + multi-stage chain + squashfs download takes
+several minutes. Run only via ``make vbox-functional-test``.
 """
 
 from __future__ import annotations
@@ -28,9 +32,11 @@ import threading
 import time
 from pathlib import Path
 
+import httpx
 import pytest
 import uvicorn
 
+from fleetboot.boot_states import BootState
 from fleetboot.server.app import create_app
 from fleetboot.server.boot_sessions import BootSessionStore
 from fleetboot.server.registry import MachineRegistry
@@ -46,16 +52,42 @@ MINT_SECRET = "vbox-test-mint-secret"
 ADMIN_SECRET = "vbox-test-admin-secret"
 VM_NAME = "fleetboot-vbox-fullpxe"
 TFTP_PORT = 69
-WAIT_SECONDS = 120
 
-# We pin the VM MAC to a stable VBox-prefixed value so we can pre-enrol it
-# in the registry. VBox accepts the bare 12-hex form.
+# Up to five minutes for the whole UEFI → GRUB → kernel → live-boot →
+# reporter chain. Real time is closer to 2–3 minutes once the squashfs is
+# in the kernel's HTTP cache; first run is longer.
+WAIT_SECONDS = 300
+
+# Pinned VBox-prefixed MAC so we can pre-enrol it.
 VM_MAC_RAW = "080027aabbcc"
 VM_MAC_COLON = "08:00:27:aa:bb:cc"
 
-# We always send the request to the host's listener via VBox NAT. The host's
-# real LAN IP routes through slirp; the 10.0.2.2 alias would be intercepted.
-TFTPJAIL_PATH = f"/jail/{VM_MAC_COLON}/x86_64/efi"
+# What VBox tells the guest's UEFI to TFTP-fetch as its first stage.
+BOOTFILE = "grubnetx64.efi"
+
+# Build artifacts the test reads (and points clients at). All produced by
+# the project's Make targets; we skip rather than fail if any is missing.
+REPO_ROOT = Path(__file__).resolve().parents[2]
+BUILD_DIR = REPO_ROOT / "build"
+REQUIRED_ARTIFACTS = (
+    BUILD_DIR / "grubnetx64.efi",
+    BUILD_DIR / "vmlinuz",
+    BUILD_DIR / "initrd.img",
+    BUILD_DIR / "fleetboot-amd64.squashfs",
+)
+
+
+# ---- Pre-flight ----------------------------------------------------------
+
+
+def _skip_if_artifacts_missing() -> None:
+    missing = [p for p in REQUIRED_ARTIFACTS if not p.is_file()]
+    if missing:
+        names = ", ".join(p.name for p in missing)
+        pytest.skip(
+            f"Missing build artifacts: {names}. "
+            "Run `make grub-binary && make image` before this test."
+        )
 
 
 # ---- Helpers --------------------------------------------------------------
@@ -82,53 +114,58 @@ def _vbox(*args: str, check: bool = True) -> subprocess.CompletedProcess:
 
 
 def _destroy_vm() -> None:
-    """Best-effort cleanup of any prior VM with our name."""
     _vbox("controlvm", VM_NAME, "poweroff", check=False)
     time.sleep(0.5)
     _vbox("unregistervm", VM_NAME, "--delete", check=False)
 
 
-def _create_and_start_vm(host_ip: str) -> None:
-    _vbox("createvm", "--name", VM_NAME, "--ostype", "Other_64", "--register")
+def _create_and_start_vm(host_ip: str) -> str:
+    """Build the VM and start it headless; return serial-log path."""
+    _vbox("createvm", "--name", VM_NAME, "--ostype", "Debian_64", "--register")
     _vbox("modifyvm", VM_NAME, "--firmware", "efi64")
-    _vbox("modifyvm", VM_NAME, "--memory", "512", "--cpus", "1")
+    _vbox("modifyvm", VM_NAME, "--memory", "2048", "--cpus", "2")
     _vbox("modifyvm", VM_NAME, "--nic1", "nat")
     _vbox("modifyvm", VM_NAME, "--nictype1", "virtio")
     _vbox("modifyvm", VM_NAME, "--macaddress1", VM_MAC_RAW)
     _vbox("modifyvm", VM_NAME, "--boot1", "net", "--boot2", "none",
           "--boot3", "none", "--boot4", "none")
     _vbox("modifyvm", VM_NAME, "--nattftpserver1", host_ip)
-    _vbox("modifyvm", VM_NAME, "--nattftpfile1", TFTPJAIL_PATH)
+    _vbox("modifyvm", VM_NAME, "--nattftpfile1", BOOTFILE)
     nic_cfg = "VBoxInternal/Devices/virtio-net/0/LUN#0/Config"
     _vbox("setextradata", VM_NAME, f"{nic_cfg}/EnableTFTP", "1")
-    _vbox("setextradata", VM_NAME, f"{nic_cfg}/BootFile", TFTPJAIL_PATH)
+    _vbox("setextradata", VM_NAME, f"{nic_cfg}/BootFile", BOOTFILE)
     _vbox("setextradata", VM_NAME, f"{nic_cfg}/NextServer", host_ip)
     serial_log = f"/tmp/{VM_NAME}-serial.log"
     Path(serial_log).write_text("")
     _vbox("modifyvm", VM_NAME, "--uart1", "0x3F8", "4",
           "--uartmode1", "file", serial_log)
     _vbox("startvm", VM_NAME, "--type", "headless")
+    return serial_log
 
 
 # ---- Fleetboot in a thread -----------------------------------------------
 
 
 class _StartedFleetboot:
-    def __init__(self, tmp_path: Path) -> None:
+    def __init__(self) -> None:
         self.sessions = BootSessionStore()
-        self.registry = MachineRegistry(tmp_path / "machines.sqlite")
+        # Registry in /tmp so it survives if we want to inspect post-run.
+        self.registry = MachineRegistry(
+            f"/tmp/{VM_NAME}-machines.sqlite"
+        )
         self.port = _find_free_tcp_port()
         self.app = create_app(
             sessions=self.sessions,
             mint_secret=MINT_SECRET,
             admin_secret=ADMIN_SECRET,
             registry=self.registry,
-            boot_dir=tmp_path / "boot",
+            boot_dir=BUILD_DIR,
         )
-        (tmp_path / "boot").mkdir(exist_ok=True)
+        # Access log on so the test surfaces what the booted image asks for
+        # (live-boot fetching the squashfs, the reporter posting /status).
         config = uvicorn.Config(
             self.app, host="0.0.0.0", port=self.port,
-            log_level="warning", access_log=False,
+            log_level="info", access_log=True,
         )
         self._server = uvicorn.Server(config)
         self._thread = threading.Thread(target=self._server.run, daemon=True)
@@ -153,37 +190,34 @@ class _StartedFleetboot:
 # ---- The test ------------------------------------------------------------
 
 
-def test_vbox_uefi_pxe_drives_full_tftpjail_fleetboot_chain(tmp_path: Path):
+def test_vbox_uefi_pxe_boots_kernel_and_reporter_calls_home():
+    _skip_if_artifacts_missing()
+
     host_ip = _host_lan_ip()
-    fleetboot = _StartedFleetboot(tmp_path)
+    fleetboot = _StartedFleetboot()
     fleetboot.start()
 
-    # Real wire: tftpjail's client points at the running fleetboot.
     client = FleetbootClient(
         base_url=fleetboot.base_url, mint_secret=MINT_SECRET,
     )
 
-    # Enrol the VBox MAC via the admin API (proves /machines + /resolve are
-    # wired end-to-end too).
-    enroll = client._http_client  # type: ignore[attr-defined]
-    import httpx
-
+    # Enrol the VBox MAC; opt in to serial_console because this is a VM.
     with httpx.Client(timeout=5.0) as http:
         response = http.post(
             f"{fleetboot.base_url}/machines",
             json={
                 "mac": VM_MAC_COLON, "profile_name": "vbox-smoke",
                 "architecture": "x86_64", "platform": "efi",
+                "serial_console": True,
             },
             headers={"Authorization": f"Bearer {ADMIN_SECRET}"},
         )
         assert response.status_code == 201, response.text
 
-    # On a NAT'd guest the source IP that reaches us is the HOST's own IP
-    # (slirp rewrites it). We can't ARP-resolve the guest MAC from that, so
-    # we install a permissive neighbour lookup for the test: it returns
-    # whatever asserted MAC the request claims. The ARP check is unit-tested
-    # elsewhere; this test is about the full PXE chain.
+    # On NAT'd guests the source IP we see is the host's own. We can't ARP
+    # back to the guest MAC, so we install a permissive neighbour lookup
+    # for the test: it returns whatever asserted MAC the request claims.
+    # The ARP check is unit-tested elsewhere.
     def permissive_neighbour(_ip: str) -> str:
         return VM_MAC_COLON
 
@@ -199,32 +233,40 @@ def test_vbox_uefi_pxe_drives_full_tftpjail_fleetboot_chain(tmp_path: Path):
         port=TFTP_PORT,
         policy=policy,
         neighbour_lookup=permissive_neighbour,
+        # Lets UEFI PXE fetch grubnetx64.efi without registry auth.
+        public_assets_dir=BUILD_DIR,
         ack_timeout_seconds=1.0,
         max_retries=3,
     )
     tftpjail.start()
 
     _destroy_vm()
+    serial_log: str | None = None
     try:
-        _create_and_start_vm(host_ip)
+        serial_log = _create_and_start_vm(host_ip)
 
-        # Wait until fleetboot records a minted session for our VM's MAC.
-        # That's the strong signal: it means the RRQ landed at tftpjail,
-        # the policy approved (registry hit succeeded), and the renderer
-        # ran the mint.
+        # Wait for the booted image's reporter to POST network_up.
         deadline = time.monotonic() + WAIT_SECONDS
-        minted = False
+        reached_network_up = False
+        last_state: BootState | None = None
         while time.monotonic() < deadline:
             for session in fleetboot.sessions.active_sessions():
-                if session.mac == VM_MAC_COLON:
-                    minted = True
-                    break
-            if minted:
+                if session.mac != VM_MAC_COLON:
+                    continue
+                last_state = session.latest_state
+                if session.latest_state == BootState.NETWORK_UP or (
+                    session.latest_state is not None
+                    and session.latest_state.value != "network_up"
+                ):
+                    # Anything network_up or beyond is enough.
+                    reached_network_up = True
+            if reached_network_up:
                 break
-            time.sleep(0.5)
-        assert minted, (
-            f"no session minted for {VM_MAC_COLON} within {WAIT_SECONDS}s — "
-            f"check /tmp/{VM_NAME}-serial.log for the UEFI PXE output"
+            time.sleep(1.0)
+        assert reached_network_up, (
+            f"reporter did not POST network_up for {VM_MAC_COLON} within "
+            f"{WAIT_SECONDS}s. Last seen state: {last_state}. "
+            f"Serial log at {serial_log}."
         )
     finally:
         _destroy_vm()

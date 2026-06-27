@@ -45,6 +45,7 @@ lint:
 image: stage-fleetboot-package
 	mkdir -p $(BUILD_DIR)
 	$(DEBOS) \
+	  --fakemachine-backend=qemu \
 	  --artifactdir=$(BUILD_DIR) \
 	  --template-var=architecture:$(ARCH) \
 	  $(RECIPE)
@@ -61,6 +62,23 @@ image-smoke:
 	$(PYTHON) -m tests.smoke.run_image_smoke \
 	  --build-dir=$(BUILD_DIR) \
 	  --arch=$(ARCH)
+
+# Build the chainload GRUB EFI binary that VBox / real UEFI fetches over
+# TFTP as the very first boot stage. Its embedded config fetches the per-MAC
+# config from tftpjail and chainloads it. Cheap to (re)build; we ship it
+# alongside vmlinuz / initrd.img in build/.
+.PHONY: grub-binary
+grub-binary: $(BUILD_DIR)/grubnetx64.efi
+
+$(BUILD_DIR)/grubnetx64.efi: image/grub-embedded.cfg
+	mkdir -p $(BUILD_DIR)
+	grub-mkimage \
+	  --format=x86_64-efi \
+	  --output=$@ \
+	  --prefix='(tftp,$$pxe_default_server)/' \
+	  --config=$< \
+	  efinet tftp http normal linux configfile \
+	  smbios search echo serial terminal net regexp
 
 # Wipe build artifacts and staged inputs.
 .PHONY: clean
