@@ -11,7 +11,7 @@ __pycache__/
 
 # Staged copy of the reporter package for fakemachine to see during builds.
 # Recreated on every `make image`.
-image/openschool_pkg/
+image/fleetboot_pkg/
 
 # Admin customisation: tracked stub files only; admins drop their own files
 # into overlay/ and hooks/ in their own deployments.

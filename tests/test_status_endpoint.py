@@ -2,9 +2,9 @@
 
 from fastapi.testclient import TestClient
 
-from openschool.boot_states import BootState
-from openschool.server.app import create_app
-from openschool.server.boot_sessions import BootSessionStore
+from fleetboot.boot_states import BootState
+from fleetboot.server.app import create_app
+from fleetboot.server.boot_sessions import BootSessionStore
 
 
 def _client_and_store():

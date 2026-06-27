@@ -13,12 +13,12 @@ from pathlib import Path
 
 import pytest
 
-from openschool.boot_states import BootState
+from fleetboot.boot_states import BootState
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SYSTEMD_DIR = REPO_ROOT / "image" / "systemd"
-PAM_HOOK = REPO_ROOT / "image" / "pam" / "openschool-session-hook"
+PAM_HOOK = REPO_ROOT / "image" / "pam" / "fleetboot-session-hook"
 
 
 def _load_unit(name: str) -> configparser.ConfigParser:
@@ -37,45 +37,45 @@ def _load_unit(name: str) -> configparser.ConfigParser:
 @pytest.mark.parametrize(
     "unit_name, expected_state",
     [
-        ("openschool-network-up.service", BootState.NETWORK_UP),
-        ("openschool-nfs-mounted.service", BootState.NFS_MOUNTED),
-        ("openschool-login-ready.service", BootState.LOGIN_READY),
+        ("fleetboot-network-up.service", BootState.NETWORK_UP),
+        ("fleetboot-nfs-mounted.service", BootState.NFS_MOUNTED),
+        ("fleetboot-login-ready.service", BootState.LOGIN_READY),
     ],
 )
 def test_unit_reports_expected_state(unit_name: str, expected_state: BootState):
     unit = _load_unit(unit_name)
     exec_start = unit["Service"]["ExecStart"]
-    assert "openschool.reporter.report" in exec_start
+    assert "fleetboot.reporter.report" in exec_start
     assert expected_state.value in exec_start
 
 
 def test_network_up_unit_waits_for_network_online():
-    unit = _load_unit("openschool-network-up.service")
+    unit = _load_unit("fleetboot-network-up.service")
     assert "network-online.target" in unit["Unit"]["After"]
     assert "network-online.target" in unit["Unit"]["Wants"]
 
 
 def test_nfs_unit_waits_for_home_mount_and_for_network_report():
-    unit = _load_unit("openschool-nfs-mounted.service")
+    unit = _load_unit("fleetboot-nfs-mounted.service")
     after = unit["Unit"]["After"]
     assert "home.mount" in after
-    assert "openschool-network-up.service" in after
+    assert "fleetboot-network-up.service" in after
     assert "home.mount" in unit["Unit"]["Requires"]
 
 
 def test_login_ready_unit_waits_for_display_manager_and_nfs_report():
-    unit = _load_unit("openschool-login-ready.service")
+    unit = _load_unit("fleetboot-login-ready.service")
     after = unit["Unit"]["After"]
     assert "display-manager.service" in after
-    assert "openschool-nfs-mounted.service" in after
+    assert "fleetboot-nfs-mounted.service" in after
 
 
 @pytest.mark.parametrize(
     "unit_name",
     [
-        "openschool-network-up.service",
-        "openschool-nfs-mounted.service",
-        "openschool-login-ready.service",
+        "fleetboot-network-up.service",
+        "fleetboot-nfs-mounted.service",
+        "fleetboot-login-ready.service",
     ],
 )
 def test_units_are_oneshot(unit_name: str):

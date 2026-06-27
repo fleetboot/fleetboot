@@ -2,8 +2,8 @@
 
 import pytest
 
-from openschool.boot_states import BootState
-from openschool.server.boot_sessions import (
+from fleetboot.boot_states import BootState
+from fleetboot.server.boot_sessions import (
     BootSessionStore,
     OutOfOrderStateError,
     UnknownTokenError,

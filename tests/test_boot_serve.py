@@ -11,8 +11,8 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from openschool.server.app import ALLOWED_BOOT_FILES, create_app
-from openschool.server.boot_sessions import BootSessionStore
+from fleetboot.server.app import ALLOWED_BOOT_FILES, create_app
+from fleetboot.server.boot_sessions import BootSessionStore
 
 
 def _setup(tmp_path: Path) -> tuple[TestClient, BootSessionStore, Path]:

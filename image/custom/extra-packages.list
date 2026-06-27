@@ -1,4 +1,4 @@
-# Extra Debian packages to install in the OpenSchool image.
+# Extra Debian packages to install in the Fleetboot image.
 # One package per line. Lines starting with '#' and blank lines are ignored.
 # Examples:
 #   firefox-esr

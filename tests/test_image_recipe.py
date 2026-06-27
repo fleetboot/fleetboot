@@ -23,7 +23,7 @@ import yaml
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-RECIPE_PATH = REPO_ROOT / "image" / "openschool-base.yaml"
+RECIPE_PATH = REPO_ROOT / "image" / "fleetboot-base.yaml"
 CUSTOM_DIR = REPO_ROOT / "image" / "custom"
 
 
@@ -93,10 +93,10 @@ def test_reporter_package_is_overlaid_at_dist_packages(recipe: dict):
     matches = [
         a
         for a in overlays
-        if "openschool" in (a.get("source", "") or "")
-        and "dist-packages/openschool" in (a.get("destination", "") or "")
+        if "fleetboot" in (a.get("source", "") or "")
+        and "dist-packages/fleetboot" in (a.get("destination", "") or "")
     ]
-    assert matches, "no overlay action installs the openschool python package"
+    assert matches, "no overlay action installs the fleetboot python package"
 
 
 def test_systemd_units_overlaid_into_system_dir(recipe: dict):
@@ -116,7 +116,7 @@ def test_pam_hook_overlaid(recipe: dict):
         a
         for a in overlays
         if "pam" in (a.get("source", "") or "")
-        and "openschool" in (a.get("destination", "") or "")
+        and "fleetboot" in (a.get("destination", "") or "")
     ]
     assert matches, "no overlay action installs the PAM session hook"
 
@@ -133,10 +133,10 @@ def test_pam_session_hook_is_wired_into_common_session(recipe: dict):
 def test_network_up_unit_is_enabled(recipe: dict):
     runs = _actions_of_type(recipe, "run")
     enabled = any(
-        "systemctl enable openschool-network-up.service" in (a.get("command", "") or "")
+        "systemctl enable fleetboot-network-up.service" in (a.get("command", "") or "")
         for a in runs
     )
-    assert enabled, "openschool-network-up.service is not enabled in the recipe"
+    assert enabled, "fleetboot-network-up.service is not enabled in the recipe"
 
 
 def test_recipe_consumes_admin_extra_packages(recipe: dict):

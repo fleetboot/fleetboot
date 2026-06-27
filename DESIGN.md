@@ -1,6 +1,6 @@
-# OpenSchool — System Design
+# Fleetboot — System Design
 
-OpenSchool automates and controls computers across a school network. Machines
+Fleetboot automates and controls computers across a school network. Machines
 netboot a locked-down, immutable Debian desktop with central identity and
 NFS-mounted home directories, and their internet access is filtered. Security is
 the top priority throughout.
@@ -136,21 +136,21 @@ Identity tuple used for policy: `(mac, arch, platform, uuid?)`.
 ## The desktop image — build and customisation
 
 The image is built with **debos** (Debian OS builder, packaged in trixie) using
-a single recipe at `image/openschool-base.yaml`. debos runs every step
+a single recipe at `image/fleetboot-base.yaml`. debos runs every step
 inside a `fakemachine` (a lightweight QEMU VM), so the build is host-independent
 and reproducible, and it can build **arm64 on an x86_64 host** via
 `qemu-user-static`.
 
 The base recipe produces:
 
-- `build/openschool-<arch>.squashfs` — the read-only root,
+- `build/fleetboot-<arch>.squashfs` — the read-only root,
 - `build/vmlinuz` and `build/initrd.img` — extracted from the image so they can
   be served by tftpjail for netboot. The initrd includes **live-boot**, which
   knows how to fetch the squashfs over HTTP and set up the tmpfs overlay.
 
 ### Admin customisation contract
 
-OpenSchool ships one base recipe; admins **never edit it**. Instead they
+Fleetboot ships one base recipe; admins **never edit it**. Instead they
 customise via four stable contract points under `image/custom/`:
 
 | Contract point | Purpose |
@@ -206,7 +206,7 @@ VLAN support.
 
 ## Project layout
 
-- **`openschool`** — umbrella: image build, FreeIPA, NFS, DNS/network control,
+- **`fleetboot`** — umbrella: image build, FreeIPA, NFS, DNS/network control,
   integration tests.
 - **`tftpjail`** — separate project: the boot-policy TFTP brain.
 

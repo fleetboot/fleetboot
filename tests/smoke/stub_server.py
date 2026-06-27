@@ -1,4 +1,4 @@
-"""Stub OpenSchool server for the image smoke test.
+"""Stub Fleetboot server for the image smoke test.
 
 Runs the real FastAPI app (so the wire format is exactly what production uses)
 plus a single static-file route serving the built squashfs to the guest via
@@ -25,14 +25,14 @@ import uvicorn
 from fastapi import FastAPI
 from fastapi.responses import FileResponse
 
-from openschool.boot_states import BootState
-from openschool.server.app import create_app
-from openschool.server.boot_sessions import BootSessionStore
+from fleetboot.boot_states import BootState
+from fleetboot.server.app import create_app
+from fleetboot.server.boot_sessions import BootSessionStore
 
 
 # Where in the URL space the smoke server publishes the squashfs. The
 # generated kernel cmdline embeds this exact path.
-SQUASHFS_URL_PATH = "/openschool.squashfs"
+SQUASHFS_URL_PATH = "/fleetboot.squashfs"
 
 
 def find_free_port() -> int:
@@ -48,7 +48,7 @@ def build_smoke_app(
     network_up_event: threading.Event,
     expected_token: str,
 ) -> FastAPI:
-    """Wrap the real OpenSchool app with the smoke-test extras.
+    """Wrap the real Fleetboot app with the smoke-test extras.
 
     The static squashfs route lets the guest fetch the image. The post-status
     middleware fires `network_up_event` the first time the right report shows

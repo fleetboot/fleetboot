@@ -2,8 +2,8 @@
 
 from fastapi.testclient import TestClient
 
-from openschool.boot_states import BootState
-from openschool.server.boot_sessions import BootSessionStore
+from fleetboot.boot_states import BootState
+from fleetboot.server.boot_sessions import BootSessionStore
 from tests.smoke.stub_server import (
     SQUASHFS_URL_PATH,
     build_smoke_app,
@@ -18,7 +18,7 @@ def test_find_free_port_returns_a_usable_port():
 
 def test_stub_serves_squashfs_at_known_url(tmp_path):
     payload = b"this stands in for a real squashfs"
-    fake_squashfs = tmp_path / "openschool.squashfs"
+    fake_squashfs = tmp_path / "fleetboot.squashfs"
     fake_squashfs.write_bytes(payload)
 
     sessions = BootSessionStore()

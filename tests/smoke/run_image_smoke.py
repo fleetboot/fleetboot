@@ -5,7 +5,7 @@ and takes minutes.
 
 Steps:
   1. Locate the build artifacts (kernel, initrd, squashfs).
-  2. Start a stub OpenSchool server that ALSO serves the squashfs as a
+  2. Start a stub Fleetboot server that ALSO serves the squashfs as a
      static file.
   3. Spawn QEMU UEFI direct-kernel boot, cmdline carrying a fresh per-boot
      token and the URL of the stub server.
@@ -62,7 +62,7 @@ def locate_artifacts(build_dir: Path, arch: str) -> tuple[Path, Path, Path]:
     """Resolve and validate the three required artifacts."""
     kernel = build_dir / "vmlinuz"
     initrd = build_dir / "initrd.img"
-    squashfs = build_dir / f"openschool-{arch}.squashfs"
+    squashfs = build_dir / f"fleetboot-{arch}.squashfs"
     missing = [p for p in (kernel, initrd, squashfs) if not p.is_file()]
     if missing:
         raise SystemExit(
@@ -94,7 +94,7 @@ def main(argv: list[str]) -> int:
     host_port = find_free_port()
     serial_log = args.build_dir / "smoke-serial.log"
 
-    with tempfile.TemporaryDirectory(prefix="openschool-smoke-") as scratch:
+    with tempfile.TemporaryDirectory(prefix="fleetboot-smoke-") as scratch:
         scratch_path = Path(scratch)
         # OVMF wants a writable VARS copy per-run; the shipped file is shared.
         vars_file = scratch_path / "OVMF_VARS.fd"
@@ -111,9 +111,9 @@ def main(argv: list[str]) -> int:
                 kernel=kernel,
                 initrd=initrd,
                 fetch_url=(
-                    f"http://{GUEST_VIEW_OF_HOST}:{host_port}/openschool.squashfs"
+                    f"http://{GUEST_VIEW_OF_HOST}:{host_port}/fleetboot.squashfs"
                 ),
-                openschool_server_url=(
+                fleetboot_server_url=(
                     f"http://{GUEST_VIEW_OF_HOST}:{host_port}/"
                 ),
                 boot_token=stub.boot_token,

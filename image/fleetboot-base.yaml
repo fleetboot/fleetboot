@@ -1,8 +1,8 @@
-# OpenSchool base image recipe (debos).
+# Fleetboot base image recipe (debos).
 #
 # Produces a netboot-ready squashfs that:
 #   - boots Debian trixie userland,
-#   - has the OpenSchool boot-state reporter installed and enabled,
+#   - has the Fleetboot boot-state reporter installed and enabled,
 #   - applies the four admin customisation points described in
 #     custom/README.md without ever needing the admin to edit this file.
 #
@@ -13,7 +13,7 @@
 #   architecture  CPU arch for the produced image (default: amd64).
 #   suite         Debian release codename (default: trixie).
 #   mirror        Debian mirror URL.
-#   output        Squashfs output filename (default: openschool-<arch>.squashfs).
+#   output        Squashfs output filename (default: fleetboot-<arch>.squashfs).
 #
 # Inside the recipe, debos sets:
 #   ${RECIPEDIR}    the directory holding this recipe file
@@ -23,7 +23,7 @@
 {{ $architecture := or .architecture "amd64" }}
 {{ $suite := or .suite "trixie" }}
 {{ $mirror := or .mirror "http://deb.debian.org/debian" }}
-{{ $output := or .output (printf "openschool-%s.squashfs" $architecture) }}
+{{ $output := or .output (printf "fleetboot-%s.squashfs" $architecture) }}
 
 architecture: {{ $architecture }}
 
@@ -40,7 +40,7 @@ actions:
     variant: minbase
 
   - action: apt
-    description: "Install the core OpenSchool image packages"
+    description: "Install the core Fleetboot image packages"
     packages:
       # systemd is the boot/PID-1 we target
       - systemd
@@ -68,52 +68,52 @@ actions:
     command: |
       hook="${RECIPEDIR}/custom/hooks/pre-build"
       if [ -x "$hook" ]; then
-        echo "openschool: running admin pre-build hook"
+        echo "fleetboot: running admin pre-build hook"
         ROOTDIR="$ROOTDIR" ARTIFACTDIR="$ARTIFACTDIR" "$hook"
       fi
 
-  # ---------- OpenSchool reporter and triggers ----------
+  # ---------- Fleetboot reporter and triggers ----------
 
   - action: overlay
-    description: "Install the OpenSchool reporter Python package"
-    # The Makefile stages a copy of ../openschool here as image/openschool_pkg
+    description: "Install the Fleetboot reporter Python package"
+    # The Makefile stages a copy of ../fleetboot here as image/fleetboot_pkg
     # so it sits inside the recipe directory, which fakemachine mounts into
     # its build VM. (Arbitrary host paths outside the recipe directory are
     # not visible inside fakemachine.)
-    source: ./openschool_pkg
-    destination: /usr/lib/python3/dist-packages/openschool
+    source: ./fleetboot_pkg
+    destination: /usr/lib/python3/dist-packages/fleetboot
 
   - action: overlay
-    description: "Install OpenSchool systemd boot-state units"
+    description: "Install Fleetboot systemd boot-state units"
     source: ./systemd
     destination: /etc/systemd/system
 
   - action: overlay
-    description: "Install OpenSchool PAM session hook"
+    description: "Install Fleetboot PAM session hook"
     source: ./pam
-    destination: /usr/local/lib/openschool
+    destination: /usr/local/lib/fleetboot
 
   - action: run
-    description: "Enable the OpenSchool boot-state reporting units"
+    description: "Enable the Fleetboot boot-state reporting units"
     chroot: true
     command: |
-      systemctl enable openschool-network-up.service
+      systemctl enable fleetboot-network-up.service
       # The nfs-mounted and login-ready units depend on system bits we have not
       # added to the example image yet (FreeIPA NFS home.mount, a display
       # manager). They are installed for completeness but only enabled when
       # their dependencies are present.
       if systemctl list-unit-files home.mount >/dev/null 2>&1; then
-        systemctl enable openschool-nfs-mounted.service
+        systemctl enable fleetboot-nfs-mounted.service
       fi
       if systemctl list-unit-files display-manager.service >/dev/null 2>&1; then
-        systemctl enable openschool-login-ready.service
+        systemctl enable fleetboot-login-ready.service
       fi
 
   - action: run
-    description: "Wire the OpenSchool PAM session hook into common-session"
+    description: "Wire the Fleetboot PAM session hook into common-session"
     chroot: true
     command: |
-      hook_line='session optional pam_exec.so type=open_session /usr/local/lib/openschool/openschool-session-hook'
+      hook_line='session optional pam_exec.so type=open_session /usr/local/lib/fleetboot/fleetboot-session-hook'
       if ! grep -qF "$hook_line" /etc/pam.d/common-session; then
         echo "$hook_line" >> /etc/pam.d/common-session
       fi
@@ -123,13 +123,13 @@ actions:
   - action: overlay
     description: "Stage admin extras into the image for the next step"
     source: ./custom
-    destination: /tmp/openschool-custom
+    destination: /tmp/fleetboot-custom
 
   - action: run
     description: "Install admin-specified extra Debian packages"
     chroot: true
     command: |
-      list=/tmp/openschool-custom/extra-packages.list
+      list=/tmp/fleetboot-custom/extra-packages.list
       if [ -s "$list" ]; then
         packages=$(grep -vE '^\s*(#|$)' "$list" || true)
         if [ -n "$packages" ]; then
@@ -152,7 +152,7 @@ actions:
   - action: run
     description: "Remove the staged admin extras directory from the image"
     chroot: true
-    command: rm -rf /tmp/openschool-custom
+    command: rm -rf /tmp/fleetboot-custom
 
   # ---------- admin customisation: local.yaml extension ----------
 
@@ -163,7 +163,7 @@ actions:
     chroot: false
     command: |
       if [ -f "${RECIPEDIR}/custom/local.yaml" ]; then
-        echo "openschool: admin local.yaml extension detected; including it"
+        echo "fleetboot: admin local.yaml extension detected; including it"
       fi
 
   # ---------- admin customisation: post-build hook ----------
@@ -174,7 +174,7 @@ actions:
     command: |
       hook="${RECIPEDIR}/custom/hooks/post-build"
       if [ -x "$hook" ]; then
-        echo "openschool: running admin post-build hook"
+        echo "fleetboot: running admin post-build hook"
         ROOTDIR="$ROOTDIR" ARTIFACTDIR="$ARTIFACTDIR" "$hook"
       fi
 

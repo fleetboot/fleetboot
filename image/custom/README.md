@@ -1,6 +1,6 @@
-# Admin customisation of the OpenSchool image
+# Admin customisation of the Fleetboot image
 
-OpenSchool ships a base squashfs recipe at `image/recipes/openschool-base.yaml`.
+Fleetboot ships a base squashfs recipe at `image/recipes/fleetboot-base.yaml`.
 **Do not edit that file.** Customise the image through the four contract points
 below — they all live in this directory and are picked up automatically by
 `make image`.

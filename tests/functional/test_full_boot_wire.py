@@ -1,19 +1,19 @@
-"""End-to-end functional test of the openschool ↔ tftpjail wire.
+"""End-to-end functional test of the fleetboot ↔ tftpjail wire.
 
-We start a real openschool FastAPI server in-process (via uvicorn on a
+We start a real fleetboot FastAPI server in-process (via uvicorn on a
 background thread) and a real tftpjail UDP server (also in-process). A tiny
 inline TFTP client then drives the full real boot-policy flow:
 
     Client TFTP-RRQ /jail/<mac>/<arch>/<platform>
         -> tftpjail parses identity, runs policy
-        -> tftpjail calls openschool POST /sessions (auth: shared secret)
-        -> openschool mints a per-boot token bound to <mac>
+        -> tftpjail calls fleetboot POST /sessions (auth: shared secret)
+        -> fleetboot mints a per-boot token bound to <mac>
         -> tftpjail renders grub.cfg stamping the token into every URL
         -> tftpjail sends the rendered grub.cfg over TFTP
     Client (acting as GRUB/live-boot) HTTP-GET /boot/vmlinuz?t=<token>
-        -> openschool validates token, serves bytes
+        -> fleetboot validates token, serves bytes
     Client (acting as the in-image reporter) POST /status with token
-        -> openschool records network_up
+        -> fleetboot records network_up
 
 Same wire format the real fleet will use — except we drive the wire from
 Python instead of QEMU. The QEMU image-smoke test proves the in-image side
@@ -31,13 +31,13 @@ import httpx
 import pytest
 import uvicorn
 
-from openschool.server.app import create_app
-from openschool.server.boot_sessions import BootSessionStore
+from fleetboot.server.app import create_app
+from fleetboot.server.boot_sessions import BootSessionStore
 
 
 # tftpjail imports — usable because conftest.py prepended its path.
 from tftpjail.identity import MacConsistency  # noqa: E402
-from tftpjail.openschool_client import OpenSchoolClient  # noqa: E402
+from tftpjail.fleetboot_client import FleetbootClient  # noqa: E402
 from tftpjail.policy import Policy  # noqa: E402
 from tftpjail.protocol import OPCODE_DATA, OPCODE_ERROR, OPCODE_READ_REQUEST  # noqa: E402
 from tftpjail.renderer import build_grub_config_renderer  # noqa: E402
@@ -113,8 +113,8 @@ def _registry_with(known_mac: str):
     return _lookup
 
 
-class _StartedOpenSchool:
-    """Real openschool app running on a background uvicorn thread."""
+class _StartedFleetboot:
+    """Real fleetboot app running on a background uvicorn thread."""
 
     def __init__(self, boot_dir: Path) -> None:
         self.sessions = BootSessionStore()
@@ -140,7 +140,7 @@ class _StartedOpenSchool:
             if self._server.started:
                 return
             threading.Event().wait(0.05)
-        raise RuntimeError("openschool failed to come up")
+        raise RuntimeError("fleetboot failed to come up")
 
     def stop(self) -> None:
         self._server.should_exit = True
@@ -158,22 +158,22 @@ def boot_dir(tmp_path: Path) -> Path:
     boot.mkdir()
     (boot / "vmlinuz").write_bytes(b"\x7fELF-fake-kernel-bytes")
     (boot / "initrd.img").write_bytes(b"fake-initrd-bytes")
-    (boot / "openschool-amd64.squashfs").write_bytes(b"fake-squashfs-bytes")
+    (boot / "fleetboot-amd64.squashfs").write_bytes(b"fake-squashfs-bytes")
     return boot
 
 
 @pytest.fixture
 def stack(boot_dir: Path):
-    """Bring up openschool + tftpjail; tear them down at the end of the test."""
-    openschool = _StartedOpenSchool(boot_dir=boot_dir)
-    openschool.start()
+    """Bring up fleetboot + tftpjail; tear them down at the end of the test."""
+    fleetboot = _StartedFleetboot(boot_dir=boot_dir)
+    fleetboot.start()
 
-    client = OpenSchoolClient(
-        base_url=openschool.base_url, mint_secret=MINT_SECRET
+    client = FleetbootClient(
+        base_url=fleetboot.base_url, mint_secret=MINT_SECRET
     )
     renderer = build_grub_config_renderer(
-        openschool_client=client,
-        openschool_base_url=openschool.base_url,
+        fleetboot_client=client,
+        fleetboot_base_url=fleetboot.base_url,
     )
     policy = Policy(
         registry_lookup=_registry_with(CLIENT_MAC),
@@ -189,10 +189,10 @@ def stack(boot_dir: Path):
     )
     tftpjail_server.start()
     try:
-        yield openschool, tftpjail_server
+        yield fleetboot, tftpjail_server
     finally:
         tftpjail_server.stop()
-        openschool.stop()
+        fleetboot.stop()
 
 
 # ---- The tests ------------------------------------------------------------
@@ -201,7 +201,7 @@ def stack(boot_dir: Path):
 def test_grub_config_round_trips_with_minted_token(stack):
     """The headline test: client TFTPs the identity path, gets a real
     grub.cfg back with a real minted token stamped into every URL."""
-    openschool, tftpjail_server = stack
+    fleetboot, tftpjail_server = stack
 
     body = _tftp_read(
         server_host="127.0.0.1",
@@ -214,7 +214,7 @@ def test_grub_config_round_trips_with_minted_token(stack):
     assert "initrd " in text
     assert "boot\n" in text
     # The token shows up three places: kernel URL, initrd URL, fetch URL —
-    # plus once in openschool.boot_token= on the kernel cmdline.
+    # plus once in fleetboot.boot_token= on the kernel cmdline.
     # We don't know its value, but it must be a 64-char hex string and used
     # consistently in every URL the client will hit.
     import re
@@ -225,17 +225,17 @@ def test_grub_config_round_trips_with_minted_token(stack):
     minted_token = tokens[0]
     assert len(minted_token) >= 64
     # The same token should appear on the kernel cmdline.
-    assert f"openschool.boot_token={minted_token}" in text
-    # And the minted session should be live in openschool's store, bound to
+    assert f"fleetboot.boot_token={minted_token}" in text
+    # And the minted session should be live in fleetboot's store, bound to
     # our MAC.
-    session = openschool.sessions.lookup(minted_token)
+    session = fleetboot.sessions.lookup(minted_token)
     assert session is not None
     assert session.mac == CLIENT_MAC
 
 
 def test_boot_assets_served_using_minted_token(stack):
     """After the grub.cfg is delivered, the URLs it points at must work."""
-    openschool, tftpjail_server = stack
+    fleetboot, tftpjail_server = stack
     body = _tftp_read(
         server_host="127.0.0.1",
         server_port=tftpjail_server.bound_port,
@@ -249,10 +249,10 @@ def test_boot_assets_served_using_minted_token(stack):
         for name, expected in [
             ("vmlinuz", b"\x7fELF-fake-kernel-bytes"),
             ("initrd.img", b"fake-initrd-bytes"),
-            ("openschool-amd64.squashfs", b"fake-squashfs-bytes"),
+            ("fleetboot-amd64.squashfs", b"fake-squashfs-bytes"),
         ]:
             response = client.get(
-                f"{openschool.base_url}/boot/{name}?t={token}"
+                f"{fleetboot.base_url}/boot/{name}?t={token}"
             )
             assert response.status_code == 200, name
             assert response.content == expected, name
@@ -260,7 +260,7 @@ def test_boot_assets_served_using_minted_token(stack):
 
 def test_status_post_with_minted_token_is_accepted(stack):
     """Closing the loop: the reporter inside the image uses the same token."""
-    openschool, tftpjail_server = stack
+    fleetboot, tftpjail_server = stack
     body = _tftp_read(
         server_host="127.0.0.1",
         server_port=tftpjail_server.bound_port,
@@ -272,7 +272,7 @@ def test_status_post_with_minted_token_is_accepted(stack):
 
     with httpx.Client(timeout=5.0) as client:
         response = client.post(
-            f"{openschool.base_url}/status",
+            f"{fleetboot.base_url}/status",
             json={"state": "network_up"},
             headers={"Authorization": f"Bearer {token}"},
         )
@@ -282,7 +282,7 @@ def test_status_post_with_minted_token_is_accepted(stack):
 
 def test_unknown_mac_path_gets_uniform_deny(stack):
     """An RRQ for an unregistered MAC must look identical to other denies."""
-    _openschool, tftpjail_server = stack
+    _fleetboot, tftpjail_server = stack
     with pytest.raises(AssertionError) as info:
         _tftp_read(
             server_host="127.0.0.1",
@@ -295,7 +295,7 @@ def test_unknown_mac_path_gets_uniform_deny(stack):
 
 def test_path_probe_gets_uniform_deny(stack):
     """A non-/jail/... probe gets the same answer as a deny."""
-    _openschool, tftpjail_server = stack
+    _fleetboot, tftpjail_server = stack
     with pytest.raises(AssertionError) as info:
         _tftp_read(
             server_host="127.0.0.1",

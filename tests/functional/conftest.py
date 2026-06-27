@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 
 
-# tftpjail lives at /home/matt/git/tftpjail, a sibling of openschool. Resolve
+# tftpjail lives at /home/matt/git/tftpjail, a sibling of fleetboot. Resolve
 # it relative to this file rather than hard-coding the user's path.
 TFTPJAIL_ROOT = (
     Path(__file__).resolve().parent.parent.parent.parent / "tftpjail"
@@ -16,7 +16,7 @@ if not TFTPJAIL_ROOT.is_dir():
     import pytest
 
     pytest.skip(
-        f"tftpjail not found at {TFTPJAIL_ROOT}; clone it next to openschool "
+        f"tftpjail not found at {TFTPJAIL_ROOT}; clone it next to fleetboot "
         "to run functional tests",
         allow_module_level=True,
     )

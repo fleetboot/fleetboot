@@ -1,6 +1,6 @@
 """Tests for the /sessions mint endpoint.
 
-This endpoint is the openschool↔tftpjail wire: tftpjail asks openschool to
+This endpoint is the fleetboot↔tftpjail wire: tftpjail asks fleetboot to
 mint a per-boot session token bound to a MAC, then stamps it into the
 rendered grub.cfg. The auth model is a shared secret (Bearer) because tftpjail
 is the only legitimate caller — any random host on the network must not be
@@ -9,8 +9,8 @@ able to forge boot sessions.
 
 from fastapi.testclient import TestClient
 
-from openschool.server.app import create_app
-from openschool.server.boot_sessions import BootSessionStore
+from fleetboot.server.app import create_app
+from fleetboot.server.boot_sessions import BootSessionStore
 
 
 SECRET = "shared-secret-from-config"

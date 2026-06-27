@@ -29,7 +29,7 @@ class QemuRunSpec:
     kernel: Path                # build/vmlinuz
     initrd: Path                # build/initrd.img
     fetch_url: str              # where the guest can GET the squashfs
-    openschool_server_url: str  # base URL the reporter posts to
+    fleetboot_server_url: str  # base URL the reporter posts to
     boot_token: str             # per-boot session token
     host_port: int              # host TCP port to forward into the guest
     vars_file: Path             # writable copy of OVMF_VARS for this run
@@ -42,7 +42,7 @@ def build_kernel_cmdline(spec: QemuRunSpec) -> str:
 
     - `boot=live fetch=URL`: live-boot mode, fetch the squashfs over HTTP.
     - `ip=dhcp`: kernel-level DHCP so live-boot has network in the initrd.
-    - `openschool.server=` / `openschool.boot_token=`: read by our reporter
+    - `fleetboot.server=` / `fleetboot.boot_token=`: read by our reporter
       from /proc/cmdline; this is exactly the channel tftpjail will use in
       production to deliver the per-boot session token.
     - `console=ttyS0`: serial console for headless boot.
@@ -52,8 +52,8 @@ def build_kernel_cmdline(spec: QemuRunSpec) -> str:
             "boot=live",
             f"fetch={spec.fetch_url}",
             "ip=dhcp",
-            f"openschool.server={spec.openschool_server_url}",
-            f"openschool.boot_token={spec.boot_token}",
+            f"fleetboot.server={spec.fleetboot_server_url}",
+            f"fleetboot.boot_token={spec.boot_token}",
             "console=ttyS0",
             "quiet",
         ]

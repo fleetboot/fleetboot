@@ -28,8 +28,8 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Query, status
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
-from openschool.boot_states import BootState
-from openschool.server.boot_sessions import (
+from fleetboot.boot_states import BootState
+from fleetboot.server.boot_sessions import (
     BootSessionStore,
     OutOfOrderStateError,
     UnknownTokenError,
@@ -43,8 +43,8 @@ ALLOWED_BOOT_FILES = frozenset(
     {
         "vmlinuz",
         "initrd.img",
-        "openschool-amd64.squashfs",
-        "openschool-arm64.squashfs",
+        "fleetboot-amd64.squashfs",
+        "fleetboot-arm64.squashfs",
     }
 )
 
@@ -101,7 +101,7 @@ def create_app(
         If None, /boot/* returns 503 (boot serving disabled).
     """
     store = sessions if sessions is not None else BootSessionStore()
-    app = FastAPI(title="OpenSchool control plane")
+    app = FastAPI(title="Fleetboot control plane")
 
     def get_store() -> BootSessionStore:
         return store

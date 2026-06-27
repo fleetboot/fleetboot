@@ -8,11 +8,11 @@ codes, and the session store, all together.
 import pytest
 from fastapi.testclient import TestClient
 
-from openschool.boot_states import BootState
-from openschool.reporter.cmdline import ReporterSettings
-from openschool.reporter.report import ReportFailedError, main, report_state
-from openschool.server.app import create_app
-from openschool.server.boot_sessions import BootSessionStore
+from fleetboot.boot_states import BootState
+from fleetboot.reporter.cmdline import ReporterSettings
+from fleetboot.reporter.report import ReportFailedError, main, report_state
+from fleetboot.server.app import create_app
+from fleetboot.server.boot_sessions import BootSessionStore
 
 
 def _wired_client(store: BootSessionStore) -> TestClient:

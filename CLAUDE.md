@@ -1,4 +1,4 @@
-# OpenSchool — Project Rules
+# Fleetboot — Project Rules
 
 See `DESIGN.md` for the full system architecture and the decisions behind it.
 
@@ -13,7 +13,7 @@ See `DESIGN.md` for the full system architecture and the decisions behind it.
 
 ## Architecture summary
 
-OpenSchool netboots heterogeneous (x86_64 / arm64) UEFI machines into a
+Fleetboot netboots heterogeneous (x86_64 / arm64) UEFI machines into a
 locked-down, immutable Debian desktop with FreeIPA identity and Kerberos-secured
 NFS home directories, plus DNS-blocklist internet filtering. Boot policy lives in
 the standalone **tftpjail** TFTP server. Full detail in `DESIGN.md`.

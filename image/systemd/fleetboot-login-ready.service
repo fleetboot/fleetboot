@@ -1,14 +1,14 @@
 [Unit]
-Description=Report login_ready to the OpenSchool server
+Description=Report login_ready to the Fleetboot server
 # Fires when the display manager has come up and the greeter is visible.
 # Chain after the nfs-mounted reporter so the two messages arrive in
 # lifecycle order.
-After=display-manager.service openschool-nfs-mounted.service
+After=display-manager.service fleetboot-nfs-mounted.service
 Requires=display-manager.service
 
 [Service]
 Type=oneshot
-ExecStart=/usr/bin/python3 -m openschool.reporter.report login_ready
+ExecStart=/usr/bin/python3 -m fleetboot.reporter.report login_ready
 
 [Install]
 WantedBy=graphical.target

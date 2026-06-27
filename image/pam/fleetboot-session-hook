@@ -1,10 +1,10 @@
 #!/bin/sh
-# PAM session hook: reports user_logged_in to the OpenSchool server.
+# PAM session hook: reports user_logged_in to the Fleetboot server.
 #
 # Wire this into the image's PAM stack with a pam_exec line, e.g. in
 # /etc/pam.d/common-session:
 #
-#     session optional pam_exec.so type=open_session /usr/local/lib/openschool/openschool-session-hook
+#     session optional pam_exec.so type=open_session /usr/local/lib/fleetboot/fleetboot-session-hook
 #
 # PAM sets $PAM_USER and $PAM_TYPE for us. We only fire on session open so we
 # get exactly one report per login.
@@ -14,7 +14,7 @@ if [ "$PAM_TYPE" != "open_session" ]; then
 fi
 
 # Best-effort: a failure here must never block the user from logging in.
-/usr/bin/python3 -m openschool.reporter.report user_logged_in "$PAM_USER" \
+/usr/bin/python3 -m fleetboot.reporter.report user_logged_in "$PAM_USER" \
     >/dev/null 2>&1 || true
 
 exit 0

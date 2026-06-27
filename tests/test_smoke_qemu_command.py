@@ -15,8 +15,8 @@ def _spec(tmp_path: Path) -> QemuRunSpec:
         qemu_binary="/usr/bin/qemu-system-x86_64",
         kernel=tmp_path / "vmlinuz",
         initrd=tmp_path / "initrd.img",
-        fetch_url="http://10.0.2.2:8000/openschool.squashfs",
-        openschool_server_url="http://10.0.2.2:8000/",
+        fetch_url="http://10.0.2.2:8000/fleetboot.squashfs",
+        fleetboot_server_url="http://10.0.2.2:8000/",
         boot_token="deadbeef",
         host_port=8000,
         vars_file=tmp_path / "OVMF_VARS.fd",
@@ -26,15 +26,15 @@ def _spec(tmp_path: Path) -> QemuRunSpec:
 
 def test_cmdline_includes_reporter_settings(tmp_path):
     cmdline = build_kernel_cmdline(_spec(tmp_path))
-    assert "openschool.server=http://10.0.2.2:8000/" in cmdline
-    assert "openschool.boot_token=deadbeef" in cmdline
+    assert "fleetboot.server=http://10.0.2.2:8000/" in cmdline
+    assert "fleetboot.boot_token=deadbeef" in cmdline
 
 
 def test_cmdline_uses_live_boot_fetch(tmp_path):
     """The smoke test relies on live-boot fetching the squashfs over HTTP."""
     cmdline = build_kernel_cmdline(_spec(tmp_path))
     assert "boot=live" in cmdline
-    assert "fetch=http://10.0.2.2:8000/openschool.squashfs" in cmdline
+    assert "fetch=http://10.0.2.2:8000/fleetboot.squashfs" in cmdline
     assert "ip=dhcp" in cmdline
 
 
@@ -89,7 +89,7 @@ def test_qemu_command_omits_serial_log_when_not_requested(tmp_path):
         kernel=spec.kernel,
         initrd=spec.initrd,
         fetch_url=spec.fetch_url,
-        openschool_server_url=spec.openschool_server_url,
+        fleetboot_server_url=spec.fleetboot_server_url,
         boot_token=spec.boot_token,
         host_port=spec.host_port,
         vars_file=spec.vars_file,
