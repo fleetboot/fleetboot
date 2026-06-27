@@ -1,0 +1,14 @@
+[Unit]
+Description=Report nfs_mounted to the OpenSchool server
+# home.mount is the Kerberos-secured NFSv4 /home mount unit. We report only
+# after it is active so the message reflects truth. We also chain after the
+# network-up reporter so the two messages arrive in lifecycle order.
+After=home.mount openschool-network-up.service
+Requires=home.mount
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 -m openschool.reporter.report nfs_mounted
+
+[Install]
+WantedBy=multi-user.target

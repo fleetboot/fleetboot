@@ -1,0 +1,20 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ssh -o BatchMode=yes -o ConnectTimeout=10 optimus 'echo connected; whoami; echo HOME=$HOME; hostname; echo \"--- ~/git ---\"; ls -la ~/git 2>/dev/null || echo \"no ~/git\"; echo \"--- openschool exists? ---\"; ls -la ~/git/openschool 2>/dev/null || echo \"absent\"; echo \"--- remote .claude ---\"; ls -la ~/.claude 2>/dev/null | head; echo \"--- rsync available? ---\"; which rsync || echo \"no rsync\"')",
+      "Bash(set -e)",
+      "Bash(ssh -o BatchMode=yes optimus 'mkdir -p ~/git/openschool ~/.claude/projects/-home-matt-git-openschool && echo ok')",
+      "Bash(rsync -av --exclude='.venv' /home/matt/git/openschool/ optimus:git/openschool/)",
+      "Bash(rsync -av /home/matt/.claude/projects/-home-matt-git-openschool/ optimus:.claude/projects/-home-matt-git-openschool/)",
+      "Bash(chmod +x /home/matt/git/openschool/image/pam/openschool-session-hook)",
+      "Bash(make test *)",
+      "Bash(python3 -m pytest --version)",
+      "Bash(debos --help)",
+      "Bash(dpkg -l qemu-user-static)",
+      "Bash(dpkg -L ovmf)",
+      "Bash(grep -E 'OVMF_\\(CODE|VARS\\).*\\\\.fd$')",
+      "Bash(fakemachine --help)",
+      "Bash(grep -E 'Action$')"
+    ]
+  }
+}

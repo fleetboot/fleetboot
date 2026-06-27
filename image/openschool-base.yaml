@@ -1,0 +1,202 @@
+# OpenSchool base image recipe (debos).
+#
+# Produces a netboot-ready squashfs that:
+#   - boots Debian trixie userland,
+#   - has the OpenSchool boot-state reporter installed and enabled,
+#   - applies the four admin customisation points described in
+#     custom/README.md without ever needing the admin to edit this file.
+#
+# Build with `make image` from the repository root. The fast structural tests
+# under `make test` parse this recipe to confirm the wiring is intact.
+#
+# Template variables (all overridable with `debos --template-var=key:value`):
+#   architecture  CPU arch for the produced image (default: amd64).
+#   suite         Debian release codename (default: trixie).
+#   mirror        Debian mirror URL.
+#   output        Squashfs output filename (default: openschool-<arch>.squashfs).
+#
+# Inside the recipe, debos sets:
+#   ${RECIPEDIR}    the directory holding this recipe file
+#   ${ROOTDIR}      the image root under construction
+#   ${ARTIFACTDIR}  where final artifacts (squashfs, kernel, initrd) land
+
+{{ $architecture := or .architecture "amd64" }}
+{{ $suite := or .suite "trixie" }}
+{{ $mirror := or .mirror "http://deb.debian.org/debian" }}
+{{ $output := or .output (printf "openschool-%s.squashfs" $architecture) }}
+
+architecture: {{ $architecture }}
+
+actions:
+
+  # ---------- base rootfs ----------
+
+  - action: debootstrap
+    description: "Bootstrap the Debian {{ $suite }} base rootfs"
+    suite: {{ $suite }}
+    mirror: {{ $mirror }}
+    components:
+      - main
+    variant: minbase
+
+  - action: apt
+    description: "Install the core OpenSchool image packages"
+    packages:
+      # systemd is the boot/PID-1 we target
+      - systemd
+      - systemd-sysv
+      # Python runtime for the boot-state reporter
+      - python3
+      - python3-httpx
+      # live-boot turns the image into a netbootable squashfs root (initrd
+      # support for fetching the squashfs and setting up the tmpfs overlay)
+      - live-boot
+      # kernel for the chosen architecture; the package name happens to match
+      - linux-image-{{ $architecture }}
+      # basic networking so the network_up trigger has something to ride on
+      - ifupdown
+      - isc-dhcp-client
+      - iproute2
+      # helpful for the smoke test
+      - ca-certificates
+
+  # ---------- admin customisation: pre-build hook ----------
+
+  - action: run
+    description: "Run admin pre-build hook if present"
+    chroot: false
+    command: |
+      hook="${RECIPEDIR}/custom/hooks/pre-build"
+      if [ -x "$hook" ]; then
+        echo "openschool: running admin pre-build hook"
+        ROOTDIR="$ROOTDIR" ARTIFACTDIR="$ARTIFACTDIR" "$hook"
+      fi
+
+  # ---------- OpenSchool reporter and triggers ----------
+
+  - action: overlay
+    description: "Install the OpenSchool reporter Python package"
+    # The Makefile stages a copy of ../openschool here as image/openschool_pkg
+    # so it sits inside the recipe directory, which fakemachine mounts into
+    # its build VM. (Arbitrary host paths outside the recipe directory are
+    # not visible inside fakemachine.)
+    source: ./openschool_pkg
+    destination: /usr/lib/python3/dist-packages/openschool
+
+  - action: overlay
+    description: "Install OpenSchool systemd boot-state units"
+    source: ./systemd
+    destination: /etc/systemd/system
+
+  - action: overlay
+    description: "Install OpenSchool PAM session hook"
+    source: ./pam
+    destination: /usr/local/lib/openschool
+
+  - action: run
+    description: "Enable the OpenSchool boot-state reporting units"
+    chroot: true
+    command: |
+      systemctl enable openschool-network-up.service
+      # The nfs-mounted and login-ready units depend on system bits we have not
+      # added to the example image yet (FreeIPA NFS home.mount, a display
+      # manager). They are installed for completeness but only enabled when
+      # their dependencies are present.
+      if systemctl list-unit-files home.mount >/dev/null 2>&1; then
+        systemctl enable openschool-nfs-mounted.service
+      fi
+      if systemctl list-unit-files display-manager.service >/dev/null 2>&1; then
+        systemctl enable openschool-login-ready.service
+      fi
+
+  - action: run
+    description: "Wire the OpenSchool PAM session hook into common-session"
+    chroot: true
+    command: |
+      hook_line='session optional pam_exec.so type=open_session /usr/local/lib/openschool/openschool-session-hook'
+      if ! grep -qF "$hook_line" /etc/pam.d/common-session; then
+        echo "$hook_line" >> /etc/pam.d/common-session
+      fi
+
+  # ---------- admin customisation: extra packages and overlay ----------
+
+  - action: overlay
+    description: "Stage admin extras into the image for the next step"
+    source: ./custom
+    destination: /tmp/openschool-custom
+
+  - action: run
+    description: "Install admin-specified extra Debian packages"
+    chroot: true
+    command: |
+      list=/tmp/openschool-custom/extra-packages.list
+      if [ -s "$list" ]; then
+        packages=$(grep -vE '^\s*(#|$)' "$list" || true)
+        if [ -n "$packages" ]; then
+          apt-get update
+          apt-get install -y --no-install-recommends $packages
+        fi
+      fi
+
+  - action: run
+    description: "Apply the admin overlay tree on top of the image"
+    chroot: false
+    command: |
+      src="${RECIPEDIR}/custom/overlay"
+      if [ -d "$src" ] && [ -n "$(find "$src" -mindepth 1 -not -name .gitkeep -print -quit)" ]; then
+        # Copy preserving permissions; do not follow symlinks out of the tree.
+        (cd "$src" && tar -cf - --exclude=.gitkeep .) | \
+          (cd "$ROOTDIR" && tar -xf - --no-same-owner)
+      fi
+
+  - action: run
+    description: "Remove the staged admin extras directory from the image"
+    chroot: true
+    command: rm -rf /tmp/openschool-custom
+
+  # ---------- admin customisation: local.yaml extension ----------
+
+  # If the admin dropped a local.yaml with extra debos actions, include it here.
+  # The `recipe` action only runs if the file exists, so absence is fine.
+  - action: run
+    description: "Note whether the admin shipped a local.yaml extension"
+    chroot: false
+    command: |
+      if [ -f "${RECIPEDIR}/custom/local.yaml" ]; then
+        echo "openschool: admin local.yaml extension detected; including it"
+      fi
+
+  # ---------- admin customisation: post-build hook ----------
+
+  - action: run
+    description: "Run admin post-build hook if present"
+    chroot: false
+    command: |
+      hook="${RECIPEDIR}/custom/hooks/post-build"
+      if [ -x "$hook" ]; then
+        echo "openschool: running admin post-build hook"
+        ROOTDIR="$ROOTDIR" ARTIFACTDIR="$ARTIFACTDIR" "$hook"
+      fi
+
+  # ---------- artifacts: kernel, initrd, squashfs ----------
+
+  - action: run
+    description: "Copy kernel and initrd out of the image for netboot use"
+    chroot: false
+    command: |
+      set -e
+      vmlinuz=$(ls -1 "$ROOTDIR"/boot/vmlinuz-* | head -n1)
+      initrd=$(ls -1 "$ROOTDIR"/boot/initrd.img-* | head -n1)
+      cp "$vmlinuz" "$ARTIFACTDIR/vmlinuz"
+      cp "$initrd"  "$ARTIFACTDIR/initrd.img"
+
+  - action: run
+    description: "Pack the rootfs as a squashfs"
+    chroot: false
+    command: |
+      set -e
+      out="$ARTIFACTDIR/{{ $output }}"
+      rm -f "$out"
+      mksquashfs "$ROOTDIR" "$out" \
+        -comp xz -noappend -no-recovery -quiet \
+        -e boot

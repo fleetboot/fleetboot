@@ -1,0 +1,11 @@
+# Minimal project metadata so pytest discovers our package layout cleanly.
+
+[project]
+name = "openschool"
+version = "0.0.1"
+description = "Locked-down netboot fleet control plane for schools"
+requires-python = ">=3.11"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"

@@ -1,0 +1,2 @@
+# Drop executable hook scripts here: pre-build, post-build.
+# See ../README.md for what each hook is called with.

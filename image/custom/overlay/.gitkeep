@@ -1,0 +1,2 @@
+# Drop files in this tree to overlay them into the image root.
+# Anything under here is copied verbatim into the image.

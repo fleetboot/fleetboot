@@ -1,0 +1,21 @@
+# Build artifacts (squashfs, kernel, initrd, OVMF scratch, smoke logs).
+build/
+
+# Python caches.
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Optional project-local virtualenv.
+.venv/
+
+# Staged copy of the reporter package for fakemachine to see during builds.
+# Recreated on every `make image`.
+image/openschool_pkg/
+
+# Admin customisation: tracked stub files only; admins drop their own files
+# into overlay/ and hooks/ in their own deployments.
+image/custom/overlay/*
+!image/custom/overlay/.gitkeep
+image/custom/hooks/*
+!image/custom/hooks/.gitkeep
