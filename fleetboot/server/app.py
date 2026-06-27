@@ -24,7 +24,7 @@ import hmac
 from pathlib import Path
 from typing import Optional
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Query, status
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Response, status
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
@@ -34,6 +34,7 @@ from fleetboot.server.boot_sessions import (
     OutOfOrderStateError,
     UnknownTokenError,
 )
+from fleetboot.server.registry import Machine, MachineRegistry
 
 
 # Closed allowlist of files we will serve under /boot/. Anything not in this
@@ -84,21 +85,58 @@ class MintResponse(BaseModel):
     mac: str
 
 
+class MachineEnrolment(BaseModel):
+    """Body of POST /machines — an admin registering a fleet machine."""
+
+    mac: str = Field(..., description="MAC address to register.")
+    profile_name: str = Field(
+        ..., description="Logical profile (image+policy) the machine belongs to."
+    )
+    architecture: str = Field(
+        ..., description="CPU architecture: x86_64, arm64, or i386."
+    )
+    platform: str = Field(..., description="Firmware platform: efi or pc.")
+
+
+class MachineRecord(BaseModel):
+    """One machine row as returned by /machines."""
+
+    mac: str
+    profile_name: str
+    architecture: str
+    platform: str
+    created_at: str
+
+    @classmethod
+    def from_machine(cls, machine: Machine) -> "MachineRecord":
+        return cls(
+            mac=machine.mac,
+            profile_name=machine.profile_name,
+            architecture=machine.architecture,
+            platform=machine.platform,
+            created_at=machine.created_at,
+        )
+
+
 def create_app(
     sessions: BootSessionStore | None = None,
     *,
     mint_secret: str | None = None,
     boot_dir: Path | None = None,
+    registry: MachineRegistry | None = None,
+    admin_secret: str | None = None,
 ) -> FastAPI:
     """Build the FastAPI app.
 
-    `sessions` — inject an existing store (tests, multi-app deployments). A
-        fresh store is created if omitted.
+    `sessions` — inject an existing store. A fresh in-memory store is
+        created if omitted.
     `mint_secret` — shared secret required on /sessions. If None, /sessions
-        returns 503 (minting disabled). Production reads this from the
-        environment and passes it in.
+        returns 503 (minting disabled).
     `boot_dir` — directory holding the build artifacts served by /boot/.
         If None, /boot/* returns 503 (boot serving disabled).
+    `registry` — MachineRegistry instance. If None, /machines returns 503.
+    `admin_secret` — shared secret required on /machines. If None, /machines
+        returns 503 even if a registry is configured.
     """
     store = sessions if sessions is not None else BootSessionStore()
     app = FastAPI(title="Fleetboot control plane")
@@ -111,6 +149,8 @@ def create_app(
     app.state.sessions = store
     app.state.mint_secret = mint_secret
     app.state.boot_dir = boot_dir
+    app.state.registry = registry
+    app.state.admin_secret = admin_secret
 
     @app.post("/status", response_model=StatusAcknowledgement)
     def post_status(
@@ -192,6 +232,104 @@ def create_app(
                 status_code=status.HTTP_404_NOT_FOUND, detail="not found"
             )
         return FileResponse(str(path), media_type="application/octet-stream")
+
+    # ---- /machines admin API ---------------------------------------------
+
+    def _require_admin(authorization: str | None) -> None:
+        """Reject anything that isn't the admin shared secret."""
+        if registry is None or admin_secret is None:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="registry not configured",
+            )
+        presented = _extract_bearer_token(authorization)
+        if not presented or not hmac.compare_digest(presented, admin_secret):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="unauthorised",
+            )
+
+    @app.post(
+        "/machines",
+        response_model=MachineRecord,
+        status_code=status.HTTP_201_CREATED,
+    )
+    def enroll_machine(
+        body: MachineEnrolment,
+        authorization: str | None = Header(default=None),
+    ) -> MachineRecord:
+        _require_admin(authorization)
+        # registry is non-None: _require_admin only returns successfully when
+        # it has been configured.
+        machine = registry.enroll(  # type: ignore[union-attr]
+            mac=body.mac,
+            profile_name=body.profile_name,
+            architecture=body.architecture,
+            platform=body.platform,
+        )
+        return MachineRecord.from_machine(machine)
+
+    @app.get("/machines", response_model=list[MachineRecord])
+    def list_machines(
+        authorization: str | None = Header(default=None),
+    ) -> list[MachineRecord]:
+        _require_admin(authorization)
+        return [
+            MachineRecord.from_machine(m)
+            for m in registry.list_all()  # type: ignore[union-attr]
+        ]
+
+    @app.get("/machines/{mac}", response_model=MachineRecord)
+    def get_machine(
+        mac: str, authorization: str | None = Header(default=None),
+    ) -> MachineRecord:
+        _require_admin(authorization)
+        machine = registry.lookup(mac)  # type: ignore[union-attr]
+        if machine is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="not found"
+            )
+        return MachineRecord.from_machine(machine)
+
+    @app.get("/resolve/{mac}", response_model=MachineRecord)
+    def resolve_machine(
+        mac: str, authorization: str | None = Header(default=None),
+    ) -> MachineRecord:
+        """Read-only registry lookup, authenticated with the mint secret.
+
+        tftpjail uses this on every read-request to decide whether a MAC is
+        known and which profile/arch it belongs to. We deliberately give
+        tftpjail less than the full admin surface — it only reads.
+        """
+        if registry is None or mint_secret is None:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="resolve not configured",
+            )
+        presented = _extract_bearer_token(authorization)
+        if not presented or not hmac.compare_digest(presented, mint_secret):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="unauthorised",
+            )
+        machine = registry.lookup(mac)
+        if machine is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="not found"
+            )
+        return MachineRecord.from_machine(machine)
+
+    @app.delete("/machines/{mac}")
+    def delete_machine(
+        mac: str, authorization: str | None = Header(default=None),
+    ) -> Response:
+        _require_admin(authorization)
+        removed = registry.remove(mac)  # type: ignore[union-attr]
+        if not removed:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="not found"
+            )
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
 
     return app
 

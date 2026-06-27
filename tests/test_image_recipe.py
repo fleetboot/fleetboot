@@ -121,6 +121,58 @@ def test_pam_hook_overlaid(recipe: dict):
     assert matches, "no overlay action installs the PAM session hook"
 
 
+def test_freeipa_client_packages_present(recipe: dict):
+    """sssd / freeipa-client / nfs-common / krb5-user must be installed.
+
+    Without these the image has no FreeIPA identity and no Kerberos NFS,
+    which the lockdown model explicitly relies on.
+    """
+    apt_actions = _actions_of_type(recipe, "apt")
+    all_packages = {pkg for a in apt_actions for pkg in a.get("packages", [])}
+    required = {
+        "freeipa-client",
+        "sssd",
+        "sssd-ipa",
+        "libpam-sss",
+        "libnss-sss",
+        "krb5-user",
+        "nfs-common",
+        "autofs",
+    }
+    missing = required - all_packages
+    assert not missing, f"recipe is missing identity packages: {sorted(missing)}"
+
+
+def test_identity_assets_overlaid(recipe: dict):
+    """The IPA enrolment helper, its systemd unit, and the autofs map ship."""
+    overlays = _actions_of_type(recipe, "overlay")
+    matches = [
+        a
+        for a in overlays
+        if "identity" in (a.get("source", "") or "")
+        and "identity" in (a.get("destination", "") or "")
+    ]
+    assert matches, "no overlay action installs the identity assets"
+
+
+def test_freeipa_enroll_service_enabled(recipe: dict):
+    """A run action must enable the FreeIPA enrolment oneshot."""
+    runs = _actions_of_type(recipe, "run")
+    found = any(
+        "systemctl enable fleetboot-freeipa-enroll.service" in (a.get("command", "") or "")
+        for a in runs
+    )
+    assert found, "fleetboot-freeipa-enroll.service is not enabled in the recipe"
+
+
+def test_autofs_wired_to_auto_home(recipe: dict):
+    """The image must register our /home -> /etc/auto.home mapping."""
+    runs = _actions_of_type(recipe, "run")
+    commands = " \n".join((a.get("command", "") or "") for a in runs)
+    assert "/etc/auto.home" in commands
+    assert "auto.master" in commands
+
+
 def test_pam_session_hook_is_wired_into_common_session(recipe: dict):
     """One of the run actions must edit /etc/pam.d/common-session."""
     runs = _actions_of_type(recipe, "run")

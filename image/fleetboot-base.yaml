@@ -59,6 +59,23 @@ actions:
       - iproute2
       # helpful for the smoke test
       - ca-certificates
+      # FreeIPA-backed identity. sssd does the PAM/NSS lookups; freeipa-client
+      # provides the enrolment tool (ipa-client-install) and the join logic.
+      # libpam-sss / libnss-sss wire SSSD into the auth and name-resolution
+      # stacks so logins via display-manager and ssh go through FreeIPA.
+      - freeipa-client
+      - sssd
+      - sssd-ipa
+      - libpam-sss
+      - libnss-sss
+      # Kerberos client + NFSv4. krb5-user gives us kinit/klist for
+      # debugging; nfs-common pulls in idmapd and the rpc.gssd helpers that
+      # NFSv4 with sec=krb5p needs to mount a home directory.
+      - krb5-user
+      - nfs-common
+      # autofs lets us mount /home/<user> on demand, using the user's
+      # Kerberos credential cache as the auth context.
+      - autofs
 
   # ---------- admin customisation: pre-build hook ----------
 
@@ -92,6 +109,33 @@ actions:
     description: "Install Fleetboot PAM session hook"
     source: ./pam
     destination: /usr/local/lib/fleetboot
+
+  - action: overlay
+    description: "Install FreeIPA enrolment helper and NFS autofs map"
+    source: ./identity
+    destination: /usr/local/lib/fleetboot/identity
+
+  - action: run
+    description: "Wire identity assets into their canonical paths"
+    chroot: true
+    command: |
+      install -m 0755 \
+        /usr/local/lib/fleetboot/identity/enroll-freeipa \
+        /usr/local/lib/fleetboot/enroll-freeipa
+      install -m 0644 \
+        /usr/local/lib/fleetboot/identity/fleetboot-freeipa-enroll.service \
+        /etc/systemd/system/fleetboot-freeipa-enroll.service
+      install -m 0644 \
+        /usr/local/lib/fleetboot/identity/auto.home \
+        /etc/auto.home
+      # Point autofs at our map. Skip if the line is already present so
+      # admin overlays can override.
+      if ! grep -q '^/home[[:space:]].*auto\.home' /etc/auto.master; then
+        echo '/home /etc/auto.home --timeout=600' >> /etc/auto.master
+      fi
+      # Enable the enrolment oneshot so it fires when identity.conf appears.
+      systemctl enable fleetboot-freeipa-enroll.service
+      systemctl enable autofs.service
 
   - action: run
     description: "Enable the Fleetboot boot-state reporting units"

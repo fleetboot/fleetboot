@@ -1,0 +1,18 @@
+[Unit]
+Description=Enrol this host with FreeIPA on first boot
+# We need DNS and outbound networking for the IPA discovery + LDAP/Kerberos
+# bindings, so order after network-online.target. Stop early if already done.
+After=network-online.target
+Wants=network-online.target
+# Only run if a config file has actually been provisioned.
+ConditionPathExists=/etc/fleetboot/identity.conf
+# Don't redo once we've enrolled.
+ConditionPathExists=!/etc/ipa/default.conf
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/lib/fleetboot/enroll-freeipa
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

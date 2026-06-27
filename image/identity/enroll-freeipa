@@ -1,0 +1,55 @@
+#!/bin/sh
+# fleetboot — first-boot FreeIPA enrolment helper.
+#
+# Reads ipa enrolment config from /etc/fleetboot/identity.conf (which the
+# admin drops in via image/custom/overlay/ or via tftpjail at boot time),
+# then runs ipa-client-install in unattended mode.
+#
+# Required keys in identity.conf:
+#   IPA_REALM          uppercase realm name, e.g. FLEETBOOT.EXAMPLE
+#   IPA_DOMAIN         lowercase DNS domain, e.g. fleetboot.example
+#   IPA_SERVER         FQDN of the IPA server (optional; auto-discovered if blank)
+#   IPA_KEYTAB         path to a one-time enrolment keytab (preferred over password)
+#
+# Idempotent: if the host is already enrolled it exits 0 without doing
+# anything. Designed to be invoked by a systemd oneshot on first boot.
+
+set -eu
+
+CONFIG=/etc/fleetboot/identity.conf
+if [ ! -r "$CONFIG" ]; then
+    echo "enroll-freeipa: no $CONFIG; skipping enrolment" >&2
+    exit 0
+fi
+
+# Already enrolled? ipa-client-install leaves /etc/ipa/default.conf behind.
+if [ -f /etc/ipa/default.conf ] && grep -q '^realm = ' /etc/ipa/default.conf; then
+    echo "enroll-freeipa: already enrolled; nothing to do"
+    exit 0
+fi
+
+# shellcheck disable=SC1090
+. "$CONFIG"
+
+: "${IPA_REALM:?IPA_REALM must be set in $CONFIG}"
+: "${IPA_DOMAIN:?IPA_DOMAIN must be set in $CONFIG}"
+: "${IPA_KEYTAB:?IPA_KEYTAB must be set in $CONFIG}"
+
+if [ ! -r "$IPA_KEYTAB" ]; then
+    echo "enroll-freeipa: keytab $IPA_KEYTAB not readable" >&2
+    exit 1
+fi
+
+server_args=""
+if [ -n "${IPA_SERVER:-}" ]; then
+    server_args="--server=$IPA_SERVER"
+fi
+
+ipa-client-install \
+    --unattended \
+    --no-ntp \
+    --mkhomedir \
+    --realm="$IPA_REALM" \
+    --domain="$IPA_DOMAIN" \
+    --keytab="$IPA_KEYTAB" \
+    $server_args

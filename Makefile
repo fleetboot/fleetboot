@@ -22,6 +22,14 @@ test:
 functional-test:
 	$(PYTHON) -m pytest tests/functional -v -o addopts=
 
+# Full PXE chain through a real VBox UEFI guest. Slow (UEFI cold boot +
+# DHCP timing), needs VBoxManage, sg vboxusers for /dev/vboxdrv access,
+# and Python granted cap_net_bind_service for UDP/69. Not part of
+# `make test` or `make functional-test`.
+.PHONY: vbox-functional-test
+vbox-functional-test:
+	sg vboxusers -c '$(PYTHON) -m pytest tests/vbox_functional -v -o addopts='
+
 .PHONY: lint
 lint:
 	$(PYTHON) -m compileall -q fleetboot tests

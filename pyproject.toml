@@ -9,5 +9,6 @@ requires-python = ">=3.11"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 # Functional tests cross into the sister tftpjail project; run them via
-# `make functional-test`, not the default `make test`.
-addopts = "-ra --ignore=tests/functional"
+# `make functional-test`. VBox functional tests need VirtualBox + UDP/69;
+# run them via `make vbox-functional-test`. Neither is part of `make test`.
+addopts = "-ra --ignore=tests/functional --ignore=tests/vbox_functional"

@@ -121,15 +121,75 @@ Identity tuple used for policy: `(mac, arch, platform, uuid?)`.
 
 ---
 
+## The machine registry
+
+The MAC → profile mapping is persistent state, owned by the fleetboot control
+plane. It lives in **SQLite** (one file, default `data/machines.sqlite`); the
+schema is one table:
+
+```
+machines(mac PRIMARY KEY, profile_name, architecture, platform, created_at)
+```
+
+Two HTTP surfaces, with two different shared secrets:
+
+| Surface | Auth | Who uses it |
+|---------|------|-------------|
+| `POST /machines`, `GET /machines`, `GET /machines/{mac}`, `DELETE /machines/{mac}` | `admin_secret` (Bearer) | Admins enrolling / managing machines. |
+| `GET /resolve/{mac}` | `mint_secret` (Bearer) | tftpjail. Read-only. |
+
+Splitting the secrets keeps the tftpjail role narrow: it can ask "is this MAC
+registered?" but it cannot enrol or delete. Anything that *would* let tftpjail
+write — and so widen its blast radius if compromised — lives on the admin
+surface.
+
+`tftpjail` consumes `/resolve` via `FleetbootClient.lookup_machine()` and
+the `build_registry_lookup()` adapter in `tftpjail/fleetboot_client.py`. The
+adapter implements the `Policy.registry_lookup` callable, so swapping the
+backend later (LDAP, a YAML file, another HTTP service) is a single-file
+change.
+
+---
+
 ## Identity, user levels, and authorization
 
 - Accounts and the `admin` / `teacher` / `headmaster` / `student` levels live in
   **FreeIPA** as users and groups.
-- The desktop image pulls them via PAM/nsswitch (SSSD).
+- The desktop image pulls them via PAM/nsswitch (SSSD), provisioned by
+  `freeipa-client`, `sssd`, `sssd-ipa`, `libpam-sss`, and `libnss-sss`
+  (in the apt list of the base recipe).
 - **Privilege is enforced at the OS layer** by group membership → `polkit`,
   `sudo`, and PAM rules — never by the boot profile.
-- `/home` is **NFSv4 with Kerberos (krb5p)**, mounted per-user at login. Without
-  Kerberos, any plugged-in laptop could read every home directory.
+- `/home` is **NFSv4 with Kerberos (krb5p)**, mounted per-user at login by
+  `autofs` against the map in `/etc/auto.home`. Without Kerberos, any
+  plugged-in laptop could read every home directory.
+
+### FreeIPA enrolment flow
+
+A booted image enrols itself with FreeIPA on its first boot when (and only
+when) `/etc/fleetboot/identity.conf` is present:
+
+```
+IPA_REALM=FLEETBOOT.EXAMPLE
+IPA_DOMAIN=fleetboot.example
+IPA_SERVER=ipa1.fleetboot.example      # optional, auto-discoverable
+IPA_KEYTAB=/etc/fleetboot/enrol.keytab # one-time enrolment keytab
+```
+
+The systemd oneshot `fleetboot-freeipa-enroll.service`
+(in `image/identity/`) runs `ipa-client-install --unattended --keytab=...`,
+which lays down `/etc/ipa/default.conf`. The unit is idempotent (skips when
+that file is already present) and gated on `/etc/fleetboot/identity.conf`
+existing — an image that has not been provisioned never tries to enrol.
+
+The identity config gets onto a machine either by an admin overlay
+(`image/custom/overlay/etc/fleetboot/identity.conf`) at build time, or — for
+per-machine secrets — by writing the file at first boot from a profile-scoped
+asset served by fleetboot. The latter is on the deferred list below.
+
+The autofs map `/etc/auto.home` (in `image/identity/`) mounts
+`<NFS_SERVER>:/export/home/<user>` on `/home/<user>` with
+`sec=krb5p,nfs4`. `<NFS_SERVER>` is substituted at enrolment time.
 
 ---
 
@@ -168,13 +228,30 @@ so a refactor that breaks the contract can't land silently.
 
 | Target | What | Speed | When |
 |--------|------|-------|------|
-| `make test` | Fast: code unit tests + recipe structural tests + customisation-contract checks. **No real build, no QEMU.** | < 1s | every change (the hard gate) |
+| `make test` | Fast: code unit tests + recipe structural tests + customisation-contract checks. **No real build, no QEMU, no VBox.** | < 2s | every change (the hard gate) |
+| `make functional-test` | In-process: real UDP TFTP + real HTTP between fleetboot and tftpjail. No VM. | seconds | every change is fine; explicit because it imports across repos |
 | `make image` | Run debos. Produces squashfs + kernel + initrd. | minutes | on demand / before a deploy |
 | `make image-smoke` | Boot the built image in QEMU UEFI (OVMF) and assert the in-image reporter posts `network_up` to a stub server. | minutes | nightly / pre-release |
+| `make vbox-functional-test` | Full PXE chain through a real VirtualBox UEFI guest: DHCP → tftpjail → grub.cfg with a minted token. | ~10s once warmed up | pre-merge for boot-layer changes |
 
-The smoke test fetches the squashfs over HTTP using **live-boot's `fetch=` mode**
-— deliberately the same path the real netboot will use, so the smoke covers the
-actual production wire format, not a contrived disk-mount.
+The image-smoke test fetches the squashfs over HTTP using **live-boot's
+`fetch=` mode** — the same path the real netboot uses. The vbox-functional
+test exercises everything *upstream* of that: real DHCP options, real UEFI
+PXE TFTP, real tftpjail policy, real fleetboot registry resolution. Together
+they cover every wire in the boot spine.
+
+#### VBox functional test gotchas
+
+VBox's NAT engine has three quirks the test (and any future fleet operator
+running on the same setup) must work around:
+
+- **`EnableTFTP=1`** must be set via `setextradata` — otherwise the NAT
+  engine's DHCP server does not include the bootp options at all.
+- **`BootFile`** must be set via `setextradata` too — `--nattftpfile1` writes
+  to the VM XML but the runtime NAT config in 7.2 only picks up `NextServer`.
+- **`NextServer` must be the host's real LAN IP**, not the `10.0.2.2` NAT
+  alias. VBox's slirp intercepts UDP/69 to the alias for its built-in TFTP,
+  so the guest never reaches our external tftpjail otherwise.
 
 ---
 

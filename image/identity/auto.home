@@ -1,0 +1,14 @@
+# fleetboot autofs map: per-user Kerberos-secured NFSv4 homes.
+#
+# autofs reads /etc/auto.master, which we provision with:
+#   /home  /etc/auto.home  --timeout=600
+#
+# When a user logs in and PAM resolves their home dir to /home/<user>,
+# autofs mounts on demand from the IPA-published NFS server, scoped to
+# the user's Kerberos credential cache via sec=krb5p.
+#
+# The placeholder <NFS_SERVER> is filled in from /etc/fleetboot/identity.conf
+# at first boot by the enrolment helper; admins can override by replacing
+# this file via image/custom/overlay/etc/auto.home.
+
+*  -fstype=nfs4,sec=krb5p,rw,hard,proto=tcp  <NFS_SERVER>:/export/home/&
