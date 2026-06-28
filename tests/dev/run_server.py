@@ -17,6 +17,7 @@ from __future__ import annotations
 import argparse
 import secrets as _secrets
 import signal
+import socket
 import subprocess
 import sys
 import threading
@@ -72,6 +73,17 @@ def _read_or_generate_secrets() -> dict[str, str]:
     SECRETS_FILE.write_text("\n".join(f"{k}={v}" for k, v in out.items()) + "\n")
     SECRETS_FILE.chmod(0o600)
     return out
+
+
+def _detect_lan_ip() -> Optional[str]:
+    """Best-effort: open a UDP socket toward an off-link address and read
+    back the source IP the kernel chose. No packets actually leave."""
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+            sock.connect(("10.255.255.255", 1))
+            return sock.getsockname()[0]
+    except OSError:
+        return None
 
 
 def _ip_neigh_lookup(ip: str) -> Optional[str]:
@@ -164,12 +176,28 @@ def main(argv: list[str]) -> int:
     tftpjail.start()
     print(f"tftpjail listening on UDP/{TFTP_PORT}")
     print(f"fleetboot listening on http://{args.host}:{args.port}")
-    print(f"dashboard:  http://localhost:{args.port}/dashboard")
+    print()
+    print("dashboard URLs (auth: 'admin' / <admin-secret> below):")
+    print(f"  on this host:        http://localhost:{args.port}/dashboard")
+    lan_ip = _detect_lan_ip()
+    if lan_ip:
+        print(
+            f"  on the LAN/SSH:      http://{lan_ip}:{args.port}/dashboard"
+        )
+        print(
+            f"  via SSH tunnel:      ssh -L {args.port}:localhost:{args.port} "
+            f"{lan_ip}  → http://localhost:{args.port}/dashboard"
+        )
+    print()
     print(
         f"admin secret: {secrets_env['FLEETBOOT_ADMIN_SECRET']}",
         file=sys.stderr,
     )
     print("press Ctrl-C to stop", file=sys.stderr)
+    # Force-flush so the URLs above appear before uvicorn's own banner,
+    # even when stdout is captured to a pipe / file by `make` or systemd.
+    sys.stdout.flush()
+    sys.stderr.flush()
 
     # Run uvicorn on the foreground thread so Ctrl-C is clean.
     def stop(*_: object) -> None:
