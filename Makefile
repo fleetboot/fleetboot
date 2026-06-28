@@ -57,7 +57,8 @@ lint:
 image: stage-fleetboot-package
 	mkdir -p $(BUILD_DIR)
 	$(DEBOS) \
-	  --fakemachine-backend=qemu \
+	  --memory=4Gb \
+	  --scratchsize=8Gb \
 	  --artifactdir=$(BUILD_DIR) \
 	  --template-var=architecture:$(ARCH) \
 	  --template-var=profile:$(PROFILE) \
