@@ -11,6 +11,10 @@ RECIPE    ?= image/fleetboot-base.yaml
 # Default image architecture. Override with `make image ARCH=arm64`.
 ARCH ?= amd64
 
+# Default profile. Override with `make image PROFILE=school`. Profiles
+# live under image/profiles/<name>/.
+PROFILE ?= default
+
 .PHONY: test
 test:
 	$(PYTHON) -m pytest -q
@@ -56,6 +60,7 @@ image: stage-fleetboot-package
 	  --fakemachine-backend=qemu \
 	  --artifactdir=$(BUILD_DIR) \
 	  --template-var=architecture:$(ARCH) \
+	  --template-var=profile:$(PROFILE) \
 	  $(RECIPE)
 
 .PHONY: stage-fleetboot-package

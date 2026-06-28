@@ -21,6 +21,7 @@ which-token-exists information to probers.
 from __future__ import annotations
 
 import hmac
+import re
 from pathlib import Path
 from typing import Optional
 
@@ -37,17 +38,27 @@ from fleetboot.server.boot_sessions import (
 from fleetboot.server.registry import Machine, MachineRegistry
 
 
-# Closed allowlist of files we will serve under /boot/. Anything not in this
-# set is rejected before any filesystem lookup — no path traversal, no
-# directory listing, no oracle for what else is on disk.
-ALLOWED_BOOT_FILES = frozenset(
-    {
-        "vmlinuz",
-        "initrd.img",
-        "fleetboot-amd64.squashfs",
-        "fleetboot-arm64.squashfs",
-    }
+# Static filenames we always serve under /boot/.
+_STATIC_BOOT_FILES = frozenset({"vmlinuz", "initrd.img"})
+
+# Profiled squashfs names. The image build produces
+# `fleetboot-<profile>-<arch>.squashfs` and we accept any name of that
+# shape. The file still has to exist on disk in the configured boot_dir,
+# so this is not an enumeration oracle for what was built.
+_PROFILED_SQUASHFS = re.compile(
+    r"^fleetboot-[a-z0-9][a-z0-9-]*-(amd64|arm64|i386)\.squashfs$"
 )
+
+
+def is_allowed_boot_filename(filename: str) -> bool:
+    """Whitelist check applied before any filesystem operation."""
+    if filename in _STATIC_BOOT_FILES:
+        return True
+    return _PROFILED_SQUASHFS.fullmatch(filename) is not None
+
+
+# Kept for tests that still want a concrete set of the static names.
+ALLOWED_BOOT_FILES = _STATIC_BOOT_FILES
 
 
 class StatusReport(BaseModel):
@@ -232,7 +243,7 @@ def create_app(
         # Filename allowlist before any filesystem operation. Same wire-level
         # response for "unknown name" and "missing on disk" so probers cannot
         # enumerate what we have.
-        if filename not in ALLOWED_BOOT_FILES:
+        if not is_allowed_boot_filename(filename):
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND, detail="not found"
             )

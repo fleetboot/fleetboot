@@ -1,0 +1,7 @@
+# School profile — extra packages beyond the base image.
+#
+# `extrepo` lets us enable third-party Debian apt repositories (in our case
+# librewolf) by short name, with the maintainer-provided signing key already
+# in the package. `librewolf` itself is installed by setup-chroot AFTER
+# extrepo enables the librewolf repository — apt won't see it until then.
+extrepo

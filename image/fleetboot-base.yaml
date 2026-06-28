@@ -23,7 +23,8 @@
 {{ $architecture := or .architecture "amd64" }}
 {{ $suite := or .suite "trixie" }}
 {{ $mirror := or .mirror "http://deb.debian.org/debian" }}
-{{ $output := or .output (printf "fleetboot-%s.squashfs" $architecture) }}
+{{ $profile := or .profile "default" }}
+{{ $output := or .output (printf "fleetboot-%s-%s.squashfs" $profile $architecture) }}
 
 architecture: {{ $architecture }}
 
@@ -76,6 +77,21 @@ actions:
       # autofs lets us mount /home/<user> on demand, using the user's
       # Kerberos credential cache as the auth context.
       - autofs
+      # Basic XFCE desktop and lightdm display manager — what a student
+      # sits in front of. lightdm-gtk-greeter gives the login screen and
+      # the fleetboot-login-ready unit a display-manager.service to chain
+      # after. Profiles can stack additional apps on top of this.
+      - xfce4
+      - xfce4-goodies
+      - lightdm
+      - lightdm-gtk-greeter
+      - xserver-xorg
+      # The default keyboard layout is configured non-interactively below.
+      - xkb-data
+      # Sound (a basic XFCE expectation; small footprint).
+      - pipewire
+      - wireplumber
+      - pipewire-pulse
 
   # ---------- admin customisation: pre-build hook ----------
 
@@ -142,16 +158,19 @@ actions:
     chroot: true
     command: |
       systemctl enable fleetboot-network-up.service
-      # The nfs-mounted and login-ready units depend on system bits we have not
-      # added to the example image yet (FreeIPA NFS home.mount, a display
-      # manager). They are installed for completeness but only enabled when
-      # their dependencies are present.
+      # nfs-mounted depends on the Kerberos NFS home.mount unit which only
+      # comes online after the machine is enrolled with FreeIPA. Enable it
+      # if it exists; the unit's own ordering keeps it silent otherwise.
       if systemctl list-unit-files home.mount >/dev/null 2>&1; then
         systemctl enable fleetboot-nfs-mounted.service
       fi
-      if systemctl list-unit-files display-manager.service >/dev/null 2>&1; then
-        systemctl enable fleetboot-login-ready.service
-      fi
+      # lightdm is in the apt list so display-manager.service is a symlink
+      # to lightdm.service: the login-ready unit always enables and fires
+      # when the greeter is up.
+      systemctl enable fleetboot-login-ready.service
+      # Boot to the graphical interface by default — lightdm postinst usually
+      # does this but we make it explicit so the recipe is self-contained.
+      systemctl set-default graphical.target
 
   - action: run
     description: "Wire the Fleetboot PAM session hook into common-session"
@@ -161,6 +180,56 @@ actions:
       if ! grep -qF "$hook_line" /etc/pam.d/common-session; then
         echo "$hook_line" >> /etc/pam.d/common-session
       fi
+
+  # ---------- profile: built-in variant selected via PROFILE= ----------
+  #
+  # A profile lives at image/profiles/<name>/ and may carry an
+  # extra-packages.list, an overlay/ tree, and an executable setup-chroot
+  # script. The recipe applies them BEFORE the admin custom block so that
+  # admin overrides win.
+
+  - action: overlay
+    description: "Stage the {{ $profile }} profile into the image"
+    source: ./profiles/{{ $profile }}
+    destination: /tmp/fleetboot-profile
+
+  - action: run
+    description: "Install profile-specified extra Debian packages"
+    chroot: true
+    command: |
+      list=/tmp/fleetboot-profile/extra-packages.list
+      if [ -s "$list" ]; then
+        packages=$(grep -vE '^\s*(#|$)' "$list" || true)
+        if [ -n "$packages" ]; then
+          apt-get update
+          apt-get install -y --no-install-recommends $packages
+        fi
+      fi
+
+  - action: run
+    description: "Apply the profile overlay tree on top of the image"
+    chroot: false
+    command: |
+      src="${RECIPEDIR}/profiles/{{ $profile }}/overlay"
+      if [ -d "$src" ] && [ -n "$(find "$src" -mindepth 1 -not -name .gitkeep -print -quit 2>/dev/null)" ]; then
+        (cd "$src" && tar -cf - --exclude=.gitkeep .) | \
+          (cd "$ROOTDIR" && tar -xf - --no-same-owner)
+      fi
+
+  - action: run
+    description: "Run profile setup-chroot if present"
+    chroot: true
+    command: |
+      script=/tmp/fleetboot-profile/setup-chroot
+      if [ -x "$script" ]; then
+        echo "fleetboot: running {{ $profile }} profile setup-chroot"
+        "$script"
+      fi
+
+  - action: run
+    description: "Remove the staged profile directory from the image"
+    chroot: true
+    command: rm -rf /tmp/fleetboot-profile
 
   # ---------- admin customisation: extra packages and overlay ----------
 

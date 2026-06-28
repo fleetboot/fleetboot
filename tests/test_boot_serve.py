@@ -52,9 +52,9 @@ def test_url_ends_with_real_file_extension(tmp_path: Path):
     """live-boot parses the archive type by sed-extracting after the last `.`.
     The URL we generate must end in the actual extension."""
     client, store, boot_dir = _setup(tmp_path)
-    (boot_dir / "fleetboot-amd64.squashfs").write_bytes(b"sqsh")
+    (boot_dir / "fleetboot-default-amd64.squashfs").write_bytes(b"sqsh")
     session = store.mint("aa:bb:cc:dd:ee:ff")
-    url = f"/boot/{session.token}/fleetboot-amd64.squashfs"
+    url = f"/boot/{session.token}/fleetboot-default-amd64.squashfs"
     assert url.rsplit(".", 1)[1] == "squashfs"
     response = client.get(url)
     assert response.status_code == 200

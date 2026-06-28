@@ -1,0 +1,21 @@
+#!/bin/sh
+# School profile setup, run inside the image chroot.
+#
+# Enables the librewolf apt repository via extrepo (which carries the
+# maintainer's signing key), then installs librewolf. We do this in
+# setup-chroot rather than via extra-packages.list because the package
+# does not exist on the apt index until extrepo has registered the
+# repository.
+
+set -eu
+
+extrepo enable librewolf
+apt-get update
+apt-get install -y --no-install-recommends librewolf
+
+# Set librewolf as the system-wide default browser. Anyone running
+# xdg-open with an http(s) URL will land in librewolf.
+if command -v update-alternatives >/dev/null 2>&1; then
+    update-alternatives --set x-www-browser /usr/bin/librewolf || true
+    update-alternatives --set gnome-www-browser /usr/bin/librewolf || true
+fi

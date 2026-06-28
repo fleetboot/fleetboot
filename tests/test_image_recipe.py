@@ -121,6 +121,41 @@ def test_pam_hook_overlaid(recipe: dict):
     assert matches, "no overlay action installs the PAM session hook"
 
 
+def test_desktop_packages_present(recipe: dict):
+    """A booted machine must reach a graphical login. XFCE+lightdm gives us
+    that with a small footprint."""
+    apt_actions = _actions_of_type(recipe, "apt")
+    all_packages = {pkg for a in apt_actions for pkg in a.get("packages", [])}
+    required = {"xfce4", "lightdm", "lightdm-gtk-greeter", "xserver-xorg"}
+    missing = required - all_packages
+    assert not missing, f"recipe is missing desktop packages: {sorted(missing)}"
+
+
+def test_graphical_target_is_default(recipe: dict):
+    """The image must boot to the graphical interface, not multi-user."""
+    runs = _actions_of_type(recipe, "run")
+    commands = " \n".join((a.get("command", "") or "") for a in runs)
+    assert "systemctl set-default graphical.target" in commands
+
+
+def test_recipe_consumes_profile_extras(recipe: dict):
+    """The recipe must apply the profile's extra packages, overlay, and
+    setup-chroot — that's the contract for built-in profiles."""
+    runs = _actions_of_type(recipe, "run")
+    commands = " \n".join((a.get("command", "") or "") for a in runs)
+    assert "fleetboot-profile/extra-packages.list" in commands
+    assert "profiles/" in commands  # overlay copy
+    assert "setup-chroot" in commands
+
+
+def test_login_ready_unit_always_enabled(recipe: dict):
+    """Once we ship a display manager, fleetboot-login-ready unconditionally
+    enables — no need for the previous 'only if present' guard."""
+    runs = _actions_of_type(recipe, "run")
+    commands = " \n".join((a.get("command", "") or "") for a in runs)
+    assert "systemctl enable fleetboot-login-ready.service" in commands
+
+
 def test_freeipa_client_packages_present(recipe: dict):
     """sssd / freeipa-client / nfs-common / krb5-user must be installed.
 

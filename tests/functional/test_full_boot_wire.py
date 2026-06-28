@@ -158,7 +158,7 @@ def boot_dir(tmp_path: Path) -> Path:
     boot.mkdir()
     (boot / "vmlinuz").write_bytes(b"\x7fELF-fake-kernel-bytes")
     (boot / "initrd.img").write_bytes(b"fake-initrd-bytes")
-    (boot / "fleetboot-amd64.squashfs").write_bytes(b"fake-squashfs-bytes")
+    (boot / "fleetboot-default-amd64.squashfs").write_bytes(b"fake-squashfs-bytes")
     return boot
 
 
@@ -249,7 +249,7 @@ def test_boot_assets_served_using_minted_token(stack):
         for name, expected in [
             ("vmlinuz", b"\x7fELF-fake-kernel-bytes"),
             ("initrd.img", b"fake-initrd-bytes"),
-            ("fleetboot-amd64.squashfs", b"fake-squashfs-bytes"),
+            ("fleetboot-default-amd64.squashfs", b"fake-squashfs-bytes"),
         ]:
             response = client.get(
                 f"{fleetboot.base_url}/boot/{name}?t={token}"
