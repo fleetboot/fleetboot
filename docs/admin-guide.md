@@ -225,6 +225,83 @@ instead of `filename "grubnetx64.efi";`. The signed grub looks for
 `image/signed-boot/initial-grub.cfg`) just hands control to tftpjail's
 per-MAC config exactly as the unsigned binary does.
 
+## NFS server — homes + shared mounts
+
+Fleetboot ships the fleetboot host as the NFS server too: same machine,
+same identity-domain, Kerberos all the way down. Two trees get exported:
+
+- `/export/home/<user>` — the user's personal home. Mounted at
+  `/home/<user>` per-login via autofs, with `sec=krb5p` (encrypted),
+  authenticated by the user's Kerberos ticket. No other user can read it.
+- `/export/shared/<bucket>` — shared dirs. Mounted under `/shared/<bucket>`.
+  Still Kerberos-secured at the wire level; visibility inside each
+  bucket is enforced by **POSIX group permissions**, so you don't need
+  a separate export per group.
+
+### One-time server setup
+
+Pre-reqs on the fleetboot host: it's already FreeIPA-enrolled
+(`ipa-client-install` ran successfully), and you have an admin Kerberos
+ticket (`kinit admin`).
+
+```sh
+sudo ./scripts/setup-nfs-server.sh \
+    --realm SCHOOL.EXAMPLE \
+    --domain school.example
+```
+
+The script is idempotent. It:
+
+1. Installs `nfs-kernel-server`, `nfs-common`, `krb5-user`.
+2. Creates the IPA service principal `nfs/<host>@REALM` and writes its
+   keytab to `/etc/krb5.keytab` (mode 0600).
+3. Lays down `/etc/exports` from `nfs/exports.template` — `sec=krb5p`
+   everywhere, no `sec=sys` fallback.
+4. Renders `/etc/idmapd.conf` from `nfs/idmapd.conf.template`, substituting
+   `__IPA_DOMAIN__` so NFSv4 owner strings round-trip to real uid:gid.
+5. Creates `/export/{home,shared/all}` with sensible perms.
+6. Enables and starts `nfs-kernel-server` and `nfs-idmapd`.
+
+### Lay out shared directories
+
+The shared root exists; the per-bucket directories are an admin curation
+step. `nfs/shared-skeleton.md` recommends a starting layout:
+
+| Path                          | Owner / mode                 | Audience |
+|-------------------------------|------------------------------|----------|
+| `/export/shared/all`          | `root:root` mode `1777`      | All users, sticky. |
+| `/export/shared/teachers`     | `root:teachers` mode `2770`  | Teachers only. |
+| `/export/shared/headmaster`   | `root:headmaster` mode `2770`| Headmaster only. |
+| `/export/shared/students`     | `root:students` mode `2775`  | Students writable, others read-only. |
+| `/export/shared/coursework`   | `root:teachers` mode `2775`  | Teachers write; students read. |
+
+The setgid bit on group-owned dirs (mode prefix `2`) means new files
+inherit the parent group, which is what you want for shared workflows.
+
+```sh
+sudo install -d -o root -g teachers -m 2770 /export/shared/teachers
+sudo install -d -o root -g headmaster -m 2770 /export/shared/headmaster
+sudo install -d -o root -g students -m 2775 /export/shared/students
+sudo install -d -o root -g teachers -m 2775 /export/shared/coursework
+```
+
+### identity.conf — what the clients need to know
+
+The image's `enroll-freeipa` substitutes the NFS server's FQDN into
+`/etc/auto.home` and `/etc/auto.shared` at first boot, using
+`IPA_NFS_SERVER` from `/etc/fleetboot/identity.conf`. So the per-machine
+identity config grows one line:
+
+```
+IPA_REALM=SCHOOL.EXAMPLE
+IPA_DOMAIN=school.example
+IPA_KEYTAB=/etc/fleetboot/enrol.keytab
+IPA_NFS_SERVER=fleetboot.school.example
+```
+
+If you co-locate fleetboot with NFS (the default), `IPA_NFS_SERVER`
+is the fleetboot host's own FQDN.
+
 ### Per-MAC FreeIPA enrolment keytab delivery
 
 For fleets where each machine should auto-enrol with FreeIPA on first

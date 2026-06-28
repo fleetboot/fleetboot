@@ -1,0 +1,15 @@
+# /etc/idmapd.conf — NFSv4 idmapping.
+#
+# NFSv4 reports owners as "user@DOMAIN". For Kerberos-secured mounts to
+# look right on the client (chown matt:matt instead of chown nobody:nogroup)
+# every host in the deployment must agree on the Domain. We use the
+# FreeIPA domain as the universal idmapping domain.
+
+[General]
+Verbosity = 0
+Pipefs-Directory = /run/rpc_pipefs
+Domain = __IPA_DOMAIN__
+
+[Mapping]
+Nobody-User = nobody
+Nobody-Group = nogroup

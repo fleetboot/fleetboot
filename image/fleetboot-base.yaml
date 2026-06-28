@@ -150,10 +150,16 @@ actions:
       install -m 0644 \
         /usr/local/lib/fleetboot/identity/auto.home \
         /etc/auto.home
-      # Point autofs at our map. Skip if the line is already present so
-      # admin overlays can override.
+      install -m 0644 \
+        /usr/local/lib/fleetboot/identity/auto.shared \
+        /etc/auto.shared
+      # Point autofs at our maps. Skip lines that are already there so
+      # admin overlays can override either map.
       if ! grep -q '^/home[[:space:]].*auto\.home' /etc/auto.master; then
         echo '/home /etc/auto.home --timeout=600' >> /etc/auto.master
+      fi
+      if ! grep -q '^/shared[[:space:]].*auto\.shared' /etc/auto.master; then
+        echo '/shared /etc/auto.shared --timeout=600' >> /etc/auto.master
       fi
       # Enable the keytab-fetch and enrolment oneshots. The fetch unit's
       # ordering puts it Before=freeipa-enroll, so the keytab is in place

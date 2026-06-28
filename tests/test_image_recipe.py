@@ -218,6 +218,14 @@ def test_autofs_wired_to_auto_home(recipe: dict):
     assert "auto.master" in commands
 
 
+def test_autofs_wired_to_auto_shared(recipe: dict):
+    """The image must register our /shared -> /etc/auto.shared mapping
+    so group-scoped NFS mounts work."""
+    runs = _actions_of_type(recipe, "run")
+    commands = " \n".join((a.get("command", "") or "") for a in runs)
+    assert "/etc/auto.shared" in commands
+
+
 def test_pam_session_hook_is_wired_into_common_session(recipe: dict):
     """One of the run actions must edit /etc/pam.d/common-session."""
     runs = _actions_of_type(recipe, "run")

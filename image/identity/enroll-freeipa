@@ -10,6 +10,9 @@
 #   IPA_DOMAIN         lowercase DNS domain, e.g. fleetboot.example
 #   IPA_SERVER         FQDN of the IPA server (optional; auto-discovered if blank)
 #   IPA_KEYTAB         path to a one-time enrolment keytab (preferred over password)
+#   IPA_NFS_SERVER     FQDN of the Kerberos NFSv4 server. Substituted into
+#                      /etc/auto.home and /etc/auto.shared so autofs
+#                      mounts have a concrete server to talk to.
 #
 # Idempotent: if the host is already enrolled it exits 0 without doing
 # anything. Designed to be invoked by a systemd oneshot on first boot.
@@ -53,3 +56,21 @@ ipa-client-install \
     --domain="$IPA_DOMAIN" \
     --keytab="$IPA_KEYTAB" \
     $server_args
+
+# Substitute the NFS server placeholder in the autofs maps so /home/<user>
+# and /shared/<group> resolve to a concrete server. Without this, every
+# automounted path returns ENOENT.
+if [ -n "${IPA_NFS_SERVER:-}" ]; then
+    for map in /etc/auto.home /etc/auto.shared; do
+        if [ -f "$map" ] && grep -q '<NFS_SERVER>' "$map"; then
+            sed -i "s|<NFS_SERVER>|$IPA_NFS_SERVER|g" "$map"
+            echo "enroll-freeipa: substituted NFS server in $map"
+        fi
+    done
+    # The autofs maps changed — reload so the next access uses the new
+    # target.
+    systemctl reload autofs.service 2>/dev/null || \
+        systemctl restart autofs.service 2>/dev/null || true
+else
+    echo "enroll-freeipa: IPA_NFS_SERVER not set; leaving autofs maps with placeholder" >&2
+fi

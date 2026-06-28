@@ -116,3 +116,71 @@ def test_keytab_fetch_unit_skips_when_already_enrolled():
 def test_keytab_fetch_unit_skips_when_no_cmdline_token():
     text = (IDENTITY_DIR / "fleetboot-keytab-fetch.service").read_text()
     assert "ConditionKernelCommandLine=fleetboot.boot_token" in text
+
+
+# ---- Shared NFS mount -----------------------------------------------------
+
+
+def test_auto_shared_map_exists_and_uses_krb5p():
+    text = (IDENTITY_DIR / "auto.shared").read_text()
+    assert "nfs4" in text
+    assert "sec=krb5p" in text
+    assert "<NFS_SERVER>" in text
+    # The wildcard substitution `&` is what makes /shared/<X> resolve to
+    # /export/shared/<X> on the server.
+    assert "&" in text
+    assert "/export/shared/" in text
+
+
+def test_enroll_freeipa_substitutes_nfs_server():
+    script = (IDENTITY_DIR / "enroll-freeipa").read_text()
+    # The substitution step is what makes the autofs maps usable; without
+    # it /home/<user> and /shared/<X> point at "<NFS_SERVER>" (no DNS).
+    assert "IPA_NFS_SERVER" in script
+    assert "/etc/auto.home" in script
+    assert "/etc/auto.shared" in script
+    # The sed line that does the substitution.
+    assert "<NFS_SERVER>" in script and "sed" in script
+
+
+# ---- NFS server-side templates --------------------------------------------
+
+
+NFS_TEMPLATES = REPO_ROOT / "nfs"
+
+
+def test_exports_template_exists_and_uses_krb5p():
+    text = (NFS_TEMPLATES / "exports.template").read_text()
+    # The export config must NOT degrade to sec=sys; that would expose
+    # /home to unauth'd hosts.
+    assert "sec=krb5p" in text
+    assert "sec=sys" not in text
+    # NFSv4 pseudo-root.
+    assert "fsid=0" in text
+    # Both branches present.
+    assert "/export/home" in text
+    assert "/export/shared" in text
+
+
+def test_idmapd_template_has_domain_placeholder():
+    text = (NFS_TEMPLATES / "idmapd.conf.template").read_text()
+    assert "__IPA_DOMAIN__" in text
+    assert "[General]" in text
+
+
+def test_setup_nfs_server_is_executable():
+    script = REPO_ROOT / "scripts" / "setup-nfs-server.sh"
+    assert script.is_file()
+    mode = script.stat().st_mode
+    assert mode & stat.S_IXUSR
+
+
+def test_setup_nfs_server_uses_ipa_getkeytab():
+    text = (REPO_ROOT / "scripts" / "setup-nfs-server.sh").read_text()
+    # The script must get a Kerberos service keytab — not rely on
+    # password-based auth or unauthenticated NFS.
+    assert "ipa-getkeytab" in text
+    assert "/etc/krb5.keytab" in text
+    # And it must lay the templates down where the daemons expect them.
+    assert "/etc/exports" in text
+    assert "/etc/idmapd.conf" in text

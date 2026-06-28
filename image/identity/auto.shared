@@ -1,0 +1,13 @@
+# fleetboot autofs map: Kerberos-secured NFSv4 shared mounts.
+#
+# Mounted at /shared on every booted machine. Each subdirectory
+# (e.g. /shared/teachers, /shared/students, /shared/all) maps to
+# server:/export/shared/<name>. Whether the user can see what's inside
+# is enforced by *POSIX permissions on the server* — sec=krb5p
+# authenticates the user, then the group ownership inside the export
+# decides what they can read or write.
+#
+# The placeholder <NFS_SERVER> is substituted at first boot by
+# enroll-freeipa using IPA_NFS_SERVER from /etc/fleetboot/identity.conf.
+
+*  -fstype=nfs4,sec=krb5p,rw,hard,proto=tcp  <NFS_SERVER>:/export/shared/&
