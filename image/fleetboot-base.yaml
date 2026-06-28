@@ -138,9 +138,15 @@ actions:
       install -m 0755 \
         /usr/local/lib/fleetboot/identity/enroll-freeipa \
         /usr/local/lib/fleetboot/enroll-freeipa
+      install -m 0755 \
+        /usr/local/lib/fleetboot/identity/fetch-keytab \
+        /usr/local/lib/fleetboot/fetch-keytab
       install -m 0644 \
         /usr/local/lib/fleetboot/identity/fleetboot-freeipa-enroll.service \
         /etc/systemd/system/fleetboot-freeipa-enroll.service
+      install -m 0644 \
+        /usr/local/lib/fleetboot/identity/fleetboot-keytab-fetch.service \
+        /etc/systemd/system/fleetboot-keytab-fetch.service
       install -m 0644 \
         /usr/local/lib/fleetboot/identity/auto.home \
         /etc/auto.home
@@ -149,7 +155,10 @@ actions:
       if ! grep -q '^/home[[:space:]].*auto\.home' /etc/auto.master; then
         echo '/home /etc/auto.home --timeout=600' >> /etc/auto.master
       fi
-      # Enable the enrolment oneshot so it fires when identity.conf appears.
+      # Enable the keytab-fetch and enrolment oneshots. The fetch unit's
+      # ordering puts it Before=freeipa-enroll, so the keytab is in place
+      # by the time enrolment runs.
+      systemctl enable fleetboot-keytab-fetch.service
       systemctl enable fleetboot-freeipa-enroll.service
       systemctl enable autofs.service
 

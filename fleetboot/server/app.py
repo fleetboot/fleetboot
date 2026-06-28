@@ -148,6 +148,7 @@ def create_app(
     registry: MachineRegistry | None = None,
     admin_secret: str | None = None,
     dashboard_repo_root: Path | None = None,
+    keytabs_dir: Path | None = None,
 ) -> FastAPI:
     """Build the FastAPI app.
 
@@ -163,6 +164,9 @@ def create_app(
     `dashboard_repo_root` — path to the fleetboot repo (so the dashboard
         can read profiles and trigger `make image`). When None, the
         dashboard is not mounted.
+    `keytabs_dir` — directory holding per-MAC FreeIPA enrolment keytabs at
+        `<keytabs_dir>/<mac>.keytab`. Served via /enrol/{token}/keytab.
+        If None, /enrol/* returns 503 (keytab delivery disabled).
     """
     store = sessions if sessions is not None else BootSessionStore()
     app = FastAPI(title="Fleetboot control plane")
@@ -369,6 +373,43 @@ def create_app(
                 status_code=status.HTTP_404_NOT_FOUND, detail="not found"
             )
         return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+    @app.get("/enrol/{token}/keytab")
+    def serve_keytab(
+        token: str,
+        store: BootSessionStore = Depends(get_store),
+    ) -> FileResponse:
+        """Per-MAC FreeIPA enrolment keytab fetch.
+
+        The booting machine reads the per-boot token from /proc/cmdline and
+        fetches its own enrolment keytab. The token validates the request
+        belongs to a current boot session, and the keytab filename on disk
+        is keyed by MAC so we naturally only ever serve THIS machine's
+        keytab to THIS boot session. Unknown token or no provisioned
+        keytab -> 401 / 404; uniform errors keep this from being a
+        scrape oracle.
+        """
+        if keytabs_dir is None:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="keytab delivery not configured",
+            )
+        session = store.lookup(token)
+        if session is None:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="unauthorised",
+            )
+        # The keytab filename is the normalised MAC. The session's mac is
+        # already normalised by BootSessionStore.mint(), so a direct join
+        # is safe — no traversal possible from arbitrary input.
+        path = keytabs_dir / f"{session.mac}.keytab"
+        if not path.is_file():
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="no keytab provisioned",
+            )
+        return FileResponse(str(path), media_type="application/octet-stream")
 
     # ---- Dashboard --------------------------------------------------------
     #

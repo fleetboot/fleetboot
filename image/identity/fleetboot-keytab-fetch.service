@@ -1,0 +1,19 @@
+[Unit]
+Description=Fetch this machine's FreeIPA enrolment keytab from fleetboot
+After=network-online.target fleetboot-network-up.service
+Wants=network-online.target
+# Run before the FreeIPA enrolment oneshot — we provide the keytab it consumes.
+Before=fleetboot-freeipa-enroll.service
+# Already-enrolled machines never re-fetch.
+ConditionPathExists=!/etc/ipa/default.conf
+# Don't bother running if the cmdline doesn't have a fleetboot context.
+# (The reporter cmdline keys are baked in by tftpjail's grub.cfg.)
+ConditionKernelCommandLine=fleetboot.boot_token
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/lib/fleetboot/fetch-keytab
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

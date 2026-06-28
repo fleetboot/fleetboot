@@ -1,0 +1,76 @@
+#!/usr/bin/env python3
+"""Fetch this machine's FreeIPA enrolment keytab from fleetboot.
+
+Runs on first boot as a systemd oneshot, *before* the freeipa-enroll
+service. Reuses the boot token already on /proc/cmdline (placed there
+by tftpjail's rendered grub.cfg) so the request is authenticated as the
+current boot session and the server can only ever serve this machine's
+keytab back.
+
+Failures are never fatal: if no keytab is provisioned for this MAC
+(404), or the fetch errors out, we exit 0 and let the rest of the boot
+proceed. The freeipa-enroll service has its own ConditionPathExists
+guard that skips when no keytab landed.
+"""
+
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+import httpx
+
+# Make the in-image reporter package importable. The package lives at
+# /usr/lib/python3/dist-packages/fleetboot during the image build.
+from fleetboot.reporter.cmdline import (
+    MissingReporterSettingsError,
+    read_settings,
+)
+
+
+KEYTAB_PATH = Path("/etc/fleetboot/enrol.keytab")
+TIMEOUT_SECONDS = 10
+
+
+def main() -> int:
+    if KEYTAB_PATH.exists():
+        print("fetch-keytab: keytab already present; nothing to do")
+        return 0
+    try:
+        settings = read_settings()
+    except MissingReporterSettingsError as err:
+        print(f"fetch-keytab: cmdline settings missing: {err}", file=sys.stderr)
+        return 0
+
+    url = (
+        settings.server_url.rstrip("/")
+        + f"/enrol/{settings.boot_token}/keytab"
+    )
+    try:
+        with httpx.Client(timeout=TIMEOUT_SECONDS) as client:
+            response = client.get(url)
+    except httpx.HTTPError as err:
+        print(f"fetch-keytab: transport error: {err}", file=sys.stderr)
+        return 0
+    if response.status_code == 404:
+        print(
+            "fetch-keytab: no keytab provisioned for this MAC; skipping"
+        )
+        return 0
+    if response.status_code >= 400:
+        print(
+            f"fetch-keytab: server returned {response.status_code}; "
+            "skipping",
+            file=sys.stderr,
+        )
+        return 0
+
+    KEYTAB_PATH.parent.mkdir(parents=True, exist_ok=True)
+    KEYTAB_PATH.write_bytes(response.content)
+    KEYTAB_PATH.chmod(0o600)
+    print(f"fetch-keytab: wrote {len(response.content)} bytes to {KEYTAB_PATH}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

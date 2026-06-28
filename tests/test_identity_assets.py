@@ -72,3 +72,47 @@ def test_autofs_map_has_placeholder_for_nfs_server():
     """Admins / the enrolment step substitute the server FQDN in."""
     contents = (IDENTITY_DIR / "auto.home").read_text()
     assert "<NFS_SERVER>" in contents
+
+
+# ---- Keytab fetch ----------------------------------------------------------
+
+
+def test_fetch_keytab_script_is_executable():
+    script = IDENTITY_DIR / "fetch-keytab"
+    assert script.is_file()
+    mode = script.stat().st_mode
+    assert mode & stat.S_IXUSR
+
+
+def test_fetch_keytab_script_uses_cmdline_token():
+    script = (IDENTITY_DIR / "fetch-keytab").read_text()
+    # Reuses the reporter's cmdline parser — no duplicate cmdline parsing.
+    assert "fleetboot.reporter.cmdline" in script
+    assert "/enrol/" in script
+    assert "/keytab" in script
+
+
+def test_fetch_keytab_writes_keytab_with_safe_perms():
+    script = (IDENTITY_DIR / "fetch-keytab").read_text()
+    # The keytab is sensitive — must be mode 0600 once written.
+    assert "0o600" in script or "chmod(0o600)" in script
+    assert "/etc/fleetboot/enrol.keytab" in script
+
+
+def test_keytab_fetch_unit_is_oneshot_and_ordered():
+    parser = configparser.ConfigParser(strict=False, interpolation=None)
+    parser.read(IDENTITY_DIR / "fleetboot-keytab-fetch.service")
+    assert parser["Service"]["Type"] == "oneshot"
+    assert "network-online.target" in parser["Unit"]["After"]
+    # Critically: runs BEFORE the enrolment unit so the keytab is there.
+    assert "fleetboot-freeipa-enroll.service" in parser["Unit"]["Before"]
+
+
+def test_keytab_fetch_unit_skips_when_already_enrolled():
+    text = (IDENTITY_DIR / "fleetboot-keytab-fetch.service").read_text()
+    assert "ConditionPathExists=!/etc/ipa/default.conf" in text
+
+
+def test_keytab_fetch_unit_skips_when_no_cmdline_token():
+    text = (IDENTITY_DIR / "fleetboot-keytab-fetch.service").read_text()
+    assert "ConditionKernelCommandLine=fleetboot.boot_token" in text

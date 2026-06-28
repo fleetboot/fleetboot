@@ -200,6 +200,16 @@ def test_freeipa_enroll_service_enabled(recipe: dict):
     assert found, "fleetboot-freeipa-enroll.service is not enabled in the recipe"
 
 
+def test_keytab_fetch_service_enabled_and_script_installed(recipe: dict):
+    """The keytab-fetch oneshot must land and be enabled, and the fetch
+    script must be installed under /usr/local/lib/fleetboot/."""
+    runs = _actions_of_type(recipe, "run")
+    commands = " \n".join((a.get("command", "") or "") for a in runs)
+    assert "fetch-keytab" in commands
+    assert "fleetboot-keytab-fetch.service" in commands
+    assert "systemctl enable fleetboot-keytab-fetch.service" in commands
+
+
 def test_autofs_wired_to_auto_home(recipe: dict):
     """The image must register our /home -> /etc/auto.home mapping."""
     runs = _actions_of_type(recipe, "run")

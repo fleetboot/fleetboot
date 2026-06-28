@@ -148,7 +148,11 @@ profile, so admin choices win.
 Whatever DHCP server your network already runs, you need to advertise:
 
 - **DHCP option 54 (next-server)** = the fleetboot server's LAN IP.
-- **DHCP option 67 (bootfile-name)** = `grubnetx64.efi`.
+- **DHCP option 67 (bootfile-name)** = `grubnetx64.efi` for the
+  unsigned chain (Secure Boot **disabled** on every client), or
+  `shimx64.efi.signed` for the signed chain (Secure Boot **enabled**;
+  needs `make signed-boot-assets` once on the build host — see "Signed
+  Secure Boot" below).
 - **DHCP option 93 (Client System Architecture)** — clients send this;
   configure your DHCP to set a different bootfile per arch when you
   start serving arm64.
@@ -197,6 +201,51 @@ If you see "PXE-E16: No valid offer received", DHCP isn't advertising
 the bootp options correctly — re-check `next-server` and `filename`.
 
 ---
+
+## Signed Secure Boot (optional)
+
+Out of the box, fleetboot ships a self-built `grubnetx64.efi` that has to
+run with Secure Boot **off** in each client's firmware. To use Debian's
+signed shim + signed grub chain instead — which firmware accepts even
+with Secure Boot **on** — install the packages once on the build host:
+
+```sh
+apt install shim-signed grub-efi-amd64-signed
+```
+
+Then build the signed-boot assets alongside your image:
+
+```sh
+make signed-boot-assets   # produces build/shimx64.efi.signed, grubx64.efi, grub/grub.cfg
+```
+
+The DHCP configuration changes one line — `filename "shimx64.efi.signed";`
+instead of `filename "grubnetx64.efi";`. The signed grub looks for
+`grub/grub.cfg` next to where it was loaded; that file (our
+`image/signed-boot/initial-grub.cfg`) just hands control to tftpjail's
+per-MAC config exactly as the unsigned binary does.
+
+### Per-MAC FreeIPA enrolment keytab delivery
+
+For fleets where each machine should auto-enrol with FreeIPA on first
+boot without the admin pre-staging keytabs on every box, fleetboot can
+serve them per-MAC via a per-boot-token authenticated endpoint.
+
+On the IPA server, mint a keytab per machine:
+
+```sh
+ipa host-add fleetboot-lab-01.school.example
+ipa-getkeytab -s ipa.school.example -p host/fleetboot-lab-01.school.example \
+              -k /var/lib/fleetboot/keytabs/aa:bb:cc:dd:ee:ff.keytab
+```
+
+Copy the file to fleetboot's `keytabs_dir` (e.g. `/var/lib/fleetboot/keytabs/`)
+keyed by the machine's MAC. On first boot the image's
+`fleetboot-keytab-fetch.service` POSTs `/enrol/<token>/keytab`, writes
+the file to `/etc/fleetboot/enrol.keytab` mode 0600, and the
+`fleetboot-freeipa-enroll.service` runs `ipa-client-install --unattended`
+against it. Unprovisioned MACs get 404 from the endpoint and skip the
+fetch step silently.
 
 ## Running fleetboot and tftpjail
 

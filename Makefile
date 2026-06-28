@@ -94,6 +94,38 @@ $(BUILD_DIR)/grubnetx64.efi: image/grub-embedded.cfg
 	  efinet tftp http normal linux configfile \
 	  smbios search echo serial terminal net regexp
 
+# Stage Debian's signed shim + signed grub binaries for Secure Boot PXE.
+#
+# DHCP advertises `shimx64.efi.signed` as the bootfile. UEFI loads shim
+# (trusted via Microsoft's UEFI CA in firmware), shim chainloads
+# `grubx64.efi` from the same TFTP path, and the signed grub looks for
+# `grub/grub.cfg` next — which we serve from `image/signed-boot/`.
+# That initial grub.cfg then `configfile`s to tftpjail's per-MAC dynamic
+# config exactly as our self-built `grubnetx64.efi` does today.
+#
+# Requires `shim-signed` and `grub-efi-amd64-signed` on the build host.
+SHIM_SOURCE  ?= /usr/lib/shim/shimx64.efi.signed
+GRUB_SOURCE  ?= /usr/lib/grub/x86_64-efi-signed/grubnetx64.efi.signed
+
+.PHONY: signed-boot-assets
+signed-boot-assets: $(BUILD_DIR)/shimx64.efi.signed \
+                    $(BUILD_DIR)/grubx64.efi \
+                    $(BUILD_DIR)/grub/grub.cfg
+
+$(BUILD_DIR)/shimx64.efi.signed: $(SHIM_SOURCE)
+	mkdir -p $(BUILD_DIR)
+	cp $< $@
+
+# Shim looks for the chained loader as `grubx64.efi` in the same dir, so
+# we rename the signed network grub to that filename when staging.
+$(BUILD_DIR)/grubx64.efi: $(GRUB_SOURCE)
+	mkdir -p $(BUILD_DIR)
+	cp $< $@
+
+$(BUILD_DIR)/grub/grub.cfg: image/signed-boot/initial-grub.cfg
+	mkdir -p $(BUILD_DIR)/grub
+	cp $< $@
+
 # Wipe build artifacts and staged inputs.
 .PHONY: clean
 clean:
