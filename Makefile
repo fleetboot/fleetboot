@@ -30,6 +30,14 @@ functional-test:
 vbox-functional-test:
 	sg vboxusers -c '$(PYTHON) -m pytest tests/vbox_functional -v -o addopts='
 
+# Full PXE chain through a QEMU UEFI guest on a libvirt-managed isolated
+# bridge. The preferred functional path: no VBox, KVM accel, no module
+# dance. Requires libvirt-daemon-system, libvirt-clients, qemu-system-x86,
+# and matt in the `libvirt` group. Python needs cap_net_bind_service.
+.PHONY: qemu-functional-test
+qemu-functional-test:
+	$(PYTHON) -m pytest tests/qemu_functional -v -o addopts=
+
 .PHONY: lint
 lint:
 	$(PYTHON) -m compileall -q fleetboot tests

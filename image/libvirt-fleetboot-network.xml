@@ -1,0 +1,30 @@
+<!--
+  Isolated host-only libvirt network for fleetboot functional tests.
+
+  NOT bridged to any physical NIC: there is no L2 path from this bridge to
+  the user's LAN, so the dnsmasq that libvirt spawns can advertise our
+  bootp options without any risk of replying on the wider network.
+
+  Subnet:        192.168.99.0/24
+  Host on br:    192.168.99.1   (where tftpjail and fleetboot listen)
+  DHCP pool:     192.168.99.10 — .50
+  bootp file:    grubnetx64.efi (served by tftpjail at 192.168.99.1:69)
+  Forward mode:  nat — VMs reach the outside world through the host's
+                       default route, masqueraded.
+-->
+<network>
+  <name>fleetboot</name>
+  <bridge name='virbr-fbt' stp='off' delay='0'/>
+  <forward mode='nat'>
+    <nat>
+      <port start='1024' end='65535'/>
+    </nat>
+  </forward>
+  <ip address='192.168.99.1' netmask='255.255.255.0'>
+    <dhcp>
+      <range start='192.168.99.10' end='192.168.99.50'/>
+      <!-- DHCP option 67 (bootfile) + option 54 (next-server). -->
+      <bootp file='grubnetx64.efi' server='192.168.99.1'/>
+    </dhcp>
+  </ip>
+</network>
