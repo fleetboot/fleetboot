@@ -305,17 +305,28 @@ def build_dashboard_router(
         response_class=HTMLResponse,
         dependencies=[Depends(require_admin)],
     )
-    def view_build(request: Request, job_id: str) -> HTMLResponse:
+    def view_build(
+        request: Request,
+        job_id: str,
+        follow: Optional[int] = None,
+    ) -> HTMLResponse:
         job = builds.get(job_id)
         if job is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="build not found",
             )
+        # The build_detail template already auto-reloads while the build
+        # is in flight; `follow` additionally scrolls the log <pre> to the
+        # bottom each load so newest lines stay in view.
         return templates.TemplateResponse(
             request,
             "build_detail.html",
-            {"job": job, "log_lines": builds.tail_log(job_id, n=400)},
+            {
+                "job": job,
+                "log_lines": builds.tail_log(job_id, n=400),
+                "follow": bool(follow),
+            },
         )
 
     return router

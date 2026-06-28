@@ -394,6 +394,27 @@ def test_concurrent_build_flashes_friendly_error(dashboard_root: Path):
     assert "already running" in page.text
 
 
+def test_build_detail_follow_link_and_autoscroll(dashboard_root: Path):
+    """`?follow=1` renders the autoscroll script + a 'stop following' link."""
+    client = _client(dashboard_root)
+    first = client.post(
+        "/dashboard/builds",
+        data={"profile": "default", "architecture": "amd64"},
+        headers=_auth_header(),
+        follow_redirects=False,
+    )
+    job_url = first.headers["location"]
+    plain = client.get(job_url, headers=_auth_header())
+    assert plain.status_code == 200
+    assert ">follow log<" in plain.text
+    assert "scrollHeight" not in plain.text
+
+    follow = client.get(job_url + "?follow=1", headers=_auth_header())
+    assert follow.status_code == 200
+    assert ">stop following<" in follow.text
+    assert "scrollHeight" in follow.text
+
+
 def test_trigger_build_runs_make_and_records_job(dashboard_root: Path):
     """Use the trivial Makefile we set up — `make image` just echoes."""
     client = _client(dashboard_root)

@@ -12,6 +12,14 @@
   {% endif %}
 </p>
 
+<p>
+  {% if follow %}
+    <a href="?">stop following</a>
+  {% else %}
+    <a href="?follow=1">follow log</a>
+  {% endif %}
+</p>
+
 {% if job.state.value == "running" %}
 <p class="muted">
   Build is running. The page auto-reloads every 5 seconds while it's in
@@ -22,8 +30,18 @@
 </script>
 {% endif %}
 
-<pre>{% for line in log_lines %}{{ line }}
+<pre id="build-log">{% for line in log_lines %}{{ line }}
 {% endfor %}</pre>
+
+{% if follow %}
+<script>
+  // Scroll the log pane to the bottom on each load so the newest lines
+  // are visible. Combined with the running-build auto-reload above this
+  // gives a "tail -f" feel.
+  var logElement = document.getElementById("build-log");
+  if (logElement) { logElement.scrollTop = logElement.scrollHeight; }
+</script>
+{% endif %}
 
 <p><a href="/dashboard/builds">back to builds</a></p>
 {% endblock %}
