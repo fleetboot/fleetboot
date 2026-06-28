@@ -3,6 +3,10 @@
 {% block content %}
 <h1>Builds</h1>
 
+{% if error == "already-running" %}
+<p class="state-failed">A build is already running — wait for it to finish before starting another.</p>
+{% endif %}
+
 <form method="post" action="/dashboard/builds">
   <label>Profile
     <select name="profile" required>

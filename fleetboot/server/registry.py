@@ -32,6 +32,18 @@ CREATE TABLE IF NOT EXISTS machines (
     serial_console  INTEGER NOT NULL DEFAULT 0,
     created_at      TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+CREATE TABLE IF NOT EXISTS boot_events (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    mac             TEXT NOT NULL,
+    state           TEXT NOT NULL,
+    detail          TEXT,
+    occurred_at     TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_boot_events_mac_time
+    ON boot_events(mac, occurred_at);
+CREATE INDEX IF NOT EXISTS idx_boot_events_time
+    ON boot_events(occurred_at);
 """
 
 
@@ -45,6 +57,17 @@ def _add_serial_console_column_if_missing(connection: sqlite3.Connection) -> Non
         )
     except sqlite3.OperationalError:
         pass
+
+
+@dataclass(frozen=True)
+class BootEvent:
+    """One row from the boot_events log."""
+
+    id: int
+    mac: str
+    state: str
+    detail: Optional[str]
+    occurred_at: str
 
 
 @dataclass(frozen=True)
@@ -139,6 +162,57 @@ class MachineRegistry:
                 "FROM machines ORDER BY created_at, mac"
             ).fetchall()
         return [_row_to_machine(r) for r in rows]
+
+    # ---- boot events ------------------------------------------------------
+
+    def log_boot_event(
+        self,
+        *,
+        mac: str,
+        state: str,
+        detail: Optional[str] = None,
+    ) -> None:
+        """Append-only log of state transitions reported by /status."""
+        normalised_mac = _normalise_mac(mac)
+        with self._write_lock, self._connect() as connection:
+            connection.execute(
+                "INSERT INTO boot_events (mac, state, detail) "
+                "VALUES (?, ?, ?)",
+                (normalised_mac, state, detail),
+            )
+
+    def recent_boot_events(
+        self, *, limit: int = 200, mac: Optional[str] = None,
+    ) -> list[BootEvent]:
+        """Return the latest `limit` events, newest first.
+
+        If `mac` is provided, filter to that MAC's events only.
+        """
+        with self._connect() as connection:
+            if mac is not None:
+                rows = connection.execute(
+                    "SELECT id, mac, state, detail, occurred_at "
+                    "FROM boot_events WHERE mac = ? "
+                    "ORDER BY occurred_at DESC, id DESC LIMIT ?",
+                    (_normalise_mac(mac), limit),
+                ).fetchall()
+            else:
+                rows = connection.execute(
+                    "SELECT id, mac, state, detail, occurred_at "
+                    "FROM boot_events "
+                    "ORDER BY occurred_at DESC, id DESC LIMIT ?",
+                    (limit,),
+                ).fetchall()
+        return [
+            BootEvent(
+                id=row["id"],
+                mac=row["mac"],
+                state=row["state"],
+                detail=row["detail"],
+                occurred_at=row["occurred_at"],
+            )
+            for row in rows
+        ]
 
     def remove(self, mac: str) -> bool:
         """Delete a machine. Returns True if a row was removed."""

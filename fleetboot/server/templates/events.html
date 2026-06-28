@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}fleetboot — boot events{% endblock %}
+{% block content %}
+<h1>Boot events
+  {% if mac_filter %}
+    <span class="muted">— {{ mac_filter }}</span>
+  {% endif %}
+</h1>
+
+{% if mac_filter %}
+<p><a href="/dashboard/events">show all machines</a></p>
+{% endif %}
+
+{% if events %}
+<table>
+  <thead>
+    <tr>
+      <th>When</th>
+      <th>MAC</th>
+      <th>State</th>
+      <th>Detail</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for e in events %}
+    <tr>
+      <td><span class="muted">{{ e.occurred_at }}</span></td>
+      <td>
+        <code>{{ e.mac }}</code>
+        {% if not mac_filter %}
+        &nbsp;<a class="muted" href="/dashboard/events?mac={{ e.mac }}">[only this]</a>
+        {% endif %}
+      </td>
+      <td><span class="state-{{ e.state }}">{{ e.state }}</span></td>
+      <td>{{ e.detail or "" }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+<p class="muted">Showing up to {{ limit }} events, newest first.</p>
+{% else %}
+<p class="muted">No boot events recorded yet.</p>
+{% endif %}
+{% endblock %}

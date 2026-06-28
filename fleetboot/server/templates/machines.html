@@ -35,6 +35,8 @@
       </td>
       <td><span class="muted">{{ m.created_at }}</span></td>
       <td class="row-actions">
+        <a href="/dashboard/events?mac={{ m.mac }}">history</a>
+        &nbsp;
         <form method="post" action="/dashboard/machines/{{ m.mac }}/delete"
               onsubmit="return confirm('Delete {{ m.mac }}?');">
           <button type="submit" class="danger">delete</button>

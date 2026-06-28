@@ -198,6 +198,13 @@ def create_app(
                 status_code=status.HTTP_409_CONFLICT,
                 detail=str(err),
             )
+        # Persist the event to the registry's boot-event log if one is
+        # attached. The session store is in-memory; this is what survives
+        # restarts and what the dashboard's history view reads.
+        if registry is not None:
+            registry.log_boot_event(
+                mac=session.mac, state=report.state.value, detail=report.detail,
+            )
         return StatusAcknowledgement(
             ok=True, mac=session.mac, state=report.state
         )

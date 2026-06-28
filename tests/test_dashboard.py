@@ -247,6 +247,64 @@ def test_save_profile_removes_empty_setup_chroot(dashboard_root: Path):
     assert not (profile_dir / "setup-chroot").exists()
 
 
+# ---- Events ------------------------------------------------------------
+
+
+def test_events_page_renders_logged_history(dashboard_root: Path):
+    """A boot event written by /status shows up on the events page."""
+    client = _client(dashboard_root)
+    # Mint a session and record a state. That triggers the side-effect
+    # the dashboard reads from the registry.
+    sessions = client.app.state.sessions
+    sessions.mint("aa:bb:cc:dd:ee:ff")
+    # Record via the API so the /status -> registry.log_boot_event hook
+    # fires (not by writing directly to the store).
+    session = list(sessions.active_sessions())[0]
+    response = client.post(
+        "/status",
+        json={"state": "network_up"},
+        headers={"Authorization": f"Bearer {session.token}"},
+    )
+    assert response.status_code == 200
+    response = client.post(
+        "/status",
+        json={"state": "nfs_mounted"},
+        headers={"Authorization": f"Bearer {session.token}"},
+    )
+    assert response.status_code == 200
+
+    page = client.get("/dashboard/events", headers=_auth_header())
+    assert page.status_code == 200
+    assert "aa:bb:cc:dd:ee:ff" in page.text
+    assert "network_up" in page.text
+    assert "nfs_mounted" in page.text
+
+
+def test_events_page_per_mac_filter(dashboard_root: Path):
+    client = _client(dashboard_root)
+    sessions = client.app.state.sessions
+    s1 = sessions.mint("aa:bb:cc:dd:ee:01")
+    s2 = sessions.mint("aa:bb:cc:dd:ee:02")
+    client.post(
+        "/status",
+        json={"state": "network_up"},
+        headers={"Authorization": f"Bearer {s1.token}"},
+    )
+    client.post(
+        "/status",
+        json={"state": "network_up"},
+        headers={"Authorization": f"Bearer {s2.token}"},
+    )
+
+    response = client.get(
+        "/dashboard/events?mac=aa:bb:cc:dd:ee:01", headers=_auth_header()
+    )
+    assert response.status_code == 200
+    assert "aa:bb:cc:dd:ee:01" in response.text
+    # The ?mac filter should hide events from the other MAC.
+    assert "aa:bb:cc:dd:ee:02" not in response.text
+
+
 # ---- Builds -------------------------------------------------------------
 
 
@@ -268,6 +326,37 @@ def test_trigger_build_unknown_profile_is_404(dashboard_root: Path):
     # An invalid profile name (containing dots/slashes) returns 400; an
     # unknown valid name returns 404.
     assert response.status_code == 404
+
+
+def test_concurrent_build_flashes_friendly_error(dashboard_root: Path):
+    """A second build submitted while the first is running redirects back
+    to the builds list with an `error=already-running` flash, not a 500."""
+    # Use a Makefile that takes long enough that the second submission
+    # arrives while the first is still in flight.
+    (dashboard_root / "Makefile").write_text(
+        ".PHONY: image\nimage:\n\tsleep 0.3\n"
+    )
+    client = _client(dashboard_root)
+    first = client.post(
+        "/dashboard/builds",
+        data={"profile": "default", "architecture": "amd64"},
+        headers=_auth_header(),
+        follow_redirects=False,
+    )
+    assert first.status_code == 303
+    second = client.post(
+        "/dashboard/builds",
+        data={"profile": "default", "architecture": "amd64"},
+        headers=_auth_header(),
+        follow_redirects=False,
+    )
+    assert second.status_code == 303
+    assert "error=already-running" in second.headers["location"]
+    # The page itself shows the flash.
+    page = client.get(
+        "/dashboard/builds?error=already-running", headers=_auth_header()
+    )
+    assert "already running" in page.text
 
 
 def test_trigger_build_runs_make_and_records_job(dashboard_root: Path):

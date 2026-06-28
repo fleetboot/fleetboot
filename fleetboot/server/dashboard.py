@@ -19,7 +19,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.templating import Jinja2Templates
 
-from fleetboot.server.build_jobs import BuildJobManager
+from fleetboot.server.build_jobs import BuildAlreadyRunningError, BuildJobManager
 from fleetboot.server.boot_sessions import BootSessionStore
 from fleetboot.server.registry import MachineRegistry
 
@@ -225,11 +225,30 @@ def build_dashboard_router(
     # ---- Builds ---------------------------------------------------------
 
     @router.get(
+        "/dashboard/events",
+        response_class=HTMLResponse,
+        dependencies=[Depends(require_admin)],
+    )
+    def list_events(
+        request: Request, mac: Optional[str] = None, limit: int = 200,
+    ) -> HTMLResponse:
+        # Clamp `limit` so a bogus query string can't trigger a huge fetch.
+        limit = max(1, min(int(limit), 1000))
+        events = registry.recent_boot_events(limit=limit, mac=mac)
+        return templates.TemplateResponse(
+            request,
+            "events.html",
+            {"events": events, "mac_filter": mac, "limit": limit},
+        )
+
+    @router.get(
         "/dashboard/builds",
         response_class=HTMLResponse,
         dependencies=[Depends(require_admin)],
     )
-    def list_builds(request: Request) -> HTMLResponse:
+    def list_builds(
+        request: Request, error: Optional[str] = None,
+    ) -> HTMLResponse:
         return templates.TemplateResponse(
             request,
             "builds.html",
@@ -237,6 +256,7 @@ def build_dashboard_router(
                 "jobs": builds.list_jobs(),
                 "running": builds.is_running(),
                 "profile_names": _list_profile_names(profiles_root),
+                "error": error,
             },
         )
 
@@ -256,7 +276,14 @@ def build_dashboard_router(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="profile not found",
             )
-        job = builds.start(profile=profile, architecture=architecture)
+        try:
+            job = builds.start(profile=profile, architecture=architecture)
+        except BuildAlreadyRunningError:
+            # Don't crash; surface as a flash on the builds page.
+            return RedirectResponse(
+                url="/dashboard/builds?error=already-running",
+                status_code=status.HTTP_303_SEE_OTHER,
+            )
         return RedirectResponse(
             url=f"/dashboard/builds/{job.job_id}",
             status_code=status.HTTP_303_SEE_OTHER,

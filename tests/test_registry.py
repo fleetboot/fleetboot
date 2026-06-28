@@ -94,6 +94,43 @@ def test_remove_unknown_returns_false(registry: MachineRegistry):
     assert registry.remove("aa:bb:cc:dd:ee:ff") is False
 
 
+def test_log_and_list_boot_events(registry: MachineRegistry):
+    registry.log_boot_event(mac="aa:bb:cc:dd:ee:ff", state="network_up")
+    registry.log_boot_event(
+        mac="aa:bb:cc:dd:ee:ff", state="user_logged_in", detail="alice"
+    )
+    events = registry.recent_boot_events()
+    assert len(events) == 2
+    # Newest first.
+    assert events[0].state == "user_logged_in"
+    assert events[0].detail == "alice"
+    assert events[1].state == "network_up"
+    assert events[1].detail is None
+
+
+def test_recent_boot_events_filters_by_mac(registry: MachineRegistry):
+    registry.log_boot_event(mac="aa:bb:cc:dd:ee:01", state="network_up")
+    registry.log_boot_event(mac="aa:bb:cc:dd:ee:02", state="network_up")
+    only_one = registry.recent_boot_events(mac="aa:bb:cc:dd:ee:01")
+    assert len(only_one) == 1
+    assert only_one[0].mac == "aa:bb:cc:dd:ee:01"
+
+
+def test_boot_events_normalise_mac_on_log(registry: MachineRegistry):
+    registry.log_boot_event(mac="AA-BB-CC-DD-EE-FF", state="network_up")
+    events = registry.recent_boot_events(mac="aa:bb:cc:dd:ee:ff")
+    assert len(events) == 1
+    assert events[0].mac == "aa:bb:cc:dd:ee:ff"
+
+
+def test_boot_events_respect_limit(registry: MachineRegistry):
+    for i in range(50):
+        registry.log_boot_event(
+            mac="aa:bb:cc:dd:ee:ff", state=f"state-{i}"
+        )
+    assert len(registry.recent_boot_events(limit=10)) == 10
+
+
 def test_registry_persists_across_instances(tmp_path: Path):
     """A second registry pointing at the same file sees the same rows."""
     path = tmp_path / "fleet.sqlite"
