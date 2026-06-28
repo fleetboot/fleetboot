@@ -121,21 +121,12 @@ def test_pam_hook_overlaid(recipe: dict):
     assert matches, "no overlay action installs the PAM session hook"
 
 
-def test_desktop_packages_present(recipe: dict):
-    """A booted machine must reach a graphical login. XFCE+lightdm gives us
-    that with a small footprint."""
-    apt_actions = _actions_of_type(recipe, "apt")
-    all_packages = {pkg for a in apt_actions for pkg in a.get("packages", [])}
-    required = {"xfce4", "lightdm", "lightdm-gtk-greeter", "xserver-xorg"}
-    missing = required - all_packages
-    assert not missing, f"recipe is missing desktop packages: {sorted(missing)}"
-
-
-def test_graphical_target_is_default(recipe: dict):
-    """The image must boot to the graphical interface, not multi-user."""
-    runs = _actions_of_type(recipe, "run")
-    commands = " \n".join((a.get("command", "") or "") for a in runs)
-    assert "systemctl set-default graphical.target" in commands
+# NB: The base recipe used to install xfce4 + lightdm directly and set
+# graphical.target as the default. With the profile-inheritance refactor
+# all of that moved out to image/profiles/xfce-desktop/ (and the other
+# desktop example profiles). The new shape is checked by tests in
+# tests/test_profile_examples.py: the base recipe MUST NOT install GUI
+# packages, and MUST set multi-user.target as the default.
 
 
 def test_recipe_consumes_profile_extras(recipe: dict):

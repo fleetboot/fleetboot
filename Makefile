@@ -75,7 +75,7 @@ lint:
 BUILD_VERSION := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 
 .PHONY: image
-image: stage-fleetboot-package
+image: stage-fleetboot-package resolve-profile
 	mkdir -p $(BUILD_DIR)
 	$(DEBOS) \
 	  --memory=4Gb \
@@ -91,6 +91,12 @@ image: stage-fleetboot-package
 stage-fleetboot-package:
 	rm -rf image/fleetboot_pkg
 	cp -r fleetboot image/fleetboot_pkg
+
+# Resolve the profile inheritance chain into image/profiles_resolved/
+# so debos can pick up a single staged directory. Fast (Python, fs ops).
+.PHONY: resolve-profile
+resolve-profile:
+	$(PYTHON) scripts/resolve-profile.py $(PROFILE)
 
 # Boot the built image in a QEMU UEFI guest and assert it reports network_up
 # to a stub server. Slow — explicit, not run by `make test`.
@@ -152,4 +158,4 @@ $(BUILD_DIR)/grub/grub.cfg: image/signed-boot/initial-grub.cfg
 # Wipe build artifacts and staged inputs.
 .PHONY: clean
 clean:
-	rm -rf $(BUILD_DIR) image/fleetboot_pkg
+	rm -rf $(BUILD_DIR) image/fleetboot_pkg image/profiles_resolved

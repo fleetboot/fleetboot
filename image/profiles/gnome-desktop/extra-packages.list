@@ -1,0 +1,12 @@
+# GNOME 3 + GDM display manager.
+gnome-shell
+gnome-session
+gdm3
+gnome-terminal
+gnome-control-center
+nautilus
+xserver-xorg
+xkb-data
+pipewire
+wireplumber
+pipewire-pulse

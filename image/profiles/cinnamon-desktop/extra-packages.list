@@ -1,0 +1,10 @@
+# Cinnamon desktop + LightDM display manager.
+cinnamon-desktop-environment
+lightdm
+lightdm-gtk-greeter
+gnome-terminal
+xserver-xorg
+xkb-data
+pipewire
+wireplumber
+pipewire-pulse

@@ -1,0 +1,16 @@
+# Nvidia GPU support — proprietary driver from Debian non-free.
+#
+# The trixie `non-free` component must be enabled in apt sources for
+# this profile to install. fleetboot's default debootstrap uses
+# `main contrib non-free non-free-firmware`, so this works out of the
+# box.
+#
+# The kernel module is rebuilt for the running kernel via DKMS; that
+# happens automatically on dpkg install, including inside the chroot
+# build.
+nvidia-driver
+nvidia-settings
+firmware-misc-nonfree
+# Mesa is still useful as a fallback (e.g. for software rendering on
+# initial boot before the nvidia module loads).
+mesa-utils

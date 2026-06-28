@@ -1,0 +1,13 @@
+# XFCE desktop + LightDM display manager.
+# The base recipe leaves the image headless; this profile adds everything
+# needed to land at a graphical login screen.
+xfce4
+xfce4-goodies
+lightdm
+lightdm-gtk-greeter
+xserver-xorg
+xkb-data
+# Audio. pipewire is the modern default on Debian trixie.
+pipewire
+wireplumber
+pipewire-pulse

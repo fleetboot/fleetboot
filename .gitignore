@@ -20,3 +20,4 @@ image/custom/overlay/*
 image/custom/hooks/*
 !image/custom/hooks/.gitkeep
 fake-scratch.img.*
+image/profiles_resolved/

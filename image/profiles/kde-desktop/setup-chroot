@@ -1,0 +1,3 @@
+#!/bin/sh
+set -eu
+systemctl set-default graphical.target

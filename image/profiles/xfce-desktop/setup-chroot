@@ -1,0 +1,6 @@
+#!/bin/sh
+# Make the image boot into the graphical target. The base recipe leaves
+# the default at multi-user.target (text console) — a desktop profile
+# needs to opt in.
+set -eu
+systemctl set-default graphical.target

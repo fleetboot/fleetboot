@@ -1,0 +1,10 @@
+# KDE Plasma + SDDM display manager.
+kde-plasma-desktop
+sddm
+konsole
+dolphin
+xserver-xorg
+xkb-data
+pipewire
+wireplumber
+pipewire-pulse

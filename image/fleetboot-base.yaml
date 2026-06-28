@@ -78,21 +78,13 @@ actions:
       # autofs lets us mount /home/<user> on demand, using the user's
       # Kerberos credential cache as the auth context.
       - autofs
-      # Basic XFCE desktop and lightdm display manager — what a student
-      # sits in front of. lightdm-gtk-greeter gives the login screen and
-      # the fleetboot-login-ready unit a display-manager.service to chain
-      # after. Profiles can stack additional apps on top of this.
-      - xfce4
-      - xfce4-goodies
-      - lightdm
-      - lightdm-gtk-greeter
-      - xserver-xorg
-      # The default keyboard layout is configured non-interactively below.
-      - xkb-data
-      # Sound (a basic XFCE expectation; small footprint).
-      - pipewire
-      - wireplumber
-      - pipewire-pulse
+      # No desktop, display manager, audio stack, or graphics drivers
+      # in the base image. The default profile inherits this thin Debian
+      # and adds nothing; desktop profiles (xfce-desktop, gnome-desktop,
+      # kde-desktop, cinnamon-desktop) add the GUI; graphics profiles
+      # (amd-graphics, nvidia-graphics) add vendor-specific stacks.
+      # Real-world profiles like `school` chain a desktop into the mix:
+      # `school` declares `parent: xfce-desktop` and adds LibreWolf on top.
 
   # ---------- admin customisation: pre-build hook ----------
 
@@ -201,13 +193,13 @@ actions:
       if systemctl list-unit-files home.mount >/dev/null 2>&1; then
         systemctl enable fleetboot-nfs-mounted.service
       fi
-      # lightdm is in the apt list so display-manager.service is a symlink
-      # to lightdm.service: the login-ready unit always enables and fires
-      # when the greeter is up.
+      # login-ready unit is enabled unconditionally. If the profile didn't
+      # install a display manager, the unit's Requires=display-manager
+      # will skip it — that's the right behaviour for headless profiles.
       systemctl enable fleetboot-login-ready.service
-      # Boot to the graphical interface by default — lightdm postinst usually
-      # does this but we make it explicit so the recipe is self-contained.
-      systemctl set-default graphical.target
+      # Thin default: boot to a text console. Desktop profiles flip this
+      # to graphical.target from their setup-chroot.
+      systemctl set-default multi-user.target
 
   - action: run
     description: "Wire the Fleetboot PAM session hook into common-session"
@@ -227,7 +219,7 @@ actions:
 
   - action: overlay
     description: "Stage the {{ $profile }} profile into the image"
-    source: ./profiles/{{ $profile }}
+    source: ./profiles_resolved/{{ $profile }}
     destination: /tmp/fleetboot-profile
 
   - action: run

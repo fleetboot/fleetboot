@@ -1,0 +1,14 @@
+# AMD/Radeon GPU support.
+#
+# The amdgpu kernel driver is in linux-image by default; this profile
+# adds the userspace Mesa drivers (GL + Vulkan) and the firmware blobs
+# that newer Radeon GPUs need to come up. firmware-amd-graphics lives
+# in Debian's `non-free-firmware` component, which trixie enables by
+# default.
+mesa-vulkan-drivers
+mesa-utils
+libgl1-mesa-dri
+firmware-amd-graphics
+# Optional but useful for diagnosing display issues from a serial
+# console while bringing a new machine up.
+radeontop
