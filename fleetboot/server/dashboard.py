@@ -112,6 +112,7 @@ def build_dashboard_router(
         machines = registry.list_all()
         states_by_mac = _states_by_mac(sessions)
         latest_versions = _latest_versions_by_artefact(boot_dir)
+        last_seen = _format_last_seen(sessions.last_seen_by_mac())
         return templates.TemplateResponse(
             request,
             "machines.html",
@@ -121,6 +122,7 @@ def build_dashboard_router(
                 "profile_names": _list_profile_names(profiles_root),
                 "auto_refresh": _clamp_refresh(refresh),
                 "latest_versions": latest_versions,
+                "last_seen": last_seen,
             },
         )
 
@@ -419,6 +421,49 @@ def _states_by_mac(sessions: BootSessionStore) -> dict[str, str]:
         if session.latest_state is not None:
             out[session.mac] = session.latest_state.value
     return out
+
+
+# Stale threshold: the in-image heartbeat fires every 2 min, so anything
+# older than three intervals is "really gone, not just a missed tick".
+_STALE_AFTER_SECONDS = 6 * 60
+
+
+def _format_last_seen(
+    raw: dict[str, str], now=None,
+) -> dict[str, dict[str, object]]:
+    """Turn the {mac: ISO timestamp} map from BootSessionStore into a
+    template-friendly {mac: {"label": "5m ago", "stale": False}}."""
+    from datetime import datetime, timezone
+
+    current = now if now is not None else datetime.now(timezone.utc)
+    out: dict[str, dict[str, object]] = {}
+    for mac, raw_ts in raw.items():
+        try:
+            # SQLite's datetime('now') returns "YYYY-MM-DD HH:MM:SS" in UTC.
+            parsed = datetime.fromisoformat(raw_ts).replace(tzinfo=timezone.utc)
+        except ValueError:
+            continue
+        delta = current - parsed
+        seconds = max(0, int(delta.total_seconds()))
+        out[mac] = {
+            "label": _humanise_seconds(seconds),
+            "stale": seconds >= _STALE_AFTER_SECONDS,
+        }
+    return out
+
+
+def _humanise_seconds(seconds: int) -> str:
+    """Compact relative-time formatter — 's', 'm', 'h', 'd'."""
+    if seconds < 60:
+        return f"{seconds}s ago"
+    minutes = seconds // 60
+    if minutes < 60:
+        return f"{minutes}m ago"
+    hours = minutes // 60
+    if hours < 48:
+        return f"{hours}h ago"
+    days = hours // 24
+    return f"{days}d ago"
 
 
 def _latest_versions_by_artefact(boot_dir: Optional[Path]) -> dict[str, str]:

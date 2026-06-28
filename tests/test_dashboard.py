@@ -162,6 +162,57 @@ def test_machines_page_colours_version_current_and_stale(
     assert "version-stale" in page
 
 
+def test_machines_page_shows_last_seen_and_stale_indicator(
+    dashboard_root: Path,
+):
+    """Heartbeat-style timestamps surface as 'N min ago'; older than the
+    stale threshold gets the version-stale class."""
+    from datetime import datetime, timedelta, timezone
+
+    from fleetboot.boot_states import BootState
+    from fleetboot.server.boot_sessions import BootSessionStore
+
+    sessions_db = dashboard_root / "sessions.sqlite"
+    sessions = BootSessionStore(sessions_db)
+    registry = MachineRegistry(dashboard_root / "machines.sqlite")
+    registry.enroll(
+        mac="aa:bb:cc:dd:ee:01", profile_name="default",
+        architecture="x86_64", platform="efi",
+    )
+    registry.enroll(
+        mac="aa:bb:cc:dd:ee:02", profile_name="default",
+        architecture="x86_64", platform="efi",
+    )
+    # Mint + record state for both, so latest_state_at is "now-ish".
+    a = sessions.mint("aa:bb:cc:dd:ee:01")
+    b = sessions.mint("aa:bb:cc:dd:ee:02")
+    sessions.record_state(a.token, BootState.NETWORK_UP)
+    sessions.record_state(b.token, BootState.LOGIN_READY)
+    # Backdate one of them to simulate a machine that went silent. SQLite
+    # stores `datetime('now')`, so we patch the row directly.
+    import sqlite3
+    long_ago = (datetime.now(timezone.utc) - timedelta(hours=2)).strftime(
+        "%Y-%m-%d %H:%M:%S"
+    )
+    with sqlite3.connect(sessions_db) as connection:
+        connection.execute(
+            "UPDATE boot_sessions SET latest_state_at = ? WHERE token = ?",
+            (long_ago, b.token),
+        )
+    app = create_app(
+        sessions=sessions,
+        registry=registry,
+        admin_secret=ADMIN,
+        dashboard_repo_root=dashboard_root,
+    )
+    client = TestClient(app)
+    page = client.get("/dashboard", headers=_auth_header()).text
+    # Fresh row should show something like "0s ago"/"1s ago"; stale row
+    # should use the version-stale class.
+    assert "ago" in page
+    assert "version-stale" in page
+
+
 def test_root_path_redirects_to_dashboard(dashboard_root: Path):
     client = _client(dashboard_root)
     response = client.get("/", headers=_auth_header(), follow_redirects=False)

@@ -95,6 +95,29 @@ def test_end_removes_session(db_path: Path):
     assert store.lookup(session.token) is None
 
 
+def test_last_seen_by_mac_returns_latest_timestamp_per_mac(db_path: Path):
+    store = BootSessionStore(db_path)
+    a = store.mint("aa:bb:cc:dd:ee:01")
+    b = store.mint("aa:bb:cc:dd:ee:02")
+    store.record_state(a.token, BootState.NETWORK_UP)
+    store.record_state(b.token, BootState.LOGIN_READY)
+    seen = store.last_seen_by_mac()
+    assert sorted(seen.keys()) == ["aa:bb:cc:dd:ee:01", "aa:bb:cc:dd:ee:02"]
+    # Both values must be parseable as SQLite-style ISO timestamps.
+    from datetime import datetime
+    for mac, ts in seen.items():
+        # Should not raise.
+        datetime.fromisoformat(ts)
+
+
+def test_last_seen_skips_never_reported_sessions(db_path: Path):
+    """Sessions that have only been minted (no state report) shouldn't
+    populate last_seen — there's nothing to relativise."""
+    store = BootSessionStore(db_path)
+    store.mint("aa:bb:cc:dd:ee:01")  # never reports
+    assert store.last_seen_by_mac() == {}
+
+
 def test_active_sessions_lists_persisted_rows(db_path: Path):
     store = BootSessionStore(db_path)
     store.mint("aa:bb:cc:dd:ee:01")

@@ -210,6 +210,28 @@ class BootSessionStore:
             else:
                 self._sessions.pop(token, None)
 
+    def last_seen_by_mac(self) -> dict[str, str]:
+        """Return {mac: ISO-8601 last_state_at} for every machine that has
+        ever reported. Picks the most recent session per MAC. Used by the
+        dashboard to show "N min ago" and to flag stale rows.
+        """
+        result: dict[str, str] = {}
+        if self._path is not None:
+            with self._connect() as connection:
+                rows = connection.execute(
+                    "SELECT mac, MAX(latest_state_at) AS seen "
+                    "FROM boot_sessions "
+                    "WHERE latest_state_at IS NOT NULL "
+                    "GROUP BY mac"
+                ).fetchall()
+            for row in rows:
+                if row["seen"]:
+                    result[row["mac"]] = row["seen"]
+            return result
+        # In-memory mode keeps no timestamps; tests that need this should
+        # use persistent mode.
+        return result
+
     def active_sessions(self) -> list[BootSession]:
         """Snapshot of all currently active sessions (for fleet views/tests)."""
         if self._path is not None:

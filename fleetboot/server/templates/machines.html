@@ -21,6 +21,7 @@
       <th>Source</th>
       <th>Build version</th>
       <th>Latest state</th>
+      <th>Last seen</th>
       <th></th>
     </tr>
   </thead>
@@ -62,6 +63,18 @@
         {% set state = states_by_mac.get(m.mac) %}
         {% if state %}
           <span class="state-{{ state }}">{{ state }}</span>
+        {% else %}
+          <span class="muted">—</span>
+        {% endif %}
+      </td>
+      <td>
+        {% set seen = last_seen.get(m.mac) %}
+        {% if seen %}
+          {% if seen.stale %}
+            <span class="version-stale" title="No heartbeat for over 6 min — machine may be offline">{{ seen.label }}</span>
+          {% else %}
+            <span class="muted">{{ seen.label }}</span>
+          {% endif %}
         {% else %}
           <span class="muted">—</span>
         {% endif %}
