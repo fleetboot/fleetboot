@@ -19,6 +19,7 @@
       <th>Profile</th>
       <th>Arch</th>
       <th>Source</th>
+      <th>Build version</th>
       <th>Latest state</th>
       <th></th>
     </tr>
@@ -41,6 +42,20 @@
           <span class="muted">manual</span>
         {% else %}
           <span class="state-network_up">{{ m.enrolled_by }}</span>
+        {% endif %}
+      </td>
+      <td>
+        {% set latest = latest_versions.get(m.profile_name ~ "/" ~ m.architecture) %}
+        {% if m.boot_version %}
+          {% if latest and m.boot_version == latest %}
+            <span class="version-current" title="Up to date with {{ latest }}">{{ m.boot_version }}</span>
+          {% elif latest %}
+            <span class="version-stale" title="Latest is {{ latest }} — reboot to update">{{ m.boot_version }}</span>
+          {% else %}
+            <span class="muted" title="No sidecar version found in build/">{{ m.boot_version }}</span>
+          {% endif %}
+        {% else %}
+          <span class="muted">—</span>
         {% endif %}
       </td>
       <td>

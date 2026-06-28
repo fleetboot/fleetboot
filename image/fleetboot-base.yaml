@@ -24,6 +24,7 @@
 {{ $suite := or .suite "trixie" }}
 {{ $mirror := or .mirror "http://deb.debian.org/debian" }}
 {{ $profile := or .profile "default" }}
+{{ $build_version := or .build_version "unspecified" }}
 {{ $output := or .output (printf "fleetboot-%s-%s.squashfs" $profile $architecture) }}
 
 architecture: {{ $architecture }}
@@ -115,6 +116,14 @@ actions:
     # not visible inside fakemachine.)
     source: ./fleetboot_pkg
     destination: /usr/lib/python3/dist-packages/fleetboot
+
+  - action: run
+    description: "Stamp the image build version into /etc/fleetboot/build-version"
+    chroot: true
+    command: |
+      mkdir -p /etc/fleetboot
+      printf '%s\n' '{{ $build_version }}' > /etc/fleetboot/build-version
+      chmod 0644 /etc/fleetboot/build-version
 
   - action: overlay
     description: "Install Fleetboot systemd boot-state units"

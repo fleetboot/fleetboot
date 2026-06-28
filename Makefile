@@ -54,7 +54,7 @@ run-server:
 # Run alongside `make run-server`.
 .PHONY: boot-dev-vm
 boot-dev-vm:
-	sg libvirt -c '$(PYTHON) -m tests.dev.boot_dev_vm'
+	sg libvirt -c 'cd $(CURDIR) && $(PYTHON) -m tests.dev.boot_dev_vm $(ARGS)'
 
 .PHONY: lint
 lint:
@@ -67,6 +67,13 @@ lint:
 # fakemachine only bind-mounts paths under the recipe's parent directory, so
 # we stage the reporter Python package into image/ before the build. The
 # staged copy is rebuilt every run and removed by `make clean`.
+# Each squashfs gets a unique BUILD_VERSION stamp written into
+# /etc/fleetboot/build-version inside the image, and into a sidecar at
+# $(BUILD_DIR)/fleetboot-$(PROFILE)-$(ARCH).version. The dashboard reads
+# the sidecar to know "latest"; the booted machine reports the in-image
+# value back via /status. Mismatch => orange row, time to reboot.
+BUILD_VERSION := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
+
 .PHONY: image
 image: stage-fleetboot-package
 	mkdir -p $(BUILD_DIR)
@@ -76,7 +83,9 @@ image: stage-fleetboot-package
 	  --artifactdir=$(BUILD_DIR) \
 	  --template-var=architecture:$(ARCH) \
 	  --template-var=profile:$(PROFILE) \
+	  --template-var=build_version:$(BUILD_VERSION) \
 	  $(RECIPE)
+	echo "$(BUILD_VERSION)" > $(BUILD_DIR)/fleetboot-$(PROFILE)-$(ARCH).version
 
 .PHONY: stage-fleetboot-package
 stage-fleetboot-package:

@@ -124,6 +124,23 @@ def test_update_hostname_ignores_whitespace_only_input(registry: MachineRegistry
     assert machine.hostname is None
 
 
+def test_update_boot_version_persists(registry: MachineRegistry):
+    registry.enroll(
+        mac="aa:bb:cc:dd:ee:ff", profile_name="default",
+        architecture="x86_64", platform="efi",
+    )
+    registry.update_boot_version("aa:bb:cc:dd:ee:ff", "2026-06-28T22:00:00Z")
+    machine = registry.lookup("aa:bb:cc:dd:ee:ff")
+    assert machine is not None
+    assert machine.boot_version == "2026-06-28T22:00:00Z"
+    assert machine.boot_version_seen_at is not None
+
+
+def test_update_boot_version_is_noop_for_unknown_mac(registry: MachineRegistry):
+    registry.update_boot_version("aa:bb:cc:dd:ee:ff", "vX")  # no raise
+    assert registry.lookup("aa:bb:cc:dd:ee:ff") is None
+
+
 def test_enroll_tracks_provenance(registry: MachineRegistry):
     """enrolled_by defaults to 'manual'; passing rule:<name> keeps it."""
     m1 = registry.enroll(

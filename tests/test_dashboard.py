@@ -120,6 +120,48 @@ def test_events_page_supports_refresh(dashboard_root: Path):
     assert '<meta http-equiv="refresh" content="5">' in response.text
 
 
+def test_machines_page_colours_version_current_and_stale(
+    dashboard_root: Path,
+):
+    """`build/<artefact>.version` sidecar is the source of truth for 'latest'.
+
+    A machine whose reported boot_version matches the sidecar shows
+    `version-current` (green). Anything else shows `version-stale` (orange).
+    """
+    build_dir = dashboard_root / "build"
+    build_dir.mkdir()
+    (build_dir / "fleetboot-school-amd64.version").write_text(
+        "2026-06-28T22:00:00Z\n"
+    )
+    registry = MachineRegistry(dashboard_root / "machines.sqlite")
+    app = create_app(
+        sessions=BootSessionStore(),
+        registry=registry,
+        admin_secret=ADMIN,
+        boot_dir=build_dir,
+        dashboard_repo_root=dashboard_root,
+    )
+    client = TestClient(app)
+    registry.enroll(
+        mac="aa:bb:cc:dd:ee:01", profile_name="school",
+        architecture="amd64", platform="efi",
+    )
+    registry.enroll(
+        mac="aa:bb:cc:dd:ee:02", profile_name="school",
+        architecture="amd64", platform="efi",
+    )
+    registry.update_boot_version(
+        "aa:bb:cc:dd:ee:01", "2026-06-28T22:00:00Z",
+    )
+    registry.update_boot_version(
+        "aa:bb:cc:dd:ee:02", "2026-06-27T10:00:00Z",
+    )
+
+    page = client.get("/dashboard", headers=_auth_header()).text
+    assert "version-current" in page
+    assert "version-stale" in page
+
+
 def test_root_path_redirects_to_dashboard(dashboard_root: Path):
     client = _client(dashboard_root)
     response = client.get("/", headers=_auth_header(), follow_redirects=False)

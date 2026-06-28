@@ -64,6 +64,24 @@ def _virsh(*args: str, check: bool = True) -> subprocess.CompletedProcess:
     return subprocess.run(cmd, check=check, capture_output=True, text=True)
 
 
+def _spice_port(vm_name: str) -> Optional[int]:
+    """Query libvirt for the autoport'd SPICE display port. Returns None if
+    SPICE isn't configured or hasn't bound yet."""
+    try:
+        result = _virsh("domdisplay", vm_name)
+    except subprocess.CalledProcessError:
+        return None
+    # Format like `spice://127.0.0.1:5900`.
+    for line in result.stdout.splitlines():
+        line = line.strip()
+        if line.startswith("spice://"):
+            try:
+                return int(line.rsplit(":", 1)[1])
+            except (ValueError, IndexError):
+                return None
+    return None
+
+
 def _vm_name(mac: str) -> str:
     """A name that's unique per MAC but legible."""
     tail = mac.replace(":", "")[-6:]
@@ -209,18 +227,36 @@ def main(argv: list[str]) -> int:
     print(f"dashboard:     {args.fleetboot_url}/dashboard")
     viewer_proc: Optional[subprocess.Popen] = None
     if args.display:
-        # Spawn virt-viewer attached to the libvirt domain; SPICE is on
-        # an autoport so we just hand it the domain name and let it ask
-        # libvirt for the URI. Inherits $DISPLAY from the caller's env.
-        try:
-            viewer_proc = subprocess.Popen(
-                ["virt-viewer", "--connect", "qemu:///system", vm_name],
-            )
-            print(f"virt-viewer:   pid {viewer_proc.pid}")
-        except FileNotFoundError:
+        spice_port = _spice_port(vm_name)
+        if spice_port:
+            print(f"SPICE port:    {spice_port} (bound 127.0.0.1)")
             print(
-                "virt-viewer not found; install it to view the display",
-                file=sys.stderr,
+                f"SSH tunnel:    ssh -L {spice_port}:127.0.0.1:{spice_port} "
+                "<this-host>"
+            )
+            print(
+                f"then on your laptop:  remote-viewer "
+                f"spice://127.0.0.1:{spice_port}"
+            )
+        else:
+            print("SPICE port:    (not yet bound; try again in a second)")
+        # Spawn virt-viewer if there's an X display to render to. Without
+        # one, the SSH workflow above is the path.
+        import os as _os
+        if _os.environ.get("DISPLAY"):
+            try:
+                viewer_proc = subprocess.Popen(
+                    ["virt-viewer", "--connect", "qemu:///system", vm_name],
+                )
+                print(f"virt-viewer:   pid {viewer_proc.pid}")
+            except FileNotFoundError:
+                print(
+                    "virt-viewer not found; use the SSH tunnel above",
+                    file=sys.stderr,
+                )
+        else:
+            print(
+                "(no $DISPLAY on this host — use the SSH tunnel above)"
             )
     print()
     print("press Ctrl-C to power off and clean up")

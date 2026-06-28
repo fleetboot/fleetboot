@@ -51,6 +51,24 @@ def _current_hostname() -> Optional[str]:
     return candidate
 
 
+BOOT_VERSION_PATH = "/etc/fleetboot/build-version"
+
+
+def _read_boot_version() -> Optional[str]:
+    """Read the image build version stamp written by `make image`.
+
+    The file is one line; everything after the first newline is ignored
+    so future format extensions (signature, profile name, etc.) don't
+    break older reporters.
+    """
+    try:
+        with open(BOOT_VERSION_PATH, "r", encoding="utf-8") as handle:
+            line = handle.readline().strip()
+    except OSError:
+        return None
+    return line or None
+
+
 def report_state(
     state: BootState,
     detail: Optional[str] = None,
@@ -74,6 +92,11 @@ def report_state(
     hostname = _current_hostname()
     if hostname:
         payload["hostname"] = hostname
+    # Include the image build version so the dashboard can tell whether
+    # this machine is running the most recently published squashfs.
+    boot_version = _read_boot_version()
+    if boot_version:
+        payload["boot_version"] = boot_version
     url = urljoin(effective_settings.server_url, STATUS_PATH)
     headers = {"Authorization": f"Bearer {effective_settings.boot_token}"}
 

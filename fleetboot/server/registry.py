@@ -33,6 +33,8 @@ CREATE TABLE IF NOT EXISTS machines (
     enrolled_by     TEXT NOT NULL DEFAULT 'manual',
     hostname        TEXT,
     hostname_seen_at TEXT,
+    boot_version    TEXT,
+    boot_version_seen_at TEXT,
     created_at      TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -96,6 +98,18 @@ def _add_hostname_columns_if_missing(connection: sqlite3.Connection) -> None:
             pass
 
 
+def _add_boot_version_columns_if_missing(connection: sqlite3.Connection) -> None:
+    """Migration: per-boot build version tracking arrived later still."""
+    for column_def in (
+        "ALTER TABLE machines ADD COLUMN boot_version TEXT",
+        "ALTER TABLE machines ADD COLUMN boot_version_seen_at TEXT",
+    ):
+        try:
+            connection.execute(column_def)
+        except sqlite3.OperationalError:
+            pass
+
+
 @dataclass(frozen=True)
 class BootEvent:
     """One row from the boot_events log."""
@@ -127,6 +141,12 @@ class Machine:
     # Useful for human-readable lookups in the dashboard.
     hostname: Optional[str] = None
     hostname_seen_at: Optional[str] = None
+    # The image build version string the machine is currently running,
+    # written into the image at build time. The dashboard compares this
+    # against the sidecar in build/ to colour rows green (up to date) or
+    # orange (stale; needs reboot to pick up the new image).
+    boot_version: Optional[str] = None
+    boot_version_seen_at: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -168,6 +188,7 @@ class MachineRegistry:
             _add_serial_console_column_if_missing(connection)
             _add_enrolled_by_column_if_missing(connection)
             _add_hostname_columns_if_missing(connection)
+            _add_boot_version_columns_if_missing(connection)
             # WAL gives us safer concurrent reads without sacrificing
             # durability on writes. Harmless on in-memory databases.
             try:
@@ -236,9 +257,25 @@ class MachineRegistry:
                 (cleaned, normalised_mac),
             )
 
+    def update_boot_version(self, mac: str, boot_version: str) -> None:
+        """Stamp the image build version the machine is currently running."""
+        normalised_mac = _normalise_mac(mac)
+        cleaned = (boot_version or "").strip()
+        if not cleaned:
+            return
+        with self._write_lock, self._connect() as connection:
+            connection.execute(
+                "UPDATE machines "
+                "SET boot_version = ?, "
+                "    boot_version_seen_at = datetime('now') "
+                "WHERE mac = ?",
+                (cleaned, normalised_mac),
+            )
+
     _MACHINE_COLUMNS = (
         "mac", "profile_name", "architecture", "platform",
         "serial_console", "enrolled_by", "hostname", "hostname_seen_at",
+        "boot_version", "boot_version_seen_at",
         "created_at",
     )
 
@@ -470,5 +507,7 @@ def _row_to_machine(row: sqlite3.Row) -> Machine:
         enrolled_by=row["enrolled_by"] if row["enrolled_by"] else "manual",
         hostname=row["hostname"],
         hostname_seen_at=row["hostname_seen_at"],
+        boot_version=row["boot_version"],
+        boot_version_seen_at=row["boot_version_seen_at"],
         created_at=row["created_at"],
     )

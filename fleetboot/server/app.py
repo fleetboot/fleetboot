@@ -80,6 +80,15 @@ class StatusReport(BaseModel):
         default=None, max_length=253,
         description="Hostname as the booted image sees it.",
     )
+    # Build version of the squashfs the machine is currently running.
+    # The reporter reads it from /etc/fleetboot/build-version. The
+    # dashboard colours rows green when this matches the latest sidecar
+    # version on the server, orange when it doesn't (machine needs a
+    # reboot to pick up the new image).
+    boot_version: Optional[str] = Field(
+        default=None, max_length=128,
+        description="Image build version stamp from /etc/fleetboot/build-version.",
+    )
 
 
 class StatusAcknowledgement(BaseModel):
@@ -258,6 +267,10 @@ def create_app(
             if report.hostname:
                 registry.update_hostname(
                     mac=session.mac, hostname=report.hostname,
+                )
+            if report.boot_version:
+                registry.update_boot_version(
+                    mac=session.mac, boot_version=report.boot_version,
                 )
         return StatusAcknowledgement(
             ok=True, mac=session.mac, state=report.state
@@ -556,6 +569,7 @@ def create_app(
             profiles_root=dashboard_repo_root / "image" / "profiles",
             admin_secret=admin_secret,
             builds=builds,
+            boot_dir=boot_dir,
         )
         app.include_router(dashboard_router)
         app.state.builds = builds

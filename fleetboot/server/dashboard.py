@@ -79,6 +79,7 @@ def build_dashboard_router(
     profiles_root: Path,
     admin_secret: str,
     builds: BuildJobManager,
+    boot_dir: Optional[Path] = None,
 ) -> APIRouter:
     """Construct the dashboard router and its template environment."""
 
@@ -110,6 +111,7 @@ def build_dashboard_router(
     ) -> HTMLResponse:
         machines = registry.list_all()
         states_by_mac = _states_by_mac(sessions)
+        latest_versions = _latest_versions_by_artefact(boot_dir)
         return templates.TemplateResponse(
             request,
             "machines.html",
@@ -118,6 +120,7 @@ def build_dashboard_router(
                 "states_by_mac": states_by_mac,
                 "profile_names": _list_profile_names(profiles_root),
                 "auto_refresh": _clamp_refresh(refresh),
+                "latest_versions": latest_versions,
             },
         )
 
@@ -415,6 +418,33 @@ def _states_by_mac(sessions: BootSessionStore) -> dict[str, str]:
     for session in sessions.active_sessions():
         if session.latest_state is not None:
             out[session.mac] = session.latest_state.value
+    return out
+
+
+def _latest_versions_by_artefact(boot_dir: Optional[Path]) -> dict[str, str]:
+    """Scan boot_dir for fleetboot-<profile>-<arch>.version sidecars.
+
+    Returns a {"<profile>/<arch>": "<version>"} map. The machines template
+    looks up its own row's profile+arch and compares.
+    """
+    if boot_dir is None or not boot_dir.is_dir():
+        return {}
+    out: dict[str, str] = {}
+    for path in boot_dir.glob("fleetboot-*-*.version"):
+        # Filename shape: fleetboot-<profile>-<arch>.version
+        stem = path.stem  # "fleetboot-<profile>-<arch>"
+        parts = stem.split("-")
+        if len(parts) < 3 or parts[0] != "fleetboot":
+            continue
+        arch = parts[-1]
+        # Profile may itself contain a hyphen, so reassemble the middle.
+        profile = "-".join(parts[1:-1])
+        try:
+            version = path.read_text().strip().splitlines()[0]
+        except (OSError, IndexError):
+            continue
+        if version:
+            out[f"{profile}/{arch}"] = version
     return out
 
 
