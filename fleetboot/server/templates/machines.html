@@ -14,24 +14,35 @@
 <table>
   <thead>
     <tr>
+      <th>Hostname</th>
       <th>MAC</th>
       <th>Profile</th>
       <th>Arch</th>
-      <th>Platform</th>
-      <th>Serial</th>
+      <th>Source</th>
       <th>Latest state</th>
-      <th>Enrolled at</th>
       <th></th>
     </tr>
   </thead>
   <tbody>
     {% for m in machines %}
     <tr>
+      <td>
+        {% if m.hostname %}
+          <strong>{{ m.hostname }}</strong>
+        {% else %}
+          <span class="muted">—</span>
+        {% endif %}
+      </td>
       <td><code>{{ m.mac }}</code></td>
       <td>{{ m.profile_name }}</td>
-      <td>{{ m.architecture }}</td>
-      <td>{{ m.platform }}</td>
-      <td>{{ "yes" if m.serial_console else "—" }}</td>
+      <td>{{ m.architecture }}/{{ m.platform }}</td>
+      <td>
+        {% if m.enrolled_by == "manual" %}
+          <span class="muted">manual</span>
+        {% else %}
+          <span class="state-network_up">{{ m.enrolled_by }}</span>
+        {% endif %}
+      </td>
       <td>
         {% set state = states_by_mac.get(m.mac) %}
         {% if state %}
@@ -40,7 +51,6 @@
           <span class="muted">—</span>
         {% endif %}
       </td>
-      <td><span class="muted">{{ m.created_at }}</span></td>
       <td class="row-actions">
         <a href="/dashboard/events?mac={{ m.mac }}">history</a>
         &nbsp;

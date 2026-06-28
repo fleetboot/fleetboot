@@ -29,6 +29,31 @@ def test_valid_report_records_state():
     assert refreshed.latest_state == BootState.NETWORK_UP
 
 
+def test_hostname_field_is_persisted_on_registered_machine(tmp_path):
+    """A hostname in the body lands on the machines.hostname column."""
+    from pathlib import Path
+    from fleetboot.server.registry import MachineRegistry
+
+    store = BootSessionStore()
+    registry = MachineRegistry(Path(tmp_path) / "machines.sqlite")
+    registry.enroll(
+        mac="aa:bb:cc:dd:ee:ff", profile_name="default",
+        architecture="x86_64", platform="efi",
+    )
+    app = create_app(sessions=store, registry=registry)
+    client = TestClient(app)
+    session = store.mint("aa:bb:cc:dd:ee:ff")
+    response = client.post(
+        "/status",
+        json={"state": "network_up", "hostname": "lab-pc-01"},
+        headers={"Authorization": f"Bearer {session.token}"},
+    )
+    assert response.status_code == 200
+    machine = registry.lookup("aa:bb:cc:dd:ee:ff")
+    assert machine is not None
+    assert machine.hostname == "lab-pc-01"
+
+
 def test_user_logged_in_detail_is_recorded():
     client, store = _client_and_store()
     session = store.mint("aa:bb:cc:dd:ee:ff")

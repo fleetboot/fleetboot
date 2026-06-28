@@ -228,6 +228,71 @@ def build_dashboard_router(
     # ---- Builds ---------------------------------------------------------
 
     @router.get(
+        "/dashboard/auto-enrol-rules",
+        response_class=HTMLResponse,
+        dependencies=[Depends(require_admin)],
+    )
+    def list_auto_enrol_rules_page(request: Request) -> HTMLResponse:
+        return templates.TemplateResponse(
+            request,
+            "auto_enrol_rules.html",
+            {
+                "rules": registry.list_auto_enrol_rules(),
+                "profile_names": _list_profile_names(profiles_root),
+            },
+        )
+
+    @router.post(
+        "/dashboard/auto-enrol-rules",
+        response_class=HTMLResponse,
+        dependencies=[Depends(require_admin)],
+    )
+    def add_auto_enrol_rule_form(
+        name: str = Form(...),
+        match_kind: str = Form(...),
+        match_value: str = Form(""),
+        profile_name: str = Form(...),
+        architecture: str = Form("x86_64"),
+        platform: str = Form("efi"),
+        serial_console: Optional[str] = Form(None),
+    ) -> RedirectResponse:
+        if match_kind not in ("mac_prefix", "ip_cidr"):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="invalid match_kind",
+            )
+        try:
+            registry.add_auto_enrol_rule(
+                name=name,
+                match_kind=match_kind,
+                match_value=match_value,
+                profile_name=profile_name,
+                architecture=architecture,
+                platform=platform,
+                serial_console=bool(serial_console),
+            )
+        except ValueError as err:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail=str(err),
+            )
+        return RedirectResponse(
+            url="/dashboard/auto-enrol-rules",
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+
+    @router.post(
+        "/dashboard/auto-enrol-rules/{rule_id}/delete",
+        response_class=HTMLResponse,
+        dependencies=[Depends(require_admin)],
+    )
+    def delete_auto_enrol_rule_form(rule_id: int) -> RedirectResponse:
+        registry.remove_auto_enrol_rule(rule_id)
+        return RedirectResponse(
+            url="/dashboard/auto-enrol-rules",
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+
+    @router.get(
         "/dashboard/events",
         response_class=HTMLResponse,
         dependencies=[Depends(require_admin)],

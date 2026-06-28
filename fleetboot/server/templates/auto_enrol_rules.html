@@ -1,0 +1,92 @@
+{% extends "base.html" %}
+{% block title %}fleetboot — auto-enrol rules{% endblock %}
+{% block content %}
+<h1>Auto-enrol rules</h1>
+
+<p class="muted">
+  Rules turn the registry from "admin must enrol every MAC by hand" into
+  "any MAC matching this predicate boots straight into this profile". The
+  first matching rule (lowest ID) wins. Auto-enrolled machines show
+  <code>rule:&lt;name&gt;</code> in their Source column on the machines page.
+</p>
+
+{% if rules %}
+<table>
+  <thead>
+    <tr>
+      <th>#</th>
+      <th>Name</th>
+      <th>Match</th>
+      <th>Profile</th>
+      <th>Arch</th>
+      <th>Serial</th>
+      <th></th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for r in rules %}
+    <tr>
+      <td>{{ r.id }}</td>
+      <td><strong>{{ r.name }}</strong></td>
+      <td>{{ r.match_kind }} = <code>{{ r.match_value or "(any)" }}</code></td>
+      <td>{{ r.profile_name }}</td>
+      <td>{{ r.architecture }}/{{ r.platform }}</td>
+      <td>{{ "yes" if r.serial_console else "—" }}</td>
+      <td class="row-actions">
+        <form method="post"
+              action="/dashboard/auto-enrol-rules/{{ r.id }}/delete"
+              onsubmit="return confirm('Delete rule {{ r.name }}?');">
+          <button type="submit" class="danger">delete</button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="muted">No auto-enrol rules defined.</p>
+{% endif %}
+
+<h2>Add a rule</h2>
+<form method="post" action="/dashboard/auto-enrol-rules">
+  <label>Name
+    <input type="text" name="name" required
+           placeholder="e.g. lab-vbox-vms">
+  </label>
+  <label>Match kind
+    <select name="match_kind" required>
+      <option value="mac_prefix" selected>MAC prefix</option>
+      <option value="ip_cidr">IP CIDR</option>
+    </select>
+  </label>
+  <label>Match value
+    <input type="text" name="match_value" required
+           placeholder="08:00:27   or   192.168.99.0/24">
+  </label>
+  <label>Profile
+    <select name="profile_name" required>
+      {% for p in profile_names %}
+      <option value="{{ p }}">{{ p }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>Architecture
+    <select name="architecture">
+      <option value="x86_64" selected>x86_64</option>
+      <option value="arm64">arm64</option>
+      <option value="i386">i386</option>
+    </select>
+  </label>
+  <label>Platform
+    <select name="platform">
+      <option value="efi" selected>efi</option>
+      <option value="pc">pc (BIOS)</option>
+    </select>
+  </label>
+  <label>
+    <input type="checkbox" name="serial_console" value="1">
+    Enable serial console
+  </label>
+  <button type="submit">add rule</button>
+</form>
+{% endblock %}

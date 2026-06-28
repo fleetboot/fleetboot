@@ -94,6 +94,51 @@ def test_remove_unknown_returns_false(registry: MachineRegistry):
     assert registry.remove("aa:bb:cc:dd:ee:ff") is False
 
 
+def test_update_hostname_sets_value_and_timestamp(registry: MachineRegistry):
+    registry.enroll(
+        mac="aa:bb:cc:dd:ee:ff", profile_name="default",
+        architecture="x86_64", platform="efi",
+    )
+    registry.update_hostname("aa:bb:cc:dd:ee:ff", "lab-pc-01")
+    machine = registry.lookup("aa:bb:cc:dd:ee:ff")
+    assert machine is not None
+    assert machine.hostname == "lab-pc-01"
+    assert machine.hostname_seen_at is not None
+
+
+def test_update_hostname_is_noop_for_unknown_mac(registry: MachineRegistry):
+    """We never want a status report to fail because the row hasn't landed."""
+    registry.update_hostname("aa:bb:cc:dd:ee:ff", "lab-pc-01")  # no raise
+    assert registry.lookup("aa:bb:cc:dd:ee:ff") is None
+
+
+def test_update_hostname_ignores_whitespace_only_input(registry: MachineRegistry):
+    registry.enroll(
+        mac="aa:bb:cc:dd:ee:ff", profile_name="default",
+        architecture="x86_64", platform="efi",
+    )
+    registry.update_hostname("aa:bb:cc:dd:ee:ff", "")
+    registry.update_hostname("aa:bb:cc:dd:ee:ff", "   ")
+    machine = registry.lookup("aa:bb:cc:dd:ee:ff")
+    assert machine is not None
+    assert machine.hostname is None
+
+
+def test_enroll_tracks_provenance(registry: MachineRegistry):
+    """enrolled_by defaults to 'manual'; passing rule:<name> keeps it."""
+    m1 = registry.enroll(
+        mac="aa:bb:cc:dd:ee:01", profile_name="default",
+        architecture="x86_64", platform="efi",
+    )
+    assert m1.enrolled_by == "manual"
+    m2 = registry.enroll(
+        mac="aa:bb:cc:dd:ee:02", profile_name="default",
+        architecture="x86_64", platform="efi",
+        enrolled_by="rule:vbox",
+    )
+    assert m2.enrolled_by == "rule:vbox"
+
+
 def test_log_and_list_boot_events(registry: MachineRegistry):
     registry.log_boot_event(mac="aa:bb:cc:dd:ee:ff", state="network_up")
     registry.log_boot_event(

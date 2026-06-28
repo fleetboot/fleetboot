@@ -30,6 +30,9 @@ CREATE TABLE IF NOT EXISTS machines (
     architecture    TEXT NOT NULL,
     platform        TEXT NOT NULL,
     serial_console  INTEGER NOT NULL DEFAULT 0,
+    enrolled_by     TEXT NOT NULL DEFAULT 'manual',
+    hostname        TEXT,
+    hostname_seen_at TEXT,
     created_at      TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -44,6 +47,18 @@ CREATE INDEX IF NOT EXISTS idx_boot_events_mac_time
     ON boot_events(mac, occurred_at);
 CREATE INDEX IF NOT EXISTS idx_boot_events_time
     ON boot_events(occurred_at);
+
+CREATE TABLE IF NOT EXISTS auto_enrol_rules (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    name            TEXT NOT NULL,
+    match_kind      TEXT NOT NULL CHECK(match_kind IN ('mac_prefix', 'ip_cidr')),
+    match_value     TEXT NOT NULL,
+    profile_name    TEXT NOT NULL,
+    architecture    TEXT NOT NULL DEFAULT 'x86_64',
+    platform        TEXT NOT NULL DEFAULT 'efi',
+    serial_console  INTEGER NOT NULL DEFAULT 0,
+    created_at      TEXT NOT NULL DEFAULT (datetime('now'))
+);
 """
 
 
@@ -57,6 +72,28 @@ def _add_serial_console_column_if_missing(connection: sqlite3.Connection) -> Non
         )
     except sqlite3.OperationalError:
         pass
+
+
+def _add_enrolled_by_column_if_missing(connection: sqlite3.Connection) -> None:
+    """Migration: older databases used 'manual' for everyone implicitly."""
+    try:
+        connection.execute(
+            "ALTER TABLE machines ADD COLUMN enrolled_by TEXT NOT NULL DEFAULT 'manual'"
+        )
+    except sqlite3.OperationalError:
+        pass
+
+
+def _add_hostname_columns_if_missing(connection: sqlite3.Connection) -> None:
+    """Migration: hostname tracking arrived after the initial schema."""
+    for column_def in (
+        "ALTER TABLE machines ADD COLUMN hostname TEXT",
+        "ALTER TABLE machines ADD COLUMN hostname_seen_at TEXT",
+    ):
+        try:
+            connection.execute(column_def)
+        except sqlite3.OperationalError:
+            pass
 
 
 @dataclass(frozen=True)
@@ -83,6 +120,36 @@ class Machine:
     # and headless debug hardware; left False on student-facing desktops so
     # the OS doesn't burn cycles on a non-existent serial port.
     serial_console: bool = False
+    # How this row got here: 'manual' for admin-entered, or 'rule:<name>'
+    # when auto-enrol fired. Auditable provenance.
+    enrolled_by: str = "manual"
+    # Most recently reported hostname from the booted image, plus when.
+    # Useful for human-readable lookups in the dashboard.
+    hostname: Optional[str] = None
+    hostname_seen_at: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class AutoEnrolRule:
+    """A rule that auto-creates a `machines` row when an unknown MAC asks
+    for its config and matches the rule's predicate.
+
+    Two predicate kinds:
+      - `mac_prefix`: matches if the candidate MAC starts with `match_value`
+        (lowercase, colon-separated, no wildcards). Handy for vendor OUIs.
+      - `ip_cidr`: matches if the candidate's source IP falls within the
+        CIDR (e.g. `192.168.99.0/24`). Handy for DHCP-segregated networks.
+    """
+
+    id: int
+    name: str
+    match_kind: str   # 'mac_prefix' or 'ip_cidr'
+    match_value: str
+    profile_name: str
+    architecture: str
+    platform: str
+    serial_console: bool
+    created_at: str
 
 
 class MachineRegistry:
@@ -99,6 +166,8 @@ class MachineRegistry:
         with self._connect() as connection:
             connection.executescript(_SCHEMA)
             _add_serial_console_column_if_missing(connection)
+            _add_enrolled_by_column_if_missing(connection)
+            _add_hostname_columns_if_missing(connection)
             # WAL gives us safer concurrent reads without sacrificing
             # durability on writes. Harmless on in-memory databases.
             try:
@@ -122,17 +191,24 @@ class MachineRegistry:
         architecture: str,
         platform: str,
         serial_console: bool = False,
+        enrolled_by: str = "manual",
     ) -> Machine:
-        """Insert (or replace) a machine. Returns the canonical row."""
+        """Insert (or replace) a machine. Returns the canonical row.
+
+        Manual admin enrolments leave `enrolled_by='manual'`; the auto-enrol
+        path passes `enrolled_by='rule:<name>'` so the dashboard can show
+        provenance.
+        """
         normalised_mac = _normalise_mac(mac)
         with self._write_lock, self._connect() as connection:
             connection.execute(
                 "INSERT OR REPLACE INTO machines "
-                "(mac, profile_name, architecture, platform, serial_console) "
-                "VALUES (?, ?, ?, ?, ?)",
+                "(mac, profile_name, architecture, platform, "
+                " serial_console, enrolled_by) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
                 (
                     normalised_mac, profile_name, architecture,
-                    platform, 1 if serial_console else 0,
+                    platform, 1 if serial_console else 0, enrolled_by,
                 ),
             )
         result = self.lookup(normalised_mac)
@@ -140,14 +216,39 @@ class MachineRegistry:
         assert result is not None
         return result
 
+    def update_hostname(self, mac: str, hostname: str) -> None:
+        """Stamp the machine's most recently reported hostname.
+
+        Quietly does nothing for MACs not in the registry — boot reporters
+        run before the auto-enrol path may have inserted the row, and we
+        don't want a transient race to fail status posts.
+        """
+        normalised_mac = _normalise_mac(mac)
+        # Empty/whitespace hostname is unhelpful noise; treat as absent.
+        cleaned = (hostname or "").strip()
+        if not cleaned:
+            return
+        with self._write_lock, self._connect() as connection:
+            connection.execute(
+                "UPDATE machines "
+                "SET hostname = ?, hostname_seen_at = datetime('now') "
+                "WHERE mac = ?",
+                (cleaned, normalised_mac),
+            )
+
+    _MACHINE_COLUMNS = (
+        "mac", "profile_name", "architecture", "platform",
+        "serial_console", "enrolled_by", "hostname", "hostname_seen_at",
+        "created_at",
+    )
+
     def lookup(self, mac: str) -> Optional[Machine]:
         """Return the registered Machine for ``mac``, or None."""
         normalised_mac = _normalise_mac(mac)
+        cols = ", ".join(self._MACHINE_COLUMNS)
         with self._connect() as connection:
             row = connection.execute(
-                "SELECT mac, profile_name, architecture, platform, "
-                "       serial_console, created_at "
-                "FROM machines WHERE mac = ?",
+                f"SELECT {cols} FROM machines WHERE mac = ?",
                 (normalised_mac,),
             ).fetchone()
         if row is None:
@@ -155,11 +256,10 @@ class MachineRegistry:
         return _row_to_machine(row)
 
     def list_all(self) -> list[Machine]:
+        cols = ", ".join(self._MACHINE_COLUMNS)
         with self._connect() as connection:
             rows = connection.execute(
-                "SELECT mac, profile_name, architecture, platform, "
-                "       serial_console, created_at "
-                "FROM machines ORDER BY created_at, mac"
+                f"SELECT {cols} FROM machines ORDER BY created_at, mac"
             ).fetchall()
         return [_row_to_machine(r) for r in rows]
 
@@ -214,6 +314,79 @@ class MachineRegistry:
             for row in rows
         ]
 
+    # ---- auto-enrolment rules --------------------------------------------
+
+    def add_auto_enrol_rule(
+        self,
+        *,
+        name: str,
+        match_kind: str,
+        match_value: str,
+        profile_name: str,
+        architecture: str = "x86_64",
+        platform: str = "efi",
+        serial_console: bool = False,
+    ) -> AutoEnrolRule:
+        normalised = _normalise_match_value(match_kind, match_value)
+        with self._write_lock, self._connect() as connection:
+            cursor = connection.execute(
+                "INSERT INTO auto_enrol_rules "
+                "(name, match_kind, match_value, profile_name, "
+                " architecture, platform, serial_console) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (
+                    name, match_kind, normalised, profile_name,
+                    architecture, platform, 1 if serial_console else 0,
+                ),
+            )
+            rule_id = cursor.lastrowid
+        result = self.get_auto_enrol_rule(rule_id)
+        assert result is not None
+        return result
+
+    def get_auto_enrol_rule(self, rule_id: int) -> Optional[AutoEnrolRule]:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT id, name, match_kind, match_value, profile_name, "
+                "       architecture, platform, serial_console, created_at "
+                "FROM auto_enrol_rules WHERE id = ?",
+                (rule_id,),
+            ).fetchone()
+        return _row_to_rule(row) if row else None
+
+    def list_auto_enrol_rules(self) -> list[AutoEnrolRule]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT id, name, match_kind, match_value, profile_name, "
+                "       architecture, platform, serial_console, created_at "
+                "FROM auto_enrol_rules ORDER BY id"
+            ).fetchall()
+        return [_row_to_rule(r) for r in rows]
+
+    def remove_auto_enrol_rule(self, rule_id: int) -> bool:
+        with self._write_lock, self._connect() as connection:
+            cursor = connection.execute(
+                "DELETE FROM auto_enrol_rules WHERE id = ?", (rule_id,)
+            )
+            return cursor.rowcount > 0
+
+    def find_matching_rule(
+        self,
+        mac: str,
+        source_ip: Optional[str] = None,
+    ) -> Optional[AutoEnrolRule]:
+        """Return the first rule (lowest id) whose predicate matches.
+
+        Empty match_value means "match anything of this kind" — useful for
+        a catch-all `mac_prefix=""` rule that auto-enrols every unknown MAC
+        to a single registration profile.
+        """
+        normalised_mac = _normalise_mac(mac)
+        for rule in self.list_auto_enrol_rules():
+            if _rule_matches(rule, mac=normalised_mac, source_ip=source_ip):
+                return rule
+        return None
+
     def remove(self, mac: str) -> bool:
         """Delete a machine. Returns True if a row was removed."""
         normalised_mac = _normalise_mac(mac)
@@ -232,6 +405,61 @@ def _normalise_mac(mac: str) -> str:
     return mac.replace("-", ":").replace(".", ":").lower().strip()
 
 
+def _normalise_match_value(match_kind: str, match_value: str) -> str:
+    """Canonicalise the value so the same rule isn't entered twice."""
+    if match_kind == "mac_prefix":
+        cleaned = match_value.replace("-", ":").replace(".", ":").lower().strip()
+        # Trailing colon is optional in input; we strip both ways and store
+        # the bare hex+colon prefix so matching is a simple startswith.
+        return cleaned.rstrip(":")
+    if match_kind == "ip_cidr":
+        import ipaddress
+
+        # ipaddress.ip_network normalises notation (e.g. host bits stripped).
+        return str(ipaddress.ip_network(match_value.strip(), strict=False))
+    raise ValueError(f"unknown match_kind: {match_kind!r}")
+
+
+def _rule_matches(
+    rule: "AutoEnrolRule",
+    *,
+    mac: str,
+    source_ip: Optional[str],
+) -> bool:
+    """Return True if the rule matches this (mac, source_ip) pair."""
+    if rule.match_kind == "mac_prefix":
+        if rule.match_value == "":
+            return True
+        return mac.startswith(rule.match_value)
+    if rule.match_kind == "ip_cidr":
+        if source_ip is None:
+            return False
+        import ipaddress
+
+        try:
+            return (
+                ipaddress.ip_address(source_ip)
+                in ipaddress.ip_network(rule.match_value, strict=False)
+            )
+        except ValueError:
+            return False
+    return False
+
+
+def _row_to_rule(row: sqlite3.Row) -> "AutoEnrolRule":
+    return AutoEnrolRule(
+        id=row["id"],
+        name=row["name"],
+        match_kind=row["match_kind"],
+        match_value=row["match_value"],
+        profile_name=row["profile_name"],
+        architecture=row["architecture"],
+        platform=row["platform"],
+        serial_console=bool(row["serial_console"]),
+        created_at=row["created_at"],
+    )
+
+
 def _row_to_machine(row: sqlite3.Row) -> Machine:
     return Machine(
         mac=row["mac"],
@@ -239,5 +467,8 @@ def _row_to_machine(row: sqlite3.Row) -> Machine:
         architecture=row["architecture"],
         platform=row["platform"],
         serial_console=bool(row["serial_console"]),
+        enrolled_by=row["enrolled_by"] if row["enrolled_by"] else "manual",
+        hostname=row["hostname"],
+        hostname_seen_at=row["hostname_seen_at"],
         created_at=row["created_at"],
     )

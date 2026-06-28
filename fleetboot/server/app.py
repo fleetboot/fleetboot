@@ -35,7 +35,7 @@ from fleetboot.server.boot_sessions import (
     OutOfOrderStateError,
     UnknownTokenError,
 )
-from fleetboot.server.registry import Machine, MachineRegistry
+from fleetboot.server.registry import AutoEnrolRule, Machine, MachineRegistry
 
 
 # Static filenames we always serve under /boot/.
@@ -72,6 +72,13 @@ class StatusReport(BaseModel):
     # We never trust this for authorisation, only display.
     detail: Optional[str] = Field(
         default=None, max_length=256, description="Optional human-readable detail."
+    )
+    # Hostname the booted image has settled on (from DHCP/DNS, or the
+    # image's own /etc/hostname). Used purely for human-readable display in
+    # the dashboard — never trusted for authorisation.
+    hostname: Optional[str] = Field(
+        default=None, max_length=253,
+        description="Hostname as the booted image sees it.",
     )
 
 
@@ -126,6 +133,9 @@ class MachineRecord(BaseModel):
     architecture: str
     platform: str
     serial_console: bool
+    enrolled_by: str = "manual"
+    hostname: Optional[str] = None
+    hostname_seen_at: Optional[str] = None
     created_at: str
 
     @classmethod
@@ -136,7 +146,43 @@ class MachineRecord(BaseModel):
             architecture=machine.architecture,
             platform=machine.platform,
             serial_console=machine.serial_console,
+            enrolled_by=machine.enrolled_by,
+            hostname=machine.hostname,
+            hostname_seen_at=machine.hostname_seen_at,
             created_at=machine.created_at,
+        )
+
+
+class AutoEnrolRuleRequest(BaseModel):
+    """Body of POST /auto-enrol-rules."""
+
+    name: str
+    match_kind: str = Field(..., description="'mac_prefix' or 'ip_cidr'")
+    match_value: str
+    profile_name: str
+    architecture: str = "x86_64"
+    platform: str = "efi"
+    serial_console: bool = False
+
+
+class AutoEnrolRuleRecord(BaseModel):
+    id: int
+    name: str
+    match_kind: str
+    match_value: str
+    profile_name: str
+    architecture: str
+    platform: str
+    serial_console: bool
+    created_at: str
+
+    @classmethod
+    def from_rule(cls, rule: AutoEnrolRule) -> "AutoEnrolRuleRecord":
+        return cls(
+            id=rule.id, name=rule.name, match_kind=rule.match_kind,
+            match_value=rule.match_value, profile_name=rule.profile_name,
+            architecture=rule.architecture, platform=rule.platform,
+            serial_console=rule.serial_console, created_at=rule.created_at,
         )
 
 
@@ -209,6 +255,10 @@ def create_app(
             registry.log_boot_event(
                 mac=session.mac, state=report.state.value, detail=report.detail,
             )
+            if report.hostname:
+                registry.update_hostname(
+                    mac=session.mac, hostname=report.hostname,
+                )
         return StatusAcknowledgement(
             ok=True, mac=session.mac, state=report.state
         )
@@ -336,13 +386,21 @@ def create_app(
 
     @app.get("/resolve/{mac}", response_model=MachineRecord)
     def resolve_machine(
-        mac: str, authorization: str | None = Header(default=None),
+        mac: str,
+        source_ip: Optional[str] = None,
+        authorization: str | None = Header(default=None),
     ) -> MachineRecord:
         """Read-only registry lookup, authenticated with the mint secret.
 
         tftpjail uses this on every read-request to decide whether a MAC is
         known and which profile/arch it belongs to. We deliberately give
         tftpjail less than the full admin surface — it only reads.
+
+        If the MAC isn't registered, we check the auto-enrol rules: if one
+        matches this MAC (and optionally the source IP that tftpjail saw),
+        we enrol the machine on the spot under that rule's profile and
+        return it. Admins audit auto-enrolled rows via the `enrolled_by`
+        column (set to `rule:<name>`).
         """
         if registry is None or mint_secret is None:
             raise HTTPException(
@@ -357,10 +415,77 @@ def create_app(
             )
         machine = registry.lookup(mac)
         if machine is None:
+            rule = registry.find_matching_rule(mac, source_ip=source_ip)
+            if rule is not None:
+                machine = registry.enroll(
+                    mac=mac,
+                    profile_name=rule.profile_name,
+                    architecture=rule.architecture,
+                    platform=rule.platform,
+                    serial_console=rule.serial_console,
+                    enrolled_by=f"rule:{rule.name}",
+                )
+        if machine is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND, detail="not found"
             )
         return MachineRecord.from_machine(machine)
+
+    @app.post(
+        "/auto-enrol-rules",
+        response_model=AutoEnrolRuleRecord,
+        status_code=status.HTTP_201_CREATED,
+    )
+    def add_auto_enrol_rule(
+        body: AutoEnrolRuleRequest,
+        authorization: str | None = Header(default=None),
+    ) -> AutoEnrolRuleRecord:
+        _require_admin(authorization)
+        if body.match_kind not in ("mac_prefix", "ip_cidr"):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="match_kind must be 'mac_prefix' or 'ip_cidr'",
+            )
+        try:
+            rule = registry.add_auto_enrol_rule(  # type: ignore[union-attr]
+                name=body.name,
+                match_kind=body.match_kind,
+                match_value=body.match_value,
+                profile_name=body.profile_name,
+                architecture=body.architecture,
+                platform=body.platform,
+                serial_console=body.serial_console,
+            )
+        except ValueError as err:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail=str(err)
+            )
+        return AutoEnrolRuleRecord.from_rule(rule)
+
+    @app.get(
+        "/auto-enrol-rules", response_model=list[AutoEnrolRuleRecord]
+    )
+    def list_auto_enrol_rules_api(
+        authorization: str | None = Header(default=None),
+    ) -> list[AutoEnrolRuleRecord]:
+        _require_admin(authorization)
+        return [
+            AutoEnrolRuleRecord.from_rule(r)
+            for r in registry.list_auto_enrol_rules()  # type: ignore[union-attr]
+        ]
+
+    @app.delete("/auto-enrol-rules/{rule_id}")
+    def delete_auto_enrol_rule(
+        rule_id: int,
+        authorization: str | None = Header(default=None),
+    ) -> Response:
+        _require_admin(authorization)
+        removed = registry.remove_auto_enrol_rule(rule_id)  # type: ignore[union-attr]
+        if not removed:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="not found"
+            )
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
 
     @app.delete("/machines/{mac}")
     def delete_machine(

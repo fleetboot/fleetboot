@@ -24,6 +24,7 @@ import sys
 import time
 from pathlib import Path
 from textwrap import dedent
+from typing import Optional
 
 import httpx
 
@@ -69,7 +70,24 @@ def _vm_name(mac: str) -> str:
     return f"fleetboot-dev-{tail}"
 
 
-def _domain_xml(name: str, mac: str, serial_log: str) -> str:
+def _domain_xml(
+    name: str,
+    mac: str,
+    serial_log: str,
+    *,
+    display: bool = False,
+) -> str:
+    # With --display, add a SPICE socket + virtio-vga so virt-viewer can
+    # attach. Without it the VM is serial-only — keeps the dashboard
+    # workflow snappy on a remote SSH host.
+    display_block = ""
+    if display:
+        display_block = (
+            "<graphics type='spice' autoport='yes' listen='127.0.0.1'/>"
+            "<video><model type='virtio' heads='1'/></video>"
+            "<input type='tablet' bus='usb'/>"
+            "<controller type='usb' model='qemu-xhci'/>"
+        )
     return dedent(
         f"""\
         <domain type='kvm'>
@@ -105,6 +123,7 @@ def _domain_xml(name: str, mac: str, serial_log: str) -> str:
               <source path='{serial_log}'/>
               <target type='serial' port='0'/>
             </console>
+            {display_block}
           </devices>
         </domain>
         """
@@ -120,6 +139,14 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument(
         "--fleetboot-url", default=DEFAULT_FLEETBOOT_URL,
         help="URL of the running dev server (default http://localhost:8080)",
+    )
+    parser.add_argument(
+        "--display", action="store_true",
+        help=(
+            "Attach a graphical display: adds SPICE + virtio-vga to the VM "
+            "and spawns virt-viewer so a local user with $DISPLAY can see "
+            "the desktop boot. Requires virt-viewer installed."
+        ),
     )
     return parser.parse_args(argv)
 
@@ -170,7 +197,9 @@ def main(argv: list[str]) -> int:
     _virsh("destroy", vm_name, check=False)
     _virsh("undefine", vm_name, "--nvram", check=False)
     domain_xml_path = Path(f"/tmp/{vm_name}.xml")
-    domain_xml_path.write_text(_domain_xml(vm_name, mac, serial_log))
+    domain_xml_path.write_text(
+        _domain_xml(vm_name, mac, serial_log, display=args.display)
+    )
     _virsh("create", str(domain_xml_path))
 
     print()
@@ -178,6 +207,21 @@ def main(argv: list[str]) -> int:
     print(f"MAC:           {mac}")
     print(f"serial log:    tail -f {serial_log}")
     print(f"dashboard:     {args.fleetboot_url}/dashboard")
+    viewer_proc: Optional[subprocess.Popen] = None
+    if args.display:
+        # Spawn virt-viewer attached to the libvirt domain; SPICE is on
+        # an autoport so we just hand it the domain name and let it ask
+        # libvirt for the URI. Inherits $DISPLAY from the caller's env.
+        try:
+            viewer_proc = subprocess.Popen(
+                ["virt-viewer", "--connect", "qemu:///system", vm_name],
+            )
+            print(f"virt-viewer:   pid {viewer_proc.pid}")
+        except FileNotFoundError:
+            print(
+                "virt-viewer not found; install it to view the display",
+                file=sys.stderr,
+            )
     print()
     print("press Ctrl-C to power off and clean up")
 
@@ -187,6 +231,8 @@ def main(argv: list[str]) -> int:
     except KeyboardInterrupt:
         print("\nshutting down VM...")
     finally:
+        if viewer_proc is not None:
+            viewer_proc.terminate()
         _virsh("destroy", vm_name, check=False)
         try:
             domain_xml_path.unlink()

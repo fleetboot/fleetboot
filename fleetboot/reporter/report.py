@@ -6,6 +6,7 @@ Designed to be invoked as `python3 -m fleetboot.reporter.report <state> [detail]
 
 from __future__ import annotations
 
+import socket
 import sys
 from typing import Optional
 from urllib.parse import urljoin
@@ -31,6 +32,25 @@ class ReportFailedError(RuntimeError):
     """Raised when the server returns a non-success status."""
 
 
+# The live-boot initramfs hands the kernel a default hostname like
+# `debian-live` before DHCP runs. Reporting that has no value, so we
+# filter it out and leave the dashboard's hostname column blank instead.
+_BORING_HOSTNAMES = frozenset(
+    {"localhost", "(none)", "debian", "debian-live", ""}
+)
+
+
+def _current_hostname() -> Optional[str]:
+    """Best-effort hostname read; returns None if it's not meaningful yet."""
+    try:
+        candidate = socket.gethostname()
+    except OSError:
+        return None
+    if candidate.lower() in _BORING_HOSTNAMES:
+        return None
+    return candidate
+
+
 def report_state(
     state: BootState,
     detail: Optional[str] = None,
@@ -48,6 +68,12 @@ def report_state(
     payload: dict[str, str] = {"state": state.value}
     if detail is not None:
         payload["detail"] = detail
+    # Include the kernel-visible hostname so the dashboard can show a
+    # human-friendly name. DHCP/DNS substitutes the right value in
+    # /etc/hostname during early boot; we just read what's settled.
+    hostname = _current_hostname()
+    if hostname:
+        payload["hostname"] = hostname
     url = urljoin(effective_settings.server_url, STATUS_PATH)
     headers = {"Authorization": f"Bearer {effective_settings.boot_token}"}
 
