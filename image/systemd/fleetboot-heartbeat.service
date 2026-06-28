@@ -1,0 +1,9 @@
+[Unit]
+Description=Heartbeat: re-report current boot state to fleetboot
+After=network-online.target fleetboot-network-up.service
+ConditionKernelCommandLine=fleetboot.boot_token
+ConditionPathExists=/run/fleetboot/current-state
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/lib/fleetboot/fleetboot-heartbeat.sh

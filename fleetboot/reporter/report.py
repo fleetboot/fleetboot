@@ -53,6 +53,21 @@ def _current_hostname() -> Optional[str]:
 
 BOOT_VERSION_PATH = "/etc/fleetboot/build-version"
 
+# Where the reporter records "the state we most recently told the server".
+# The heartbeat timer reads this and re-sends so the dashboard stays alive.
+CURRENT_STATE_PATH = "/run/fleetboot/current-state"
+
+
+def _remember_current_state(state: BootState) -> None:
+    """Persist the latest reported state for the heartbeat to find."""
+    try:
+        import os
+        os.makedirs("/run/fleetboot", exist_ok=True)
+        with open(CURRENT_STATE_PATH, "w", encoding="utf-8") as handle:
+            handle.write(state.value + "\n")
+    except OSError:
+        pass
+
 
 def _read_boot_version() -> Optional[str]:
     """Read the image build version stamp written by `make image`.
@@ -111,6 +126,11 @@ def report_state(
         raise ReportFailedError(
             f"server returned {response.status_code}: {response.text}"
         )
+    # Remember the most-recent successfully-reported state so the heartbeat
+    # timer can re-send it. Best-effort: a missing /run/fleetboot dir or a
+    # read-only fs just leaves the heartbeat with nothing to send, which is
+    # also benign.
+    _remember_current_state(state)
 
 
 def main(argv: list[str]) -> int:

@@ -1,0 +1,15 @@
+[Unit]
+Description=Heartbeat timer for fleetboot state reports
+After=network-online.target
+
+[Timer]
+# First fire 1 minute after boot completes — gives the lifecycle reporters
+# a chance to land their initial states first. Then every 2 minutes for the
+# lifetime of the boot.
+OnBootSec=1min
+OnUnitActiveSec=2min
+AccuracySec=10s
+Unit=fleetboot-heartbeat.service
+
+[Install]
+WantedBy=timers.target

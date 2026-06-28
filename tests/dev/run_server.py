@@ -139,7 +139,9 @@ def main(argv: list[str]) -> int:
 
     BOOT_DIR.mkdir(parents=True, exist_ok=True)
 
-    sessions = BootSessionStore()
+    # Persistent: shares the registry's DB file so server restarts keep
+    # booted machines' tokens alive (in-image heartbeats then keep ticking).
+    sessions = BootSessionStore(REGISTRY_PATH)
     registry = MachineRegistry(REGISTRY_PATH)
 
     app = create_app(

@@ -131,6 +131,16 @@ actions:
     destination: /etc/systemd/system
 
   - action: overlay
+    description: "Install Fleetboot runtime helpers (heartbeat etc.)"
+    source: ./runtime
+    destination: /usr/local/lib/fleetboot
+
+  - action: run
+    description: "Mark Fleetboot runtime helpers executable"
+    chroot: true
+    command: chmod 0755 /usr/local/lib/fleetboot/fleetboot-heartbeat.sh
+
+  - action: overlay
     description: "Install Fleetboot PAM session hook"
     source: ./pam
     destination: /usr/local/lib/fleetboot
@@ -176,6 +186,9 @@ actions:
       systemctl enable fleetboot-keytab-fetch.service
       systemctl enable fleetboot-freeipa-enroll.service
       systemctl enable autofs.service
+      # Heartbeat timer keeps the dashboard's "latest state" column fresh
+      # and lets fleetboot detect machines that went silent.
+      systemctl enable fleetboot-heartbeat.timer
 
   - action: run
     description: "Enable the Fleetboot boot-state reporting units"
