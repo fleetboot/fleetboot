@@ -2,6 +2,9 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
+  {% if auto_refresh %}
+  <meta http-equiv="refresh" content="{{ auto_refresh }}">
+  {% endif %}
   <title>{% block title %}fleetboot{% endblock %}</title>
   <style>
     :root { --fg: #222; --muted: #666; --bg: #fafafa; --accent: #1f78b4;

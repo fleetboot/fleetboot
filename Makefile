@@ -42,6 +42,20 @@ vbox-functional-test:
 qemu-functional-test:
 	$(PYTHON) -m pytest tests/qemu_functional -v -o addopts=
 
+# Long-running dev server: fleetboot + tftpjail with the dashboard, talking
+# to a persistent registry at build/dev/machines.sqlite. Listens on
+# 0.0.0.0:8080. Browser: http://localhost:8080/dashboard.
+.PHONY: run-server
+run-server:
+	$(PYTHON) -m tests.dev.run_server
+
+# Boot a transient QEMU UEFI VM that registers against the running dev
+# server, so it appears on the dashboard as it ticks through boot states.
+# Run alongside `make run-server`.
+.PHONY: boot-dev-vm
+boot-dev-vm:
+	sg libvirt -c '$(PYTHON) -m tests.dev.boot_dev_vm'
+
 .PHONY: lint
 lint:
 	$(PYTHON) -m compileall -q fleetboot tests

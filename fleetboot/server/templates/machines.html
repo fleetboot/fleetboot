@@ -1,7 +1,14 @@
 {% extends "base.html" %}
 {% block title %}fleetboot — machines{% endblock %}
 {% block content %}
-<h1>Machines</h1>
+<h1>Machines
+  {% if auto_refresh %}
+    <span class="muted">— live ({{ auto_refresh }}s)</span>
+    &nbsp;<a class="muted" href="/dashboard">[stop]</a>
+  {% else %}
+    &nbsp;<a class="muted" href="/dashboard?refresh=5">[live view]</a>
+  {% endif %}
+</h1>
 
 {% if machines %}
 <table>

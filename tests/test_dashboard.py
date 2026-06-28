@@ -82,7 +82,42 @@ def test_dashboard_accepts_correct_password(dashboard_root: Path):
     client = _client(dashboard_root)
     response = client.get("/dashboard", headers=_auth_header())
     assert response.status_code == 200
-    assert "<h1>Machines</h1>" in response.text
+    assert "<h1>Machines" in response.text
+
+
+def test_dashboard_emits_meta_refresh_when_requested(dashboard_root: Path):
+    """`?refresh=5` switches the page into live-view mode."""
+    client = _client(dashboard_root)
+    response = client.get(
+        "/dashboard?refresh=5", headers=_auth_header()
+    )
+    assert response.status_code == 200
+    assert '<meta http-equiv="refresh" content="5">' in response.text
+
+
+def test_dashboard_refresh_value_is_clamped(dashboard_root: Path):
+    """Bogus values get clamped; this protects the server from a junk
+    query param triggering 1-second hammering."""
+    client = _client(dashboard_root)
+    response = client.get(
+        "/dashboard?refresh=999999", headers=_auth_header()
+    )
+    assert '<meta http-equiv="refresh" content="60">' in response.text
+
+
+def test_dashboard_no_refresh_meta_when_unset(dashboard_root: Path):
+    client = _client(dashboard_root)
+    response = client.get("/dashboard", headers=_auth_header())
+    assert "http-equiv=\"refresh\"" not in response.text
+
+
+def test_events_page_supports_refresh(dashboard_root: Path):
+    client = _client(dashboard_root)
+    response = client.get(
+        "/dashboard/events?refresh=5", headers=_auth_header()
+    )
+    assert response.status_code == 200
+    assert '<meta http-equiv="refresh" content="5">' in response.text
 
 
 def test_root_path_redirects_to_dashboard(dashboard_root: Path):

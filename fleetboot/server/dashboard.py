@@ -105,7 +105,9 @@ def build_dashboard_router(
         response_class=HTMLResponse,
         dependencies=[Depends(require_admin)],
     )
-    def dashboard_home(request: Request) -> HTMLResponse:
+    def dashboard_home(
+        request: Request, refresh: Optional[int] = None,
+    ) -> HTMLResponse:
         machines = registry.list_all()
         states_by_mac = _states_by_mac(sessions)
         return templates.TemplateResponse(
@@ -115,6 +117,7 @@ def build_dashboard_router(
                 "machines": machines,
                 "states_by_mac": states_by_mac,
                 "profile_names": _list_profile_names(profiles_root),
+                "auto_refresh": _clamp_refresh(refresh),
             },
         )
 
@@ -230,7 +233,10 @@ def build_dashboard_router(
         dependencies=[Depends(require_admin)],
     )
     def list_events(
-        request: Request, mac: Optional[str] = None, limit: int = 200,
+        request: Request,
+        mac: Optional[str] = None,
+        limit: int = 200,
+        refresh: Optional[int] = None,
     ) -> HTMLResponse:
         # Clamp `limit` so a bogus query string can't trigger a huge fetch.
         limit = max(1, min(int(limit), 1000))
@@ -238,7 +244,12 @@ def build_dashboard_router(
         return templates.TemplateResponse(
             request,
             "events.html",
-            {"events": events, "mac_filter": mac, "limit": limit},
+            {
+                "events": events,
+                "mac_filter": mac,
+                "limit": limit,
+                "auto_refresh": _clamp_refresh(refresh),
+            },
         )
 
     @router.get(
@@ -329,6 +340,21 @@ def _states_by_mac(sessions: BootSessionStore) -> dict[str, str]:
         if session.latest_state is not None:
             out[session.mac] = session.latest_state.value
     return out
+
+
+def _clamp_refresh(value: Optional[int]) -> Optional[int]:
+    """Constrain the ?refresh= query param to a sensible range.
+
+    Returns None if the query param wasn't present (no meta tag emitted),
+    otherwise an integer in [2, 60] — fast enough to feel live, slow
+    enough not to hammer the server.
+    """
+    if value is None:
+        return None
+    try:
+        return max(2, min(int(value), 60))
+    except (TypeError, ValueError):
+        return None
 
 
 def _read_or_empty(path: Path) -> str:
