@@ -287,6 +287,16 @@ actions:
       fi
 
   - action: run
+    description: "Run admin post-install hook if present"
+    chroot: true
+    command: |
+      hook=/tmp/fleetboot-custom/hooks/post-install
+      if [ -x "$hook" ]; then
+        echo "fleetboot: running admin post-install hook"
+        "$hook"
+      fi
+
+  - action: run
     description: "Remove the staged admin extras directory from the image"
     chroot: true
     command: rm -rf /tmp/fleetboot-custom

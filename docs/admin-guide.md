@@ -225,6 +225,104 @@ instead of `filename "grubnetx64.efi";`. The signed grub looks for
 `image/signed-boot/initial-grub.cfg`) just hands control to tftpjail's
 per-MAC config exactly as the unsigned binary does.
 
+## FreeIPA — identity and authentication
+
+Fleetboot's image authenticates users against FreeIPA via SSSD + LightDM.
+FreeIPA owns the LDAP directory, the Kerberos KDC, and (optionally) DNS
+for the realm. Each fleetboot machine is itself a Kerberos host
+principal so it can mount Kerberos-secured NFS without per-user keytabs.
+
+### Why containers
+
+FreeIPA Server isn't packaged for Debian (only the client). The
+upstream FreeIPA project ships a maintained Fedora-based container image,
+which is the cleanest path on a Debian host:
+
+```sh
+sudo IPA_ADMIN_PASS='ChangeMe123!' IPA_DM_PASS='ChangeMeDmToo!' \
+    ./scripts/setup-ipa-server.sh
+```
+
+That pulls `freeipa/freeipa-server:fedora-rawhide`, persists its state
+under `/var/lib/ipa-data`, and runs the install unattended. Takes
+5–10 minutes; watch progress with `docker logs -f freeipa-server`.
+
+The script pre-flight-checks that ports 53, 80, 88, 389, 443, 464,
+636, and 749 are all free on the host. If `systemd-resolved` is binding
+53, or `slapd`/`bind` is already running, the script bails before
+touching anything.
+
+Defaults (override with env vars at the top of the script):
+
+| Variable | Default |
+|---|---|
+| `IPA_REALM` | `FLEETBOOT.LAN` |
+| `IPA_DOMAIN` | `fleetboot.lan` |
+| `IPA_SERVER_FQDN` | `ipa.fleetboot.lan` |
+| `IPA_DATA_DIR` | `/var/lib/ipa-data` |
+
+### Resolving the IPA server from clients
+
+Both the fleetboot host and the booted images need to resolve
+`ipa.fleetboot.lan` to the IPA container's IP. Two options:
+
+- **`/etc/hosts`** entry on each client — fine for a small fleet,
+  but it's per-machine state outside fleetboot's view.
+- **DNS forwarding** — IPA's own DNS server can be the resolver for
+  the realm. On dev (libvirt), add to your libvirt network XML:
+  `<dns><forwarder addr='192.168.99.1'/></dns>` so the bridge's
+  dnsmasq forwards realm queries to IPA.
+
+### Test users for dev
+
+```sh
+sudo IPA_ADMIN_PASS='ChangeMe123!' ./scripts/ipa-add-test-users.sh
+```
+
+Creates four accounts (`alice`, `bob` in `students`; `carol` in
+`teachers`; `dave` in `headmaster`) with the shared password
+`ChangeMe123!` (FreeIPA forces a change on first login).
+
+### Per-host enrolment
+
+For each machine to enrol, mint a keytab and drop it where fleetboot's
+`/enrol/<token>/keytab` endpoint can deliver it on first boot:
+
+```sh
+sudo IPA_ADMIN_PASS='ChangeMe123!' \
+    ./scripts/ipa-prepare-host.sh aa:bb:cc:dd:ee:ff
+```
+
+That adds `fleetboot-aabbccddeeff.fleetboot.lan` to IPA, generates a
+one-shot enrolment keytab, and writes it to
+`/var/lib/fleetboot/keytabs/aa:bb:cc:dd:ee:ff.keytab` (mode 0600).
+On first boot the image's `fleetboot-keytab-fetch.service` pulls it
+via the per-boot-token-authenticated `/enrol` endpoint and
+`ipa-client-install` consumes it.
+
+### identity.conf (per-deployment)
+
+The image needs to know the realm + domain + server FQDN. Drop a
+deployment-wide identity.conf into the admin overlay
+(`image/custom/overlay/etc/fleetboot/identity.conf`):
+
+```
+IPA_REALM=FLEETBOOT.LAN
+IPA_DOMAIN=fleetboot.lan
+IPA_SERVER=ipa.fleetboot.lan
+IPA_KEYTAB=/etc/fleetboot/enrol.keytab
+IPA_NFS_SERVER=ipa.fleetboot.lan
+```
+
+Then rebuild your profile images:
+
+```sh
+make image PROFILE=school
+```
+
+The image's `enroll-freeipa` service reads this on first boot and runs
+`ipa-client-install` against it.
+
 ## NFS server — homes + shared mounts
 
 Fleetboot ships the fleetboot host as the NFS server too: same machine,
