@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block title %}fleetboot — builds{% endblock %}
+{% block content %}
+<h1>Builds</h1>
+
+<form method="post" action="/dashboard/builds">
+  <label>Profile
+    <select name="profile" required>
+      {% for p in profile_names %}
+      <option value="{{ p }}">{{ p }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>Architecture
+    <select name="architecture">
+      <option value="amd64" selected>amd64</option>
+      <option value="arm64">arm64</option>
+    </select>
+  </label>
+  <button type="submit" {% if running %}disabled{% endif %}>
+    {% if running %}build already running{% else %}start build{% endif %}
+  </button>
+</form>
+
+{% if jobs %}
+<table>
+  <thead>
+    <tr>
+      <th>Job ID</th>
+      <th>Profile</th>
+      <th>Arch</th>
+      <th>State</th>
+      <th>Exit</th>
+      <th>Started</th>
+      <th>Duration</th>
+      <th></th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for j in jobs %}
+    <tr>
+      <td><code>{{ j.job_id }}</code></td>
+      <td>{{ j.profile }}</td>
+      <td>{{ j.architecture }}</td>
+      <td><span class="state-{{ j.state.value }}">{{ j.state.value }}</span></td>
+      <td>{{ j.exit_code if j.exit_code is not none else "—" }}</td>
+      <td><span class="muted">{{ j.started_at | int }}</span></td>
+      <td>
+        {% if j.finished_at %}
+          {{ (j.finished_at - j.started_at) | round(1) }}s
+        {% else %}
+          <span class="muted">…</span>
+        {% endif %}
+      </td>
+      <td><a href="/dashboard/builds/{{ j.job_id }}">log</a></td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="muted">No builds yet.</p>
+{% endif %}
+{% endblock %}

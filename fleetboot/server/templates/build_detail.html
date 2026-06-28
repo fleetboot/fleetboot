@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}fleetboot — build {{ job.job_id }}{% endblock %}
+{% block content %}
+<h1>Build {{ job.job_id }}</h1>
+<p>
+  <strong>profile</strong> {{ job.profile }} &nbsp; · &nbsp;
+  <strong>arch</strong> {{ job.architecture }} &nbsp; · &nbsp;
+  <strong>state</strong>
+  <span class="state-{{ job.state.value }}">{{ job.state.value }}</span>
+  {% if job.exit_code is not none %}
+    &nbsp; · &nbsp; <strong>exit</strong> {{ job.exit_code }}
+  {% endif %}
+</p>
+
+{% if job.state.value == "running" %}
+<p class="muted">
+  Build is running. The page auto-reloads every 5 seconds while it's in
+  flight; reload manually to see the latest log.
+</p>
+<script>
+  setTimeout(function () { window.location.reload(); }, 5000);
+</script>
+{% endif %}
+
+<pre>{% for line in log_lines %}{{ line }}
+{% endfor %}</pre>
+
+<p><a href="/dashboard/builds">back to builds</a></p>
+{% endblock %}

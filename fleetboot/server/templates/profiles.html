@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}fleetboot — profiles{% endblock %}
+{% block content %}
+<h1>Profiles</h1>
+
+{% if profile_names %}
+<table>
+  <thead><tr><th>Name</th><th></th></tr></thead>
+  <tbody>
+    {% for name in profile_names %}
+    <tr>
+      <td><strong>{{ name }}</strong></td>
+      <td>
+        <a href="/dashboard/profiles/{{ name }}">view / edit</a>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="muted">No profiles defined under <code>image/profiles/</code>.</p>
+{% endif %}
+
+<p class="muted">
+  To add a new profile, create <code>image/profiles/&lt;name&gt;/</code> on
+  disk and edit it through this page. The profile contract is described in
+  <code>image/profiles/README.md</code>.
+</p>
+{% endblock %}

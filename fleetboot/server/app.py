@@ -147,6 +147,7 @@ def create_app(
     boot_dir: Path | None = None,
     registry: MachineRegistry | None = None,
     admin_secret: str | None = None,
+    dashboard_repo_root: Path | None = None,
 ) -> FastAPI:
     """Build the FastAPI app.
 
@@ -157,8 +158,11 @@ def create_app(
     `boot_dir` — directory holding the build artifacts served by /boot/.
         If None, /boot/* returns 503 (boot serving disabled).
     `registry` — MachineRegistry instance. If None, /machines returns 503.
-    `admin_secret` — shared secret required on /machines. If None, /machines
-        returns 503 even if a registry is configured.
+    `admin_secret` — shared secret required on /machines AND on the
+        dashboard. If None, both return 503.
+    `dashboard_repo_root` — path to the fleetboot repo (so the dashboard
+        can read profiles and trigger `make image`). When None, the
+        dashboard is not mounted.
     """
     store = sessions if sessions is not None else BootSessionStore()
     app = FastAPI(title="Fleetboot control plane")
@@ -358,6 +362,30 @@ def create_app(
                 status_code=status.HTTP_404_NOT_FOUND, detail="not found"
             )
         return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+    # ---- Dashboard --------------------------------------------------------
+    #
+    # Mounted only when caller provided a repo root, a registry, and an
+    # admin secret. Otherwise the dashboard would have nothing useful to
+    # show, so we just don't expose any of its routes.
+    if (
+        dashboard_repo_root is not None
+        and registry is not None
+        and admin_secret is not None
+    ):
+        from fleetboot.server.build_jobs import BuildJobManager
+        from fleetboot.server.dashboard import build_dashboard_router
+
+        builds = BuildJobManager(repo_root=dashboard_repo_root)
+        dashboard_router = build_dashboard_router(
+            registry=registry,
+            sessions=store,
+            profiles_root=dashboard_repo_root / "image" / "profiles",
+            admin_secret=admin_secret,
+            builds=builds,
+        )
+        app.include_router(dashboard_router)
+        app.state.builds = builds
 
     return app
 

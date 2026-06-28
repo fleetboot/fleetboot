@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>{% block title %}fleetboot{% endblock %}</title>
+  <style>
+    :root { --fg: #222; --muted: #666; --bg: #fafafa; --accent: #1f78b4;
+            --bad: #c0392b; --good: #2e7d32; --border: #ddd; }
+    * { box-sizing: border-box; }
+    body { font-family: -apple-system, "Segoe UI", Helvetica, sans-serif;
+           margin: 0; background: var(--bg); color: var(--fg);
+           font-size: 15px; line-height: 1.4; }
+    header { background: #222; color: #fff; padding: 12px 24px; }
+    header a { color: #fff; text-decoration: none; margin-right: 18px; }
+    header a:hover { text-decoration: underline; }
+    header .title { font-weight: bold; margin-right: 28px; }
+    main { padding: 20px 28px; max-width: 1100px; margin: 0 auto; }
+    h1, h2 { font-weight: 600; }
+    h1 { margin-top: 0; }
+    table { width: 100%; border-collapse: collapse; margin: 12px 0; background: #fff; }
+    th, td { padding: 8px 10px; text-align: left; border-bottom: 1px solid var(--border); }
+    th { background: #f0f0f0; font-weight: 600; font-size: 14px; }
+    code, pre { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 13px; }
+    pre { background: #111; color: #eee; padding: 10px 12px; overflow-x: auto;
+          border-radius: 4px; max-height: 600px; overflow-y: auto; }
+    form { margin: 16px 0; }
+    label { display: block; margin: 8px 0 4px 0; font-weight: 500; }
+    input[type=text], input[type=password], select, textarea {
+       padding: 6px 8px; font-size: 14px; border: 1px solid var(--border);
+       border-radius: 3px; font-family: inherit; }
+    textarea { width: 100%; font-family: ui-monospace, Menlo, Consolas, monospace; }
+    button { padding: 6px 14px; font-size: 14px; cursor: pointer;
+             background: var(--accent); color: #fff; border: 0; border-radius: 3px; }
+    button.danger { background: var(--bad); }
+    button:hover { opacity: 0.9; }
+    .state-network_up { color: var(--accent); }
+    .state-nfs_mounted { color: var(--accent); }
+    .state-login_ready { color: var(--good); }
+    .state-user_logged_in { color: var(--good); font-weight: 600; }
+    .state-running { color: var(--accent); }
+    .state-succeeded { color: var(--good); }
+    .state-failed { color: var(--bad); }
+    .muted { color: var(--muted); font-size: 13px; }
+    .row-actions form { display: inline; margin: 0; }
+  </style>
+</head>
+<body>
+  <header>
+    <span class="title">fleetboot</span>
+    <a href="/dashboard">machines</a>
+    <a href="/dashboard/profiles">profiles</a>
+    <a href="/dashboard/builds">builds</a>
+  </header>
+  <main>
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>

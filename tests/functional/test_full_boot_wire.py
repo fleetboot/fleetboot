@@ -219,13 +219,18 @@ def test_grub_config_round_trips_with_minted_token(stack):
     # consistently in every URL the client will hit.
     import re
 
-    tokens = re.findall(r"[?&]t=([0-9a-f]+)", text)
-    assert tokens, f"no token query params found in:\n{text}"
-    assert len(set(tokens)) == 1, "token should be the same across all URLs"
-    minted_token = tokens[0]
+    # Token now lives in a path segment: /boot/<token>/<filename> for the
+    # squashfs URL inside live-boot's fetch=, and is also passed on the
+    # cmdline as fleetboot.boot_token=<token>. We pull it out via the
+    # explicit cmdline form (most reliable).
+    cmdline_match = re.search(
+        r"fleetboot\.boot_token=([0-9a-f]+)", text
+    )
+    assert cmdline_match, f"no boot_token on cmdline in:\n{text}"
+    minted_token = cmdline_match.group(1)
     assert len(minted_token) >= 64
-    # The same token should appear on the kernel cmdline.
-    assert f"fleetboot.boot_token={minted_token}" in text
+    # The squashfs URL must use the same token in its path segment.
+    assert f"/boot/{minted_token}/fleetboot-" in text
     # And the minted session should be live in fleetboot's store, bound to
     # our MAC.
     session = fleetboot.sessions.lookup(minted_token)
@@ -243,7 +248,9 @@ def test_boot_assets_served_using_minted_token(stack):
     )
     import re
 
-    token = re.search(r"[?&]t=([0-9a-f]+)", body.decode("utf-8")).group(1)
+    token = re.search(
+        r"fleetboot\.boot_token=([0-9a-f]+)", body.decode("utf-8")
+    ).group(1)
 
     with httpx.Client(timeout=5.0) as client:
         for name, expected in [
@@ -252,7 +259,7 @@ def test_boot_assets_served_using_minted_token(stack):
             ("fleetboot-default-amd64.squashfs", b"fake-squashfs-bytes"),
         ]:
             response = client.get(
-                f"{fleetboot.base_url}/boot/{name}?t={token}"
+                f"{fleetboot.base_url}/boot/{token}/{name}"
             )
             assert response.status_code == 200, name
             assert response.content == expected, name
@@ -268,7 +275,9 @@ def test_status_post_with_minted_token_is_accepted(stack):
     )
     import re
 
-    token = re.search(r"[?&]t=([0-9a-f]+)", body.decode("utf-8")).group(1)
+    token = re.search(
+        r"fleetboot\.boot_token=([0-9a-f]+)", body.decode("utf-8")
+    ).group(1)
 
     with httpx.Client(timeout=5.0) as client:
         response = client.post(

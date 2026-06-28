@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}fleetboot — profile {{ name }}{% endblock %}
+{% block content %}
+<h1>Profile: {{ name }}</h1>
+<p class="muted">
+  Changes here are written to <code>image/profiles/{{ name }}/</code> on disk
+  and take effect on the next image build.
+</p>
+
+<form method="post" action="/dashboard/profiles/{{ name }}">
+  <label>README.md
+    <textarea name="readme" rows="6">{{ readme }}</textarea>
+  </label>
+
+  <label>extra-packages.list
+    <textarea name="extra_packages" rows="8">{{ extra_packages }}</textarea>
+  </label>
+
+  <label>setup-chroot (shell script — leave empty to remove)
+    <textarea name="setup_chroot" rows="14">{{ setup_chroot }}</textarea>
+  </label>
+
+  <button type="submit">save</button>
+  <a href="/dashboard/profiles" style="margin-left: 12px;">back</a>
+</form>
+
+<form method="post" action="/dashboard/builds" style="margin-top: 28px;">
+  <input type="hidden" name="profile" value="{{ name }}">
+  <label>Architecture
+    <select name="architecture">
+      <option value="amd64" selected>amd64</option>
+      <option value="arm64">arm64</option>
+    </select>
+  </label>
+  <button type="submit">build this profile now</button>
+</form>
+{% endblock %}

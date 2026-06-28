@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+{% block title %}fleetboot — machines{% endblock %}
+{% block content %}
+<h1>Machines</h1>
+
+{% if machines %}
+<table>
+  <thead>
+    <tr>
+      <th>MAC</th>
+      <th>Profile</th>
+      <th>Arch</th>
+      <th>Platform</th>
+      <th>Serial</th>
+      <th>Latest state</th>
+      <th>Enrolled at</th>
+      <th></th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for m in machines %}
+    <tr>
+      <td><code>{{ m.mac }}</code></td>
+      <td>{{ m.profile_name }}</td>
+      <td>{{ m.architecture }}</td>
+      <td>{{ m.platform }}</td>
+      <td>{{ "yes" if m.serial_console else "—" }}</td>
+      <td>
+        {% set state = states_by_mac.get(m.mac) %}
+        {% if state %}
+          <span class="state-{{ state }}">{{ state }}</span>
+        {% else %}
+          <span class="muted">—</span>
+        {% endif %}
+      </td>
+      <td><span class="muted">{{ m.created_at }}</span></td>
+      <td class="row-actions">
+        <form method="post" action="/dashboard/machines/{{ m.mac }}/delete"
+              onsubmit="return confirm('Delete {{ m.mac }}?');">
+          <button type="submit" class="danger">delete</button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="muted">No machines enrolled yet.</p>
+{% endif %}
+
+<h2>Enrol a new machine</h2>
+<form method="post" action="/dashboard/machines">
+  <label>MAC address
+    <input type="text" name="mac" placeholder="aa:bb:cc:dd:ee:ff" required>
+  </label>
+  <label>Profile
+    <select name="profile_name" required>
+      {% for p in profile_names %}
+      <option value="{{ p }}">{{ p }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>Architecture
+    <select name="architecture">
+      <option value="x86_64" selected>x86_64</option>
+      <option value="arm64">arm64</option>
+      <option value="i386">i386</option>
+    </select>
+  </label>
+  <label>Platform
+    <select name="platform">
+      <option value="efi" selected>efi</option>
+      <option value="pc">pc (BIOS)</option>
+    </select>
+  </label>
+  <label>
+    <input type="checkbox" name="serial_console" value="1">
+    Enable serial console (VMs / headless hardware only)
+  </label>
+  <button type="submit">enrol</button>
+</form>
+{% endblock %}
