@@ -80,8 +80,6 @@ log "candidate disk: $candidate ($((candidate_size / 2 / 1024 / 1024)) GiB)"
 
 # --- Decide: do we own this disk? -------------------------------------------
 # We own it iff it has a single ext4 filesystem labelled "fleetboot-scratch".
-# Anything else and we DECLINE to wipe — better to leave the admin's data
-# alone than format a disk we shouldn't have touched.
 existing_fs=$(blkid -s TYPE -o value "$candidate" 2>/dev/null || true)
 existing_label=$(blkid -s LABEL -o value "$candidate" 2>/dev/null || true)
 
@@ -90,32 +88,43 @@ if [ "$existing_fs" = "ext4" ] && [ "$existing_label" = "$SIGNATURE_LABEL" ]; th
     owned=1
 fi
 
-# Any signs of a filesystem or partition table we don't recognise as
-# ours? Refuse to wipe.
-if [ "$owned" = "0" ] && [ -n "$existing_fs" ]; then
-    warn "$candidate has an unknown filesystem ($existing_fs); refusing to wipe"
-    exit 0
+# Sanity: mkfs.ext4 must exist. Without it, the rest of this script is
+# pointless. Fail loud (exit 1, unit marked failed) so the dashboard's
+# diagnostics surface "scratch broken" instead of "scratch silently
+# disabled".
+if ! command -v mkfs.ext4 >/dev/null 2>&1; then
+    warn "mkfs.ext4 not installed (need e2fsprogs); scratch cannot be set up"
+    exit 1
 fi
-
-# Empty disk OR our-labelled disk — proceed.
 
 case "$mode" in
     volatile)
-        log "volatile: formatting $candidate (label=$SIGNATURE_LABEL)"
-        mkfs.ext4 -q -F -L "$SIGNATURE_LABEL" "$candidate" || {
-            warn "mkfs.ext4 failed; scratch not configured"
-            exit 0
-        }
+        # Truly volatile: format whatever's there. Choosing volatile is
+        # already an admin opt-in saying "this disk is scratch, anything
+        # on it is replaceable". Persistent state lives on NFS-mounted
+        # /home, not on the local disk.
+        log "volatile: formatting $candidate (was $existing_fs/$existing_label)"
+        if ! mkfs.ext4 -q -F -L "$SIGNATURE_LABEL" "$candidate"; then
+            warn "mkfs.ext4 failed on $candidate; scratch not configured"
+            exit 1
+        fi
         ;;
     persistent)
+        # Persistent: keep the safety check. A typo on the mode shouldn't
+        # cost user data — only blank disks or our-labelled disks
+        # are eligible for format. Disks with foreign filesystems are
+        # left alone (exit 0 — intentional no-op, not a failure).
         if [ "$owned" = "1" ]; then
             log "persistent: existing fleetboot-scratch filesystem; reusing"
-        else
+        elif [ -z "$existing_fs" ]; then
             log "persistent: empty disk; formatting fresh (label=$SIGNATURE_LABEL)"
-            mkfs.ext4 -q -F -L "$SIGNATURE_LABEL" "$candidate" || {
-                warn "mkfs.ext4 failed; scratch not configured"
-                exit 0
-            }
+            if ! mkfs.ext4 -q -F -L "$SIGNATURE_LABEL" "$candidate"; then
+                warn "mkfs.ext4 failed on $candidate; scratch not configured"
+                exit 1
+            fi
+        else
+            warn "persistent: $candidate has $existing_fs/$existing_label; refusing to wipe — switch to volatile to override"
+            exit 0
         fi
         ;;
 esac
@@ -128,5 +137,5 @@ if mount -t ext4 -o noatime "$candidate" "$MOUNTPOINT"; then
     log "mounted $candidate at $MOUNTPOINT (mode=$mode)"
 else
     warn "mount $candidate at $MOUNTPOINT failed"
-    exit 0
+    exit 1
 fi

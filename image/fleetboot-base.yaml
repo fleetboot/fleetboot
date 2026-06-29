@@ -78,6 +78,9 @@ actions:
       # autofs lets us mount /home/<user> on demand, using the user's
       # Kerberos credential cache as the auth context.
       - autofs
+      # mkfs.ext4 + e2fsck for the local-disk scratch setup. Tiny
+      # footprint, always useful to have on hand.
+      - e2fsprogs
       # No desktop, display manager, audio stack, or graphics drivers
       # in the base image. The default profile inherits this thin Debian
       # and adds nothing; desktop profiles (xfce-desktop, gnome-desktop,
