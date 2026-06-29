@@ -235,6 +235,25 @@ actions:
       # and lets fleetboot detect machines that went silent.
       systemctl enable fleetboot-heartbeat.timer
 
+      # ---- Userspace network management ---------------------------
+      #
+      # The initramfs's klibc `ipconfig` brings the interface up once
+      # (kernel cmdline `ip=dhcp`) but is fire-and-forget: it doesn't
+      # configure DNS in /etc/resolv.conf and never refreshes the
+      # DHCP lease. Once the lease expires the machine drops off the
+      # network silently.
+      #
+      # Hand off to systemd-networkd + systemd-resolved (both already
+      # in the systemd package — no extra apt installs). The .network
+      # file in base-overlay matches any wired ethernet and tells
+      # networkd to re-DHCP on its own schedule.
+      #
+      # /etc/resolv.conf becomes a symlink into resolved's stub so
+      # libc-level name lookups use the DHCP-supplied DNS server.
+      systemctl enable systemd-networkd.service
+      systemctl enable systemd-resolved.service
+      ln -sf /run/systemd/resolve/stub-resolv.conf /etc/resolv.conf
+
       # ---- Dev test account ----------------------------------------
       #
       # `fleetboot / fleetboot` — bootstrap login the dashboard admin

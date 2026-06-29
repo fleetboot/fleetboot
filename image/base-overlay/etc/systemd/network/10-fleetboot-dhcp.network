@@ -1,0 +1,27 @@
+# DHCP-configure any wired ethernet interface.
+#
+# The initramfs (klibc ipconfig via ip=dhcp on the kernel cmdline)
+# brings the interface up but only one-shot — it doesn't write
+# /etc/resolv.conf properly and doesn't renew the lease. This unit
+# tells systemd-networkd to take over: it'll re-DHCP on its own
+# schedule, refresh leases, and feed DNS to systemd-resolved.
+#
+# Match is deliberately loose ("any ethernet") because fleet hardware
+# has wildly different interface names (enp0s25, eno1, enx<MAC>, etc.)
+# and we don't want to ship per-machine network files.
+
+[Match]
+Type=ether
+
+[Network]
+DHCP=yes
+# Use hostname/domains the DHCP server advertises for DNS resolution.
+# We already set the system hostname via fleetboot-set-hostname.sh
+# from the same DHCP data, so UseHostname=no here avoids a tug-of-war.
+LLMNR=no
+MulticastDNS=no
+
+[DHCP]
+UseDomains=yes
+UseHostname=no
+UseDNS=yes

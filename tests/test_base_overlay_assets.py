@@ -55,6 +55,28 @@ def test_set_hostname_script_falls_back_to_mac_suffix():
     assert "tail -c 6" in script
 
 
+def test_networkd_dhcp_drop_in_matches_any_wired_ethernet():
+    """systemd-networkd takes over DHCP after the initramfs hands
+    off. The drop-in must match all wired interfaces (different
+    machines have different names: enp0s25, eno1, enx<MAC>, etc.)."""
+    drop_in = BASE_OVERLAY / "etc/systemd/network/10-fleetboot-dhcp.network"
+    assert drop_in.is_file()
+    text = drop_in.read_text()
+    assert "Type=ether" in text
+    assert "DHCP=yes" in text
+    assert "UseDNS=yes" in text
+
+
+def test_recipe_enables_systemd_networkd_and_resolved():
+    """Wiring the .network file isn't enough — the units must also be
+    enabled, and /etc/resolv.conf must point at resolved's stub so
+    libc DNS lookups use the DHCP-supplied server."""
+    recipe = (REPO_ROOT / "image" / "fleetboot-base.yaml").read_text()
+    assert "systemctl enable systemd-networkd.service" in recipe
+    assert "systemctl enable systemd-resolved.service" in recipe
+    assert "/run/systemd/resolve/stub-resolv.conf /etc/resolv.conf" in recipe
+
+
 def test_recipe_overlays_base_overlay_at_root():
     """The recipe must include an overlay action sourcing base-overlay/
     onto /. Without it the sysctl drop-in never reaches the image."""
