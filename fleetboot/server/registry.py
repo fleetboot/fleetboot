@@ -610,9 +610,28 @@ class MachineRegistry:
         return None
 
     def remove(self, mac: str) -> bool:
-        """Delete a machine. Returns True if a row was removed."""
+        """Delete a machine and its associated boot events + sessions.
+
+        We don't enforce FK CASCADE in the schema (it adds migration
+        complexity for a deployment that hasn't needed cleanup yet);
+        instead we explicitly delete the dependents in the same write
+        lock so the cleanup is atomic.
+        """
         normalised_mac = _normalise_mac(mac)
         with self._write_lock, self._connect() as connection:
+            connection.execute(
+                "DELETE FROM boot_events WHERE mac = ?", (normalised_mac,)
+            )
+            # boot_sessions only exists when a persistent BootSessionStore
+            # has run schema setup on the same DB file — registry-only
+            # tests skip it. Tolerate missing table.
+            try:
+                connection.execute(
+                    "DELETE FROM boot_sessions WHERE mac = ?",
+                    (normalised_mac,),
+                )
+            except sqlite3.OperationalError:
+                pass
             cursor = connection.execute(
                 "DELETE FROM machines WHERE mac = ?", (normalised_mac,)
             )

@@ -193,6 +193,22 @@ def test_enroll_rejects_unknown_scratch_mode(registry: MachineRegistry):
         )
 
 
+def test_remove_machine_cascades_to_events(registry: MachineRegistry):
+    """Deleting a machine row also clears its boot_events. Otherwise
+    the events table accumulates orphan rows forever as machines come
+    and go; the detail page on a re-enrolled MAC would show stale
+    history."""
+    registry.enroll(
+        mac="aa:bb:cc:dd:ee:ff", profile_name="default",
+        architecture="x86_64", platform="efi",
+    )
+    registry.log_boot_event(mac="aa:bb:cc:dd:ee:ff", state="network_up")
+    registry.log_boot_event(mac="aa:bb:cc:dd:ee:ff", state="login_ready")
+    assert len(registry.recent_boot_events(mac="aa:bb:cc:dd:ee:ff")) == 2
+    assert registry.remove("aa:bb:cc:dd:ee:ff") is True
+    assert registry.recent_boot_events(mac="aa:bb:cc:dd:ee:ff") == []
+
+
 def test_enroll_tracks_provenance(registry: MachineRegistry):
     """enrolled_by defaults to 'manual'; passing rule:<name> keeps it."""
     m1 = registry.enroll(
