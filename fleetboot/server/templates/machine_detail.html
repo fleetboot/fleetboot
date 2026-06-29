@@ -82,6 +82,14 @@
   </tbody>
 </table>
 
+<h2>Latest diagnostics</h2>
+{% if machine.last_diagnostics %}
+<p class="muted">Captured {{ machine.last_diagnostics_at }} — refreshed on each /status report.</p>
+<pre>{{ machine.last_diagnostics }}</pre>
+{% else %}
+<p class="muted">No diagnostics reported yet (needs the reporter from {{ "2026-06-29T13:48:04Z" }} or later).</p>
+{% endif %}
+
 <h2>Recent boot events</h2>
 {% if events %}
 <table>

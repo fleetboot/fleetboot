@@ -101,6 +101,14 @@ class StatusReport(BaseModel):
         default=None, max_length=128,
         description="Image build version stamp from /etc/fleetboot/build-version.",
     )
+    diagnostics: Optional[str] = Field(
+        default=None, max_length=8192,
+        description=(
+            "Optional snapshot of what's broken (systemctl --failed, "
+            "display-manager state, recent journal). Server stores the "
+            "latest non-empty value on the machine row."
+        ),
+    )
 
 
 class StatusAcknowledgement(BaseModel):
@@ -303,6 +311,10 @@ def create_app(
             if report.boot_version:
                 registry.update_boot_version(
                     mac=session.mac, boot_version=report.boot_version,
+                )
+            if report.diagnostics:
+                registry.update_diagnostics(
+                    mac=session.mac, diagnostics=report.diagnostics,
                 )
         return StatusAcknowledgement(
             ok=True, mac=session.mac, state=report.state

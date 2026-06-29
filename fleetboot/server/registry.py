@@ -37,6 +37,8 @@ CREATE TABLE IF NOT EXISTS machines (
     boot_version_seen_at TEXT,
     scratch_mode    TEXT NOT NULL DEFAULT 'volatile'
                     CHECK(scratch_mode IN ('volatile', 'persistent', 'off')),
+    last_diagnostics TEXT,
+    last_diagnostics_at TEXT,
     created_at      TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -128,6 +130,20 @@ def _add_scratch_mode_columns_if_missing(
             pass
 
 
+def _add_diagnostics_columns_if_missing(
+    connection: sqlite3.Connection,
+) -> None:
+    """Migration: latest reporter diagnostics live on the machine row."""
+    for column_def in (
+        "ALTER TABLE machines ADD COLUMN last_diagnostics TEXT",
+        "ALTER TABLE machines ADD COLUMN last_diagnostics_at TEXT",
+    ):
+        try:
+            connection.execute(column_def)
+        except sqlite3.OperationalError:
+            pass
+
+
 @dataclass(frozen=True)
 class BootEvent:
     """One row from the boot_events log."""
@@ -170,6 +186,11 @@ class Machine:
     #   - persistent: keep ext4 across boots (browser cache survives)
     #   - off:        ignore the disk entirely
     scratch_mode: str = "volatile"
+    # Latest reporter diagnostics — overwritten by each non-empty
+    # `diagnostics` field on /status. Used by the machine detail page
+    # to answer "why is this machine stuck?".
+    last_diagnostics: Optional[str] = None
+    last_diagnostics_at: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -214,6 +235,7 @@ class MachineRegistry:
             _add_hostname_columns_if_missing(connection)
             _add_boot_version_columns_if_missing(connection)
             _add_scratch_mode_columns_if_missing(connection)
+            _add_diagnostics_columns_if_missing(connection)
             # WAL gives us safer concurrent reads without sacrificing
             # durability on writes. Harmless on in-memory databases.
             try:
@@ -288,6 +310,21 @@ class MachineRegistry:
                 (cleaned, normalised_mac),
             )
 
+    def update_diagnostics(self, mac: str, diagnostics: str) -> None:
+        """Replace the machine row's latest diagnostics blob."""
+        normalised_mac = _normalise_mac(mac)
+        cleaned = (diagnostics or "").strip()
+        if not cleaned:
+            return
+        with self._write_lock, self._connect() as connection:
+            connection.execute(
+                "UPDATE machines "
+                "SET last_diagnostics = ?, "
+                "    last_diagnostics_at = datetime('now') "
+                "WHERE mac = ?",
+                (cleaned, normalised_mac),
+            )
+
     def update_boot_version(self, mac: str, boot_version: str) -> None:
         """Stamp the image build version the machine is currently running."""
         normalised_mac = _normalise_mac(mac)
@@ -308,6 +345,7 @@ class MachineRegistry:
         "serial_console", "enrolled_by", "hostname", "hostname_seen_at",
         "boot_version", "boot_version_seen_at",
         "scratch_mode",
+        "last_diagnostics", "last_diagnostics_at",
         "created_at",
     )
 
@@ -575,5 +613,7 @@ def _row_to_machine(row: sqlite3.Row) -> Machine:
         boot_version=row["boot_version"],
         boot_version_seen_at=row["boot_version_seen_at"],
         scratch_mode=row["scratch_mode"] or "volatile",
+        last_diagnostics=row["last_diagnostics"],
+        last_diagnostics_at=row["last_diagnostics_at"],
         created_at=row["created_at"],
     )

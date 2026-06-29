@@ -124,6 +124,31 @@ def test_update_hostname_ignores_whitespace_only_input(registry: MachineRegistry
     assert machine.hostname is None
 
 
+def test_update_diagnostics_persists(registry: MachineRegistry):
+    registry.enroll(
+        mac="aa:bb:cc:dd:ee:ff", profile_name="default",
+        architecture="x86_64", platform="efi",
+    )
+    body = "# systemctl --failed\nfoo.service\n\n# display-manager.service: active"
+    registry.update_diagnostics("aa:bb:cc:dd:ee:ff", body)
+    m = registry.lookup("aa:bb:cc:dd:ee:ff")
+    assert m is not None
+    assert m.last_diagnostics == body
+    assert m.last_diagnostics_at is not None
+
+
+def test_update_diagnostics_skips_empty(registry: MachineRegistry):
+    registry.enroll(
+        mac="aa:bb:cc:dd:ee:ff", profile_name="default",
+        architecture="x86_64", platform="efi",
+    )
+    registry.update_diagnostics("aa:bb:cc:dd:ee:ff", "")
+    registry.update_diagnostics("aa:bb:cc:dd:ee:ff", "   \n  ")
+    m = registry.lookup("aa:bb:cc:dd:ee:ff")
+    assert m is not None
+    assert m.last_diagnostics is None
+
+
 def test_update_boot_version_persists(registry: MachineRegistry):
     registry.enroll(
         mac="aa:bb:cc:dd:ee:ff", profile_name="default",

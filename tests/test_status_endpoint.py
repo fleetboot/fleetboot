@@ -54,6 +54,36 @@ def test_hostname_field_is_persisted_on_registered_machine(tmp_path):
     assert machine.hostname == "lab-pc-01"
 
 
+def test_diagnostics_field_lands_on_machine_row(tmp_path):
+    """A /status post with a diagnostics body overwrites the latest
+    machine.last_diagnostics."""
+    from pathlib import Path
+    from fleetboot.server.registry import MachineRegistry
+
+    store = BootSessionStore()
+    registry = MachineRegistry(Path(tmp_path) / "machines.sqlite")
+    registry.enroll(
+        mac="aa:bb:cc:dd:ee:ff", profile_name="default",
+        architecture="x86_64", platform="efi",
+    )
+    app = create_app(sessions=store, registry=registry)
+    client = TestClient(app)
+    session = store.mint("aa:bb:cc:dd:ee:ff")
+    response = client.post(
+        "/status",
+        json={
+            "state": "network_up",
+            "diagnostics": "# systemctl --failed\nlightdm.service\n",
+        },
+        headers={"Authorization": f"Bearer {session.token}"},
+    )
+    assert response.status_code == 200
+    m = registry.lookup("aa:bb:cc:dd:ee:ff")
+    assert m is not None
+    assert m.last_diagnostics is not None
+    assert "lightdm.service" in m.last_diagnostics
+
+
 def test_user_logged_in_detail_is_recorded():
     client, store = _client_and_store()
     session = store.mint("aa:bb:cc:dd:ee:ff")

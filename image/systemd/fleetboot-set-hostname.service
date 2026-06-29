@@ -1,0 +1,16 @@
+[Unit]
+Description=Adopt DHCP-supplied hostname from initramfs ipconfig
+DefaultDependencies=no
+# /run is a tmpfs, populated very early. Run before any service that
+# might cache the hostname (most importantly the reporter, which calls
+# socket.gethostname() and forwards to /status).
+After=systemd-tmpfiles-setup.service
+Before=network-pre.target fleetboot-network-up.service fleetboot-heartbeat.timer
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/lib/fleetboot/fleetboot-set-hostname.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=basic.target
