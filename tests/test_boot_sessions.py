@@ -5,7 +5,6 @@ import pytest
 from fleetboot.boot_states import BootState
 from fleetboot.server.boot_sessions import (
     BootSessionStore,
-    OutOfOrderStateError,
     UnknownTokenError,
 )
 
@@ -59,12 +58,21 @@ def test_record_state_repeats_are_idempotent():
     assert refreshed.latest_state == BootState.NETWORK_UP
 
 
-def test_record_state_rejects_out_of_order():
+def test_record_state_accepts_out_of_order_keeping_highest_state():
+    """The lifecycle isn't strictly linear: scratch_mounted,
+    network_up, and login_console can converge in different orders
+    depending on which subsystem comes up first. Both states are
+    recorded; latest_state still tracks the highest-index "furthest
+    along" reached."""
     store = BootSessionStore()
     session = store.mint("aa:bb:cc:dd:ee:ff")
     store.record_state(session.token, BootState.LOGIN_CONSOLE)
-    with pytest.raises(OutOfOrderStateError):
-        store.record_state(session.token, BootState.NETWORK_UP)
+    # A later-arriving lower-index report does NOT raise.
+    store.record_state(session.token, BootState.NETWORK_UP)
+    refreshed = store.lookup(session.token)
+    assert refreshed is not None
+    # Highest-index state wins for latest_state.
+    assert refreshed.latest_state == BootState.LOGIN_CONSOLE
 
 
 def test_record_state_unknown_token_raises():

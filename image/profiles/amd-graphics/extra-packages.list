@@ -5,7 +5,11 @@
 # that newer Radeon GPUs need to come up. firmware-amd-graphics lives
 # in Debian's `non-free-firmware` component, which trixie enables by
 # default.
-mesa-vulkan-drivers
+# Mesa userspace — GL + DRI. Vulkan deliberately excluded by default:
+# mesa-vulkan-drivers + its libllvm19 dependency add ~200 MB and most
+# desktop workloads don't need Vulkan acceleration. Admins targeting
+# Vulkan-accelerated apps (some games, Blender, modern compute) can
+# add mesa-vulkan-drivers via image/custom/extra-packages.list.
 mesa-utils
 libgl1-mesa-dri
 firmware-amd-graphics

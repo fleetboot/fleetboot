@@ -12,9 +12,13 @@ xserver-xorg-video-intel
 # cheap to ship, useful when modesetting flakes.
 xserver-xorg-video-vesa
 xserver-xorg-video-fbdev
-# Mesa userspace — GL + Vulkan + DRI. Same packages as amd-graphics,
-# but unioning is harmless because the resolver dedupes.
-mesa-vulkan-drivers
+# Mesa userspace — GL + DRI. No Vulkan: mesa-vulkan-drivers pulls in
+# libllvm19 (126 MB) and itself takes 81 MB, and the typical Intel
+# fleet target (older OptiPlex-class hardware through current Iris
+# Xe) either lacks Vulkan entirely (G41 / GMA X4500 / Ironlake) or
+# doesn't depend on it for desktop rendering. Admins running modern
+# GPU-accelerated workloads can re-add mesa-vulkan-drivers via
+# image/custom/extra-packages.list per-deployment.
 mesa-utils
 libgl1-mesa-dri
 # CPU microcode updates. Small (~50MB) and useful for any Intel CPU.

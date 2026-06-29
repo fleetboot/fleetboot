@@ -13,7 +13,6 @@ import pytest
 from fleetboot.boot_states import BootState
 from fleetboot.server.boot_sessions import (
     BootSessionStore,
-    OutOfOrderStateError,
     UnknownTokenError,
 )
 
@@ -74,12 +73,17 @@ def test_same_state_heartbeat_does_not_regress(db_path: Path):
     assert refreshed.latest_state == BootState.LOGIN_CONSOLE
 
 
-def test_out_of_order_report_still_rejected(db_path: Path):
+def test_out_of_order_report_accepted_persistent(db_path: Path):
+    """Same loosening as the in-memory store — the persistent backend
+    also accepts any valid state at any time. latest_state still
+    tracks the highest-index 'furthest along'."""
     store = BootSessionStore(db_path)
     session = store.mint("aa:bb:cc:dd:ee:ff")
     store.record_state(session.token, BootState.LOGIN_CONSOLE)
-    with pytest.raises(OutOfOrderStateError):
-        store.record_state(session.token, BootState.NETWORK_UP)
+    store.record_state(session.token, BootState.NETWORK_UP)
+    refreshed = store.lookup(session.token)
+    assert refreshed is not None
+    assert refreshed.latest_state == BootState.LOGIN_CONSOLE
 
 
 def test_unknown_token_still_raises(db_path: Path):

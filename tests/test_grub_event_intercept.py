@@ -122,12 +122,14 @@ def test_intercept_unknown_token_returns_empty_without_recording(
     assert registry.recent_boot_events(mac="aa:bb:cc:dd:ee:ff") == []
 
 
-def test_intercept_out_of_order_state_returns_empty_without_recording(
+def test_intercept_lower_index_state_is_accepted_keeps_highest(
     sessions: BootSessionStore, registry: MachineRegistry,
 ):
-    """A later state followed by an earlier one (e.g. heartbeat race)
-    — the BootSessionStore rejects it; we don't propagate the
-    rejection to GRUB."""
+    """A later-arriving lower-index state (e.g. grub_running coming
+    in after the kernel already reported login_console — unusual but
+    possible if heartbeats race) is accepted. The event is recorded
+    in the events table, but latest_state continues to track the
+    highest-index 'furthest along'."""
     session = sessions.mint("aa:bb:cc:dd:ee:ff")
     sessions.record_state(session.token, BootState.LOGIN_CONSOLE)
     intercept = make_grub_event_intercept(
@@ -139,11 +141,13 @@ def test_intercept_out_of_order_state_returns_empty_without_recording(
     )
 
     assert result == b""
-    # latest_state still LOGIN_CONSOLE (the earlier-state attempt was
-    # silently dropped).
     refreshed = sessions.lookup(session.token)
     assert refreshed is not None
     assert refreshed.latest_state == BootState.LOGIN_CONSOLE
+    # grub_running was recorded as an event even though it doesn't
+    # advance latest_state.
+    events = registry.recent_boot_events(mac="aa:bb:cc:dd:ee:ff")
+    assert any(e.state == "grub_running" for e in events)
 
 
 def test_intercept_without_registry_still_records_session_state(

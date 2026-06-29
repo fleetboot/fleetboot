@@ -166,11 +166,12 @@ class BootSessionStore:
         session = self._sessions.get(token)
         if session is None:
             raise UnknownTokenError(token)
-        if session.latest_state is not None:
-            if state_index(state) < state_index(session.latest_state):
-                raise OutOfOrderStateError(
-                    previous=session.latest_state, attempted=state,
-                )
+        # We used to reject out-of-order reports, but the lifecycle
+        # isn't actually linear: scratch_mounted, network_up, and
+        # login_console can fire in different orders depending on how
+        # quickly the local disk, network, and display-manager
+        # converge. Accept any valid state; latest_state still tracks
+        # the highest-index "furthest along" reached.
         session.reports.append(state)
         if session.latest_state is None or state_index(state) > state_index(
             session.latest_state
@@ -191,16 +192,15 @@ class BootSessionStore:
                 if row["latest_state"] is not None
                 else None
             )
-            if previous is not None and state_index(state) < state_index(previous):
-                raise OutOfOrderStateError(previous=previous, attempted=state)
-            # latest_state advances monotonically; equal-state heartbeats just
-            # update the timestamp (so the dashboard knows the machine is
-            # still alive) without rolling back the highest-seen state.
-            new_latest = state
-            if previous is not None and state_index(state) < state_index(previous):
-                # Defensive: should have been rejected above.
-                new_latest = previous
-            elif previous is not None and state_index(state) == state_index(previous):
+            # Accept any valid state. The lifecycle isn't strictly
+            # linear — scratch_mounted, network_up, login_console can
+            # arrive in different orders depending on which subsystem
+            # converges first. latest_state still tracks the highest-
+            # index "furthest along" reached so the dashboard shows the
+            # most-progressed state, and the timestamp always advances.
+            if previous is None or state_index(state) >= state_index(previous):
+                new_latest = state
+            else:
                 new_latest = previous
             connection.execute(
                 "UPDATE boot_sessions "

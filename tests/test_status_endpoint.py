@@ -215,7 +215,11 @@ def test_malformed_authorization_header_returns_401_uniformly():
     assert response.json() == {"detail": "unauthorised"}
 
 
-def test_out_of_order_report_returns_409():
+def test_lower_index_state_after_higher_is_accepted():
+    """Out-of-order reports used to get a 409. They no longer do —
+    scratch_mounted, network_up, login_console can converge in any
+    order. The server records every report and tracks the highest
+    state as `latest_state`."""
     client, store = _client_and_store()
     session = store.mint("aa:bb:cc:dd:ee:ff")
     client.post(
@@ -228,7 +232,11 @@ def test_out_of_order_report_returns_409():
         json={"state": "network_up"},
         headers={"Authorization": f"Bearer {session.token}"},
     )
-    assert response.status_code == 409
+    assert response.status_code == 200
+    refreshed = store.lookup(session.token)
+    assert refreshed is not None
+    # Highest-index state still wins for latest_state.
+    assert refreshed.latest_state == BootState.LOGIN_CONSOLE
 
 
 def test_unknown_state_string_returns_422():
