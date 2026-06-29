@@ -182,7 +182,11 @@ class AutoEnrolRuleRequest(BaseModel):
     match_value: str
     profile_name: str
     architecture: str = "x86_64"
-    platform: str = "efi"
+    # `any` (the default for new rules) matches every URL platform —
+    # restores the old behaviour. `efi`/`pc` make the rule fire only
+    # for that firmware type, useful for per-platform serial_console
+    # defaults in mixed-firmware subnets.
+    platform: str = "any"
     serial_console: bool = False
 
 
@@ -441,7 +445,9 @@ def create_app(
             )
         machine = registry.lookup(mac)
         if machine is None:
-            rule = registry.find_matching_rule(mac, source_ip=source_ip)
+            rule = registry.find_matching_rule(
+                mac, source_ip=source_ip, platform=platform,
+            )
             if rule is not None:
                 # URL platform wins over the rule's platform when both
                 # are present — the URL is observed truth (the client's
@@ -450,9 +456,16 @@ def create_app(
                 # Architecture stays from the rule: BIOS GRUB reports
                 # `i386` even on x86_64 machines, so we can't infer the
                 # real CPU arch from the URL.
-                effective_platform = (
-                    platform if platform in {"pc", "efi"} else rule.platform
-                )
+                # URL platform wins. If absent (shouldn't happen — the
+                # path parser requires it — but be defensive), fall back
+                # to the rule's platform unless that's 'any', in which
+                # case 'efi' is the safest modern default.
+                if platform in {"pc", "efi"}:
+                    effective_platform = platform
+                elif rule.platform in {"pc", "efi"}:
+                    effective_platform = rule.platform
+                else:
+                    effective_platform = "efi"
                 machine = registry.enroll(
                     mac=mac,
                     profile_name=rule.profile_name,
@@ -481,6 +494,11 @@ def create_app(
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="match_kind must be 'mac_prefix' or 'ip_cidr'",
+            )
+        if body.platform not in ("any", "efi", "pc"):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="platform must be 'any', 'efi', or 'pc'",
             )
         try:
             rule = registry.add_auto_enrol_rule(  # type: ignore[union-attr]

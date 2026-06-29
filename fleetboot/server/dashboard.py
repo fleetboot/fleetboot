@@ -258,13 +258,18 @@ def build_dashboard_router(
         match_value: str = Form(""),
         profile_name: str = Form(...),
         architecture: str = Form("x86_64"),
-        platform: str = Form("efi"),
+        platform: str = Form("any"),
         serial_console: Optional[str] = Form(None),
     ) -> RedirectResponse:
         if match_kind not in ("mac_prefix", "ip_cidr"):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="invalid match_kind",
+            )
+        if platform not in ("any", "efi", "pc"):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="platform must be 'any', 'efi', or 'pc'",
             )
         try:
             registry.add_auto_enrol_rule(

@@ -92,6 +92,73 @@ def test_first_matching_rule_wins(registry: MachineRegistry):
     assert match.name == "first"
 
 
+def test_rule_platform_any_matches_both_efi_and_pc(registry: MachineRegistry):
+    """The default behaviour — a rule with platform='any' fires
+    regardless of what the URL says."""
+    registry.add_auto_enrol_rule(
+        name="catch-all", match_kind="mac_prefix",
+        match_value="08", profile_name="default", platform="any",
+    )
+    efi_match = registry.find_matching_rule("08:11:22:33:44:55", platform="efi")
+    pc_match = registry.find_matching_rule("08:11:22:33:44:55", platform="pc")
+    assert efi_match is not None and efi_match.name == "catch-all"
+    assert pc_match is not None and pc_match.name == "catch-all"
+
+
+def test_rule_platform_efi_only_matches_efi(registry: MachineRegistry):
+    registry.add_auto_enrol_rule(
+        name="uefi-rule", match_kind="mac_prefix",
+        match_value="08", profile_name="default", platform="efi",
+    )
+    assert registry.find_matching_rule(
+        "08:11:22:33:44:55", platform="efi"
+    ) is not None
+    # A BIOS URL must NOT match a UEFI-gated rule.
+    assert registry.find_matching_rule(
+        "08:11:22:33:44:55", platform="pc"
+    ) is None
+
+
+def test_per_platform_rules_in_same_subnet(registry: MachineRegistry):
+    """Two rules with the same predicate but different platform gates
+    each fire for their own client class."""
+    registry.add_auto_enrol_rule(
+        name="lab-uefi", match_kind="ip_cidr",
+        match_value="192.168.25.0/24", profile_name="cinnamon-desktop",
+        platform="efi", serial_console=False,
+    )
+    registry.add_auto_enrol_rule(
+        name="lab-bios", match_kind="ip_cidr",
+        match_value="192.168.25.0/24", profile_name="cinnamon-desktop",
+        platform="pc", serial_console=True,
+    )
+    uefi = registry.find_matching_rule(
+        "aa:bb:cc:dd:ee:ff", source_ip="192.168.25.10", platform="efi"
+    )
+    bios = registry.find_matching_rule(
+        "aa:bb:cc:dd:ee:ff", source_ip="192.168.25.10", platform="pc"
+    )
+    assert uefi is not None and uefi.name == "lab-uefi"
+    assert bios is not None and bios.name == "lab-bios"
+    # The serial-console differentiator is preserved per platform.
+    assert uefi.serial_console is False
+    assert bios.serial_console is True
+
+
+def test_rule_platform_specific_skipped_when_url_omits_platform(
+    registry: MachineRegistry,
+):
+    """A platform-gated rule must not fire if we don't know the platform —
+    safer than guessing wrong."""
+    registry.add_auto_enrol_rule(
+        name="uefi-rule", match_kind="mac_prefix",
+        match_value="08", profile_name="default", platform="efi",
+    )
+    assert registry.find_matching_rule(
+        "08:11:22:33:44:55", platform=None
+    ) is None
+
+
 def test_remove_auto_enrol_rule(registry: MachineRegistry):
     rule = registry.add_auto_enrol_rule(
         name="vbox", match_kind="mac_prefix",

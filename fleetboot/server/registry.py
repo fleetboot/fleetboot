@@ -361,7 +361,9 @@ class MachineRegistry:
         match_value: str,
         profile_name: str,
         architecture: str = "x86_64",
-        platform: str = "efi",
+        # 'any' matches both UEFI and BIOS URLs — the unsurprising
+        # default. 'efi'/'pc' gate the rule to one firmware type.
+        platform: str = "any",
         serial_console: bool = False,
     ) -> AutoEnrolRule:
         normalised = _normalise_match_value(match_kind, match_value)
@@ -411,16 +413,28 @@ class MachineRegistry:
         self,
         mac: str,
         source_ip: Optional[str] = None,
+        platform: Optional[str] = None,
     ) -> Optional[AutoEnrolRule]:
         """Return the first rule (lowest id) whose predicate matches.
 
         Empty match_value means "match anything of this kind" — useful for
         a catch-all `mac_prefix=""` rule that auto-enrols every unknown MAC
         to a single registration profile.
+
+        A rule whose ``platform`` is one of ``'efi'``/``'pc'`` only matches
+        when the URL's platform is the same; ``platform='any'`` matches
+        irrespective. This lets admins ship per-firmware rules (e.g. a
+        UEFI rule and a BIOS rule on the same subnet with different
+        serial-console defaults) without writing custom matchers.
         """
         normalised_mac = _normalise_mac(mac)
         for rule in self.list_auto_enrol_rules():
-            if _rule_matches(rule, mac=normalised_mac, source_ip=source_ip):
+            if _rule_matches(
+                rule,
+                mac=normalised_mac,
+                source_ip=source_ip,
+                platform=platform,
+            ):
                 return rule
         return None
 
@@ -462,8 +476,18 @@ def _rule_matches(
     *,
     mac: str,
     source_ip: Optional[str],
+    platform: Optional[str] = None,
 ) -> bool:
-    """Return True if the rule matches this (mac, source_ip) pair."""
+    """Return True if the rule matches this (mac, source_ip, platform) tuple."""
+    # Platform gate: a rule with platform 'any' matches regardless. A
+    # rule with platform 'efi' / 'pc' only matches a URL of that
+    # platform; if the URL didn't include a platform, we conservatively
+    # decline so a UEFI-only rule can't accidentally fire for a BIOS box
+    # that happened to omit the field.
+    rule_platform = (rule.platform or "any").lower()
+    if rule_platform != "any":
+        if platform is None or platform.lower() != rule_platform:
+            return False
     if rule.match_kind == "mac_prefix":
         if rule.match_value == "":
             return True
