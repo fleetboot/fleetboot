@@ -117,6 +117,14 @@ actions:
   # ---------- Fleetboot reporter and triggers ----------
 
   - action: overlay
+    description: "Install Fleetboot base /etc fragments (sysctl, etc.)"
+    # Small drop-ins that affect kernel/runtime behaviour for every
+    # profile. Example: kernel.sysrq=0 to stop a floating ttyS0 from
+    # interpreting electrical noise as Alt+SysRq+B (silent reboot).
+    source: ./base-overlay
+    destination: /
+
+  - action: overlay
     description: "Install the Fleetboot reporter Python package"
     # The Makefile stages a copy of ../fleetboot here as image/fleetboot_pkg
     # so it sits inside the recipe directory, which fakemachine mounts into
