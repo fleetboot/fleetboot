@@ -1,0 +1,94 @@
+#!/bin/sh
+# Wire the fleetboot wallpaper into whichever display-manager greeter
+# is installed. The PNG itself is shipped via the overlay tree at
+# /usr/share/backgrounds/fleetboot/wallpaper.png.
+
+set -eu
+
+BG=/usr/share/backgrounds/fleetboot/wallpaper.png
+
+# lightdm-gtk-greeter (used by xfce-desktop / cinnamon-desktop today).
+# Drop-in conf takes precedence over /etc/lightdm/lightdm-gtk-greeter.conf
+# so we never edit the package file.
+if [ -d /etc/lightdm ]; then
+    mkdir -p /etc/lightdm/lightdm-gtk-greeter.conf.d
+    cat > /etc/lightdm/lightdm-gtk-greeter.conf.d/50-fleetboot.conf <<EOF
+[greeter]
+background=$BG
+EOF
+fi
+
+# gdm3 (gnome-desktop). gdm doesn't expose a simple background setting
+# in its main config; the closest stable mechanism is a dconf default
+# for the lock-screen / login-screen picture-uri. We drop a profile
+# fragment and a default.
+if [ -d /etc/gdm3 ] || dpkg-query -W -f='\${Status}' gdm3 2>/dev/null | grep -q 'install ok installed'; then
+    mkdir -p /etc/dconf/profile /etc/dconf/db/gdm.d
+    cat > /etc/dconf/profile/gdm <<'EOF'
+user-db:user
+system-db:gdm
+file-db:/usr/share/gdm/greeter-dconf-defaults
+EOF
+    cat > /etc/dconf/db/gdm.d/50-fleetboot-background <<EOF
+[org/gnome/desktop/background]
+picture-uri='file://$BG'
+picture-uri-dark='file://$BG'
+EOF
+    # dconf update writes the compiled db. Tolerate missing dconf
+    # (image without the tool — gdm itself will still read the source).
+    dconf update 2>/dev/null || true
+fi
+
+# sddm (kde-desktop). The theme background is per-theme; the cleanest
+# universal hook is the breeze theme's wallpaper override, plus a
+# default-theme override pinning the wallpaper if no other theme is
+# selected.
+if [ -d /etc/sddm.conf.d ] || dpkg-query -W -f='\${Status}' sddm 2>/dev/null | grep -q 'install ok installed'; then
+    mkdir -p /etc/sddm.conf.d
+    cat > /etc/sddm.conf.d/50-fleetboot.conf <<EOF
+[Theme]
+Current=breeze
+EOF
+    # Override the breeze theme's background image so the default
+    # theme picks up the fleetboot wallpaper without us having to
+    # author a custom theme.
+    if [ -d /usr/share/sddm/themes/breeze ]; then
+        cp "$BG" /usr/share/sddm/themes/breeze/fleetboot-wallpaper.png
+        # The theme.conf usually has `background=...`. Patch it if
+        # present; otherwise append.
+        conf=/usr/share/sddm/themes/breeze/theme.conf
+        if [ -f "$conf" ]; then
+            if grep -q '^background=' "$conf"; then
+                sed -i 's|^background=.*|background=fleetboot-wallpaper.png|' "$conf"
+            else
+                printf '\n[General]\nbackground=fleetboot-wallpaper.png\n' >> "$conf"
+            fi
+        fi
+    fi
+fi
+
+# Cinnamon (and other Mate/Xfce/Gnome family) read the desktop
+# wallpaper from gsettings. A dconf default lands a sensible value
+# for every new user account.
+mkdir -p /etc/dconf/profile /etc/dconf/db/local.d
+if [ ! -f /etc/dconf/profile/user ]; then
+    cat > /etc/dconf/profile/user <<'EOF'
+user-db:user
+system-db:local
+EOF
+fi
+cat > /etc/dconf/db/local.d/50-fleetboot-background <<EOF
+[org/cinnamon/desktop/background]
+picture-uri='file://$BG'
+picture-options='zoom'
+
+[org/gnome/desktop/background]
+picture-uri='file://$BG'
+picture-uri-dark='file://$BG'
+picture-options='zoom'
+
+[org/mate/background]
+picture-filename='$BG'
+picture-options='zoom'
+EOF
+dconf update 2>/dev/null || true

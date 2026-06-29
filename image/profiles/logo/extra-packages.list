@@ -1,0 +1,3 @@
+# No extra packages — the wallpaper is shipped via the overlay tree.
+# The setup-chroot wires whichever greeter / desktop the profile chain
+# installed to use the wallpaper.
