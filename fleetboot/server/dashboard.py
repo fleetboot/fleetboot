@@ -255,6 +255,18 @@ def build_dashboard_router(
                 "setup_chroot": _read_or_empty(
                     profile_dir / "setup-chroot"
                 ),
+                # Inheritance chain — newline-separated parent profile
+                # names. Each must resolve under profiles_root; the
+                # resolver dedupes and unions.
+                "parents": _read_or_empty(profile_dir / "parent"),
+                # Debian release this profile bases its image on.
+                # Default ("trixie") is empty here; the recipe falls
+                # back when this file is missing.
+                "suite": _read_or_empty(profile_dir / "suite").strip(),
+                # Show what's actually available to inherit from.
+                "available_parents": [
+                    p for p in _list_profile_names(profiles_root) if p != name
+                ],
             },
         )
 
@@ -268,6 +280,8 @@ def build_dashboard_router(
         extra_packages: str = Form(""),
         setup_chroot: str = Form(""),
         readme: str = Form(""),
+        parents: str = Form(""),
+        suite: str = Form(""),
     ) -> RedirectResponse:
         profile_dir = _safe_profile_dir(profiles_root, name)
         profile_dir.mkdir(parents=True, exist_ok=True)
@@ -282,6 +296,30 @@ def build_dashboard_router(
             script_path.chmod(0o755)
         elif script_path.is_file():
             script_path.unlink()
+        # `parent` is newline-separated names; empty clears the file
+        # entirely so the resolver treats this profile as a root.
+        # Sanitise to known profile names — silently drop unknown
+        # entries so a typo can't break the build chain. (The
+        # resolver also validates, but we surface it earlier here.)
+        known = set(_list_profile_names(profiles_root)) - {name}
+        cleaned_parents = "\n".join(
+            line.strip() for line in parents.splitlines()
+            if line.strip() and line.strip() in known
+        )
+        parent_path = profile_dir / "parent"
+        if cleaned_parents:
+            parent_path.write_text(cleaned_parents + "\n")
+        elif parent_path.is_file():
+            parent_path.unlink()
+        # `suite` is the Debian release codename (e.g. "trixie",
+        # "bookworm"). Empty clears the per-profile override so the
+        # recipe falls back to its default.
+        suite_path = profile_dir / "suite"
+        cleaned_suite = suite.strip()
+        if cleaned_suite:
+            suite_path.write_text(cleaned_suite + "\n")
+        elif suite_path.is_file():
+            suite_path.unlink()
         return RedirectResponse(
             url=f"/dashboard/profiles/{name}",
             status_code=status.HTTP_303_SEE_OTHER,

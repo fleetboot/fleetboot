@@ -15,6 +15,10 @@ ARCH ?= amd64
 # live under image/profiles/<name>/.
 PROFILE ?= default
 
+# Debian release the image is based on. Override with
+# `make image SUITE=bookworm`. The recipe has the same default.
+SUITE ?= trixie
+
 .PHONY: test
 test:
 	$(PYTHON) -m pytest -q
@@ -89,6 +93,7 @@ image: stage-fleetboot-package resolve-profile
 	  --artifactdir=$(BUILD_DIR) \
 	  --template-var=architecture:$(ARCH) \
 	  --template-var=profile:$(PROFILE) \
+	  --template-var=suite:$(SUITE) \
 	  --template-var=build_version:$(BUILD_VERSION) \
 	  $(RECIPE)
 	echo "$(BUILD_VERSION)" > $(BUILD_DIR)/fleetboot-$(PROFILE)-$(ARCH).version

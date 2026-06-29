@@ -258,6 +258,27 @@ def _collect_diagnostics() -> Optional[str]:
     if scratch_log:
         sections.append("# scratch-setup journal\n" + scratch_log)
 
+    # Recent kernel messages: useful for "thermal trip", "I/O error",
+    # "out of memory", "broken hardware" — none of which the systemd
+    # status alone surfaces.
+    dmesg_tail = _run(
+        ["dmesg", "--time-format=iso", "--ctime", "--no-pager"],
+        timeout=6.0,
+    ).strip()
+    if dmesg_tail:
+        last_lines = "\n".join(dmesg_tail.splitlines()[-50:])
+        sections.append("# dmesg (last 50 lines)\n" + last_lines)
+
+    # Recent system-wide journal: complements the per-service journals
+    # above by catching multi-service interaction issues (e.g. lightdm
+    # racing with sssd, NetworkManager spam).
+    system_journal = _run(
+        ["journalctl", "-n", "50", "--no-pager", "--no-hostname"],
+        timeout=6.0,
+    ).strip()
+    if system_journal:
+        sections.append("# journalctl (last 50 lines)\n" + system_journal)
+
     # Show the most-recent log lines for whatever has just crashed — bounded
     # so a verbose service can't blow the payload budget.
     if failed:

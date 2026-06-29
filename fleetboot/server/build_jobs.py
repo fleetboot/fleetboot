@@ -149,6 +149,19 @@ class BuildJobManager:
                     f"PROFILE={job.profile}",
                     f"ARCH={job.architecture}",
                 ]
+                # Per-profile `suite` file (Debian release codename, e.g.
+                # "trixie", "bookworm") overrides the recipe default if
+                # present. Lets a single dashboard manage profiles
+                # pinned to different Debian releases without forking
+                # the recipe.
+                suite_file = (
+                    self._repo_root / "image" / "profiles"
+                    / job.profile / "suite"
+                )
+                if suite_file.is_file():
+                    suite = suite_file.read_text().strip().splitlines()
+                    if suite and suite[0].strip():
+                        cmd.append(f"SUITE={suite[0].strip()}")
                 # Stream stdout+stderr line-by-line into both the file and
                 # the recent_lines ring.
                 process = subprocess.Popen(

@@ -8,6 +8,25 @@
 </p>
 
 <form method="post" action="/dashboard/profiles/{{ name }}">
+  <label>Inherits from (one parent profile per line; deepest first wins)
+    <textarea name="parents" rows="3" placeholder="e.g.&#10;intel-graphics&#10;ssh-debug">{{ parents }}</textarea>
+  </label>
+  {% if available_parents %}
+  <p class="muted">
+    Available parents:
+    {% for p in available_parents %}<code>{{ p }}</code>{% if not loop.last %}, {% endif %}{% endfor %}
+  </p>
+  {% endif %}
+
+  <label>Debian release (suite) — empty falls back to the recipe default (trixie)
+    <input
+      type="text" name="suite"
+      placeholder="trixie"
+      value="{{ suite }}"
+      style="width: 160px"
+    >
+  </label>
+
   <label>README.md
     <textarea name="readme" rows="6">{{ readme }}</textarea>
   </label>
