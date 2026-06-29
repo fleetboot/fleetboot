@@ -28,9 +28,18 @@ def test_set_hostname_reads_initramfs_state_files():
     assert "HOSTNAME=" in text
 
 
-def test_set_hostname_calls_hostnamectl():
+def test_set_hostname_writes_etc_hostname_and_calls_hostname():
+    """The script must persist the hostname by writing /etc/hostname AND
+    set the live kernel hostname. hostnamectl was unreliable in early
+    boot — systemd-hostnamed is socket-activated and not always ready
+    when this script runs, so a hostnamectl failure was silent and
+    NetworkManager later read /etc/hostname (still the baked default)
+    and pushed it back over our transient set."""
     text = (RUNTIME_DIR / "fleetboot-set-hostname.sh").read_text()
-    assert "hostnamectl" in text
+    assert "/etc/hostname" in text
+    assert "hostname " in text  # the legacy syscall-setting binary
+    # And explicitly NOT relying on hostnamectl:
+    assert "hostnamectl" not in text
 
 
 def test_set_hostname_service_runs_before_reporter():

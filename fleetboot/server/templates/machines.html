@@ -87,11 +87,13 @@
         {% endif %}
       </td>
       <td class="row-actions">
-        {% if m.reboot_command %}
+        {% set has_reboot = m.reboot_command or (pdudaemon_host and m.hostname) %}
+        {% if has_reboot %}
+        {% set hint = m.reboot_command or ("pdudaemon alias=" ~ m.hostname) %}
         <form method="post"
               action="/dashboard/machines/{{ m.mac }}/delete-and-reboot"
-              onsubmit="return confirm('Delete {{ m.mac }} AND run reboot command?');">
-          <button type="submit" class="danger" title="{{ m.reboot_command }}">delete + reboot</button>
+              onsubmit="return confirm('Delete {{ m.mac }} AND power-cycle?');">
+          <button type="submit" class="danger" title="{{ hint }}">delete + reboot</button>
         </form>
         {% endif %}
         <form method="post" action="/dashboard/machines/{{ m.mac }}/delete"

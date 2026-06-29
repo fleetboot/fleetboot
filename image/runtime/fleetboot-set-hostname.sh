@@ -36,4 +36,13 @@ if [ -z "$found" ]; then
 fi
 
 echo "fleetboot-set-hostname: setting hostname to $found"
-hostnamectl set-hostname --static "$found" 2>/dev/null || hostname "$found"
+# Two-step: overwrite /etc/hostname so any later service that reads it
+# (NetworkManager, DHCP clients, login banners) sees the right value,
+# AND call the `hostname` syscall directly so the live kernel name
+# updates without a reboot. Going via the d-bus hostname service is
+# unreliable here — this script runs in early boot, before the socket
+# activation has wired up that service, so the d-bus call silently
+# fails and NetworkManager later clobbers the transient back from
+# /etc/hostname.
+echo "$found" > /etc/hostname
+hostname "$found"

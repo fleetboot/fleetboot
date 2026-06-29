@@ -123,6 +123,11 @@ def build_dashboard_router(
                 "auto_refresh": _clamp_refresh(refresh),
                 "latest_versions": latest_versions,
                 "last_seen": last_seen,
+                # Used by the per-row delete+reboot button: if set, any
+                # machine with a hostname can be power-cycled via the
+                # pdudaemon alias fallback even without its own
+                # reboot_command.
+                "pdudaemon_host": registry.get_setting("pdudaemon_host"),
             },
         )
 

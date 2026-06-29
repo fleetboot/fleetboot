@@ -663,19 +663,17 @@ def create_app(
             registry.log_boot_event(
                 mac=session.mac, state=state.value, detail=None,
             )
-        # Return a single byte so GRUB's `cat` has something to read
-        # without erroring. A bare newline shows as a blank line in
-        # GRUB's output — visually a clean separator between echoes.
-        #
-        # `Connection: close` matters: BIOS GRUB's HTTP module reads
-        # Content-Length bytes but then waits for the server to close
-        # the TCP socket before declaring the fetch "done". Without
-        # this header uvicorn keeps the socket open for keep-alive,
-        # causing a ~30s timeout per grub-event call and adding ~2 min
-        # to each boot. Eager close avoids that entire wait.
+        # Empty 200 with Connection: close. We tried returning a 1-byte
+        # body ("\n") to give GRUB's `cat` something to display, but
+        # that triggered a ~30 second per-event stall on the OptiPlex's
+        # BIOS PXE TCP stack (apparently waiting for FIN to propagate
+        # after the Content-Length bytes were read). Content-Length: 0
+        # with eager Connection: close avoids the read-then-wait path
+        # entirely; GRUB's cat sees no body to read and falls through
+        # to the next command immediately.
         return Response(
             status_code=status.HTTP_200_OK,
-            content=b"\n",
+            content=b"",
             media_type="text/plain",
             headers={"Connection": "close"},
         )

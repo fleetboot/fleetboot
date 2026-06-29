@@ -72,9 +72,10 @@ def test_grub_event_records_boot_event(tmp_path):
 
     response = client.get(f"/grub-event/{session.token}/grub_running")
     assert response.status_code == 200
-    # Single newline so GRUB's `cat` has something to read; an empty
-    # body caused "error reading" in BIOS GRUB.
-    assert response.content == b"\n"
+    # Empty body + Connection: close. Content beyond 0 bytes triggers
+    # a 30s stall on the OptiPlex's BIOS PXE TCP stack (FIN propagation).
+    assert response.content == b""
+    assert response.headers.get("connection") == "close"
 
     events = registry.recent_boot_events(mac="aa:bb:cc:dd:ee:ff")
     assert any(e.state == "grub_running" for e in events)
