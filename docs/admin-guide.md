@@ -161,26 +161,55 @@ Whatever DHCP server your network already runs, you need to advertise:
 
 ```
 option arch code 93 = unsigned integer 16;
+class "bios-x86" {
+    match if option arch = 00:00;
+    next-server 10.0.0.10;            # fleetboot server LAN IP
+    filename "fleetboot-x86-bios";
+}
 class "uefi-x64" {
     match if option arch = 00:07;
-    next-server 10.0.0.10;            # fleetboot server LAN IP
+    next-server 10.0.0.10;
     filename "fleetboot-x64-uefi";
 }
 class "uefi-arm64" {
     match if option arch = 00:0b;
     next-server 10.0.0.10;
-    filename "grubnetaa64.efi";
+    filename "grubnetaa64.efi";       # not yet built; placeholder
 }
 ```
 
 ### Example: dnsmasq
 
 ```
+dhcp-match=set:bios,option:client-arch,0
 dhcp-match=set:efi64,option:client-arch,7
 dhcp-match=set:efiarm64,option:client-arch,11
+dhcp-boot=tag:bios,fleetboot-x86-bios,fleetboot,10.0.0.10
 dhcp-boot=tag:efi64,fleetboot-x64-uefi,fleetboot,10.0.0.10
 dhcp-boot=tag:efiarm64,grubnetaa64.efi,fleetboot,10.0.0.10
 ```
+
+### Why arch dispatch matters
+
+DHCP option 93 ("client system architecture") tells us what kind of
+firmware just sent the request:
+
+| Value (decimal) | Firmware                  | bootfile                  |
+|-----------------|---------------------------|---------------------------|
+| 0               | Intel x86PC / legacy BIOS | `fleetboot-x86-bios`      |
+| 7               | EFI x86-64                | `fleetboot-x64-uefi`      |
+| 9               | EFI BC                    | `fleetboot-x64-uefi`      |
+| 11              | EFI ARM 64                | (arm64 build TBD)         |
+
+Without arch dispatch, all clients get the same filename — and a legacy
+BIOS machine fed a UEFI binary won't execute it (downloads succeed,
+firmware silently drops, PXE loops). The signature in the BOOTP capture
+is `ARCH (93), length 2: 0`.
+
+For legacy BIOS clients you also need to set the BOOTP `siaddr` header
+field (= `next-server` in ISC dhcpd, = the third positional argument in
+the dnsmasq snippet above). Option 66 (TFTP server name) alone isn't
+enough — most BIOS PXE stacks ignore it and require `siaddr`.
 
 ### Verifying
 

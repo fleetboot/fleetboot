@@ -53,6 +53,16 @@ def test_initial_grub_cfg_has_no_user_supplied_extensions():
         )
 
 
+def test_makefile_bios_boot_target_present():
+    """grub-binary builds both UEFI and BIOS bootfiles so DHCP can
+    dispatch on option 93 (client architecture)."""
+    makefile = (REPO_ROOT / "Makefile").read_text()
+    # Phony grub-binary target depends on the BIOS file too.
+    assert "fleetboot-x86-bios" in makefile
+    # Uses the i386-pc-pxe grub-mkimage format for legacy BIOS clients.
+    assert "i386-pc-pxe" in makefile
+
+
 def test_makefile_signed_boot_target_present():
     """The structural test that proves admins can run `make signed-boot-assets`."""
     makefile = (REPO_ROOT / "Makefile").read_text()

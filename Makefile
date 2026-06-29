@@ -111,7 +111,28 @@ image-smoke:
 # config from tftpjail and chainloads it. Cheap to (re)build; we ship it
 # alongside vmlinuz / initrd.img in build/.
 .PHONY: grub-binary
-grub-binary: $(BUILD_DIR)/fleetboot-x64-uefi
+grub-binary: $(BUILD_DIR)/fleetboot-x64-uefi $(BUILD_DIR)/fleetboot-x86-bios
+
+# BIOS PXE bootfile. Older x86 hardware (pre-2012ish OptiPlexes etc.)
+# only does legacy BIOS PXE — UEFI binaries won't execute. The same
+# embedded.cfg works (`$grub_cpu` evaluates to `i386` and
+# `$grub_platform` to `pc` in BIOS GRUB, so the per-MAC config request
+# becomes `/jail/<mac>/i386/pc`). tftpjail's identity parser accepts
+# that shape; the renderer maps the machine's registered architecture
+# (e.g. x86_64) to the right squashfs.
+#
+# DHCP needs to advertise this filename to ARCH=0 (Intel x86PC) clients
+# and fleetboot-x64-uefi to ARCH=7/9 (EFI x64) clients — see admin
+# guide's "DHCP — pointing clients at fleetboot" section.
+$(BUILD_DIR)/fleetboot-x86-bios: image/grub-embedded.cfg
+	mkdir -p $(BUILD_DIR)
+	grub-mkimage \
+	  --format=i386-pc-pxe \
+	  --output=$@ \
+	  --prefix='(tftp,$$pxe_default_server)/' \
+	  --config=$< \
+	  pxe tftp http normal linux configfile \
+	  smbios search echo serial terminal net regexp
 
 # Bootfile name is fleetboot-branded so a `tcpdump tftp` capture or a
 # next-server inspect makes it obvious which fleet this client is asking
