@@ -36,7 +36,16 @@ class ReportFailedError(RuntimeError):
 # `debian-live` before DHCP runs. Reporting that has no value, so we
 # filter it out and leave the dashboard's hostname column blank instead.
 _BORING_HOSTNAMES = frozenset(
-    {"localhost", "(none)", "debian", "debian-live", ""}
+    {
+        "", "localhost", "(none)", "none",
+        "debian", "debian-live",
+        # debos's build VM hostname — leaks into /etc/hostname inside the
+        # built image unless the recipe overrides it.
+        "fakemachine",
+        # Our own placeholder set by the recipe; meaningful only after
+        # something better (DHCP option 12, etc.) has overwritten it.
+        "fleetboot", "fleetboot-client",
+    }
 )
 
 

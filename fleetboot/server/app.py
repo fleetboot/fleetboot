@@ -38,6 +38,18 @@ from fleetboot.server.boot_sessions import (
 from fleetboot.server.registry import AutoEnrolRule, Machine, MachineRegistry
 
 
+# Hostnames the reporter sometimes sends that aren't useful for display:
+# the live-boot initramfs default, the host-of-build leakage (debos
+# fakemachine), and various stand-ins. The reporter inside the image has
+# its own filter but we belt-and-braces on the server side too so a fix
+# doesn't require an image rebuild to take effect.
+_BORING_HOSTNAMES = frozenset({
+    "", "localhost", "(none)", "none",
+    "debian", "debian-live", "fakemachine",
+    "fleetboot", "fleetboot-client",
+})
+
+
 # Static filenames we always serve under /boot/.
 _STATIC_BOOT_FILES = frozenset({"vmlinuz", "initrd.img"})
 
@@ -264,7 +276,7 @@ def create_app(
             registry.log_boot_event(
                 mac=session.mac, state=report.state.value, detail=report.detail,
             )
-            if report.hostname:
+            if report.hostname and report.hostname.lower() not in _BORING_HOSTNAMES:
                 registry.update_hostname(
                     mac=session.mac, hostname=report.hostname,
                 )

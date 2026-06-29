@@ -181,6 +181,11 @@ actions:
       # Heartbeat timer keeps the dashboard's "latest state" column fresh
       # and lets fleetboot detect machines that went silent.
       systemctl enable fleetboot-heartbeat.timer
+      # Overwrite debos's fakemachine hostname leak from the chroot build.
+      # `fleetboot-client` is the deliberate placeholder; the reporter
+      # filters it out, so the dashboard shows "—" until DHCP option 12
+      # (or some future runtime hook) gives a real per-machine hostname.
+      echo fleetboot-client > /etc/hostname
 
   - action: run
     description: "Enable the Fleetboot boot-state reporting units"
