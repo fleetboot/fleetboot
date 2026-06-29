@@ -140,7 +140,9 @@ def test_recipe_consumes_profile_extras(recipe: dict):
     # The profile is staged into a durable build-only path (not /tmp,
     # where apt-get install can wipe it).
     assert "fleetboot-build/profile/extra-packages.list" in commands
-    assert "profiles/" in commands  # overlay copy
+    # The overlay copy uses the resolver's merged tree so a parent
+    # profile's overlay (e.g. logo's wallpaper) reaches the image.
+    assert "profiles_resolved/" in commands
     assert "setup-chroot" in commands
 
 

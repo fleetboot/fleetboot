@@ -294,7 +294,12 @@ actions:
     description: "Apply the profile overlay tree on top of the image"
     chroot: false
     command: |
-      src="${RECIPEDIR}/profiles/{{ $profile }}/overlay"
+      # Use the RESOLVED tree: scripts/resolve-profile.py merges every
+      # ancestor's overlay/ into one directory under
+      # profiles_resolved/<profile>/overlay/, so a wallpaper that
+      # lives in `logo/overlay/...` lands on the image when
+      # cinnamon-desktop (which inherits logo) is built.
+      src="${RECIPEDIR}/profiles_resolved/{{ $profile }}/overlay"
       if [ -d "$src" ] && [ -n "$(find "$src" -mindepth 1 -not -name .gitkeep -print -quit 2>/dev/null)" ]; then
         (cd "$src" && tar -cf - --exclude=.gitkeep .) | \
           (cd "$ROOTDIR" && tar -xf - --no-same-owner)
