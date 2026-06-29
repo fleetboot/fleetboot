@@ -210,10 +210,25 @@ def build_dashboard_router(
         dependencies=[Depends(require_admin)],
     )
     def list_profiles(request: Request) -> HTMLResponse:
+        names = _list_profile_names(profiles_root)
+        # Most-recent artifact per profile. We only check x86_64-shaped
+        # archs the image recipe produces today (amd64, arm64); the
+        # template hides rows with no artifact yet.
+        latest_artifacts: dict[str, dict] = {}
+        for name in names:
+            for arch in ("amd64", "arm64"):
+                info = _artifact_for(boot_dir, name, arch)
+                if info is not None:
+                    info["architecture"] = arch
+                    latest_artifacts[name] = info
+                    break
         return templates.TemplateResponse(
             request,
             "profiles.html",
-            {"profile_names": _list_profile_names(profiles_root)},
+            {
+                "profile_names": names,
+                "latest_artifacts": latest_artifacts,
+            },
         )
 
     @router.get(
@@ -489,13 +504,23 @@ def build_dashboard_router(
     def list_builds(
         request: Request, error: Optional[str] = None,
     ) -> HTMLResponse:
+        jobs = builds.list_jobs()
+        # Successful builds: surface the artifact filename + size on
+        # disk so admins can confirm at-a-glance what landed. Failed /
+        # running builds get None — the template suppresses the cell.
+        artifacts = {
+            j.job_id: _artifact_for(boot_dir, j.profile, j.architecture)
+            if getattr(j, "state", "") == "succeeded" else None
+            for j in jobs
+        }
         return templates.TemplateResponse(
             request,
             "builds.html",
             {
-                "jobs": builds.list_jobs(),
+                "jobs": jobs,
                 "running": builds.is_running(),
                 "profile_names": _list_profile_names(profiles_root),
+                "artifacts": artifacts,
                 "error": error,
             },
         )
@@ -671,6 +696,41 @@ def _latest_versions_by_artefact(boot_dir: Optional[Path]) -> dict[str, str]:
         if version:
             out[f"{profile}/{arch}"] = version
     return out
+
+
+def _artifact_for(
+    boot_dir: Optional[Path], profile: str, architecture: str,
+) -> Optional[dict]:
+    """Return metadata for the squashfs that `make image PROFILE=...
+    ARCH=...` produces, or None if it doesn't exist on disk.
+
+    Used by the builds and profiles pages so admins can see at a glance
+    "what file was created, how big is it, when was it written". We
+    look at the artifact's *current* on-disk state — successive builds
+    of the same (profile, arch) overwrite each other, so this naturally
+    shows the most recent build for that combination.
+    """
+    if boot_dir is None:
+        return None
+    name = f"fleetboot-{profile}-{architecture}.squashfs"
+    path = boot_dir / name
+    try:
+        st = path.stat()
+    except OSError:
+        return None
+    return {
+        "name": name,
+        "size_mb": st.st_size // (1024 * 1024),
+        "mtime": _format_mtime(st.st_mtime),
+    }
+
+
+def _format_mtime(epoch: float) -> str:
+    """Human-readable timestamp for an artifact mtime."""
+    import datetime
+    return datetime.datetime.fromtimestamp(
+        epoch, tz=datetime.timezone.utc,
+    ).strftime("%Y-%m-%d %H:%M UTC")
 
 
 def _clamp_refresh(value: Optional[int]) -> Optional[int]:

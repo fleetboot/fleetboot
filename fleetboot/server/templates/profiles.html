@@ -5,11 +5,26 @@
 
 {% if profile_names %}
 <table>
-  <thead><tr><th>Name</th><th></th></tr></thead>
+  <thead>
+    <tr>
+      <th>Name</th>
+      <th>Most recent build</th>
+      <th></th>
+    </tr>
+  </thead>
   <tbody>
     {% for name in profile_names %}
+    {% set art = latest_artifacts.get(name) %}
     <tr>
       <td><strong>{{ name }}</strong></td>
+      <td>
+        {% if art %}
+          <code>{{ art.name }}</code>
+          <br><span class="muted">{{ art.size_mb }} MB · {{ art.mtime }}</span>
+        {% else %}
+          <span class="muted">— not built yet</span>
+        {% endif %}
+      </td>
       <td>
         <a href="/dashboard/profiles/{{ name }}">view / edit</a>
       </td>

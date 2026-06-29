@@ -37,11 +37,13 @@
       <th>Exit</th>
       <th>Started</th>
       <th>Duration</th>
+      <th>Artifact</th>
       <th></th>
     </tr>
   </thead>
   <tbody>
     {% for j in jobs %}
+    {% set art = artifacts.get(j.job_id) %}
     <tr>
       <td><code>{{ j.job_id }}</code></td>
       <td>{{ j.profile }}</td>
@@ -54,6 +56,14 @@
           {{ (j.finished_at - j.started_at) | round(1) }}s
         {% else %}
           <span class="muted">…</span>
+        {% endif %}
+      </td>
+      <td>
+        {% if art %}
+          <code>{{ art.name }}</code>
+          <br><span class="muted">{{ art.size_mb }} MB · {{ art.mtime }}</span>
+        {% else %}
+          <span class="muted">—</span>
         {% endif %}
       </td>
       <td><a href="/dashboard/builds/{{ j.job_id }}">log</a></td>
