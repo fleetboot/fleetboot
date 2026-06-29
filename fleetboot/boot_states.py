@@ -12,6 +12,7 @@ class BootState(str, Enum):
     """Lifecycle states a machine progresses through during a boot."""
 
     NETWORK_UP = "network_up"
+    SCRATCH_MOUNTED = "scratch_mounted"
     NFS_MOUNTED = "nfs_mounted"
     LOGIN_READY = "login_ready"
     USER_LOGGED_IN = "user_logged_in"
@@ -22,6 +23,7 @@ class BootState(str, Enum):
 # against a confused or tampered-with client).
 BOOT_STATE_ORDER: tuple[BootState, ...] = (
     BootState.NETWORK_UP,
+    BootState.SCRATCH_MOUNTED,
     BootState.NFS_MOUNTED,
     BootState.LOGIN_READY,
     BootState.USER_LOGGED_IN,

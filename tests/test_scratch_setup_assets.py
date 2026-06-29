@@ -88,6 +88,24 @@ def test_scratch_service_is_oneshot_with_cmdline_condition():
     assert "ConditionKernelCommandLine=fleetboot.scratch" in text
 
 
+def test_scratch_service_reports_scratch_mounted_on_success():
+    """ExecStartPost calls the reporter so the dashboard sees the
+    scratch_mounted state — visibility into 'did the mount actually
+    happen'."""
+    text = (SYSTEMD_DIR / "fleetboot-scratch-setup.service").read_text()
+    assert "fleetboot.reporter.report scratch_mounted" in text
+    # Leading `-` means a failed reporter call doesn't mark the unit
+    # failed — the next heartbeat will re-send the state.
+    assert "ExecStartPost=-/" in text
+
+
+def test_scratch_service_waits_for_network():
+    """The reporter call needs HTTP; defer the whole unit until
+    network-online so the report can actually get through."""
+    text = (SYSTEMD_DIR / "fleetboot-scratch-setup.service").read_text()
+    assert "network-online.target" in text
+
+
 def test_scratch_script_fails_loud_when_mkfs_missing():
     """Without mkfs.ext4 the script can't do its job — exit non-zero so
     the unit is marked failed and the dashboard's diagnostics surface

@@ -81,6 +81,10 @@ actions:
       # mkfs.ext4 + e2fsck for the local-disk scratch setup. Tiny
       # footprint, always useful to have on hand.
       - e2fsprogs
+      # lspci/lsusb power the reporter's hardware inventory — GPU,
+      # network, USB controllers + devices show up in the dashboard.
+      - pciutils
+      - usbutils
       # No desktop, display manager, audio stack, or graphics drivers
       # in the base image. The default profile inherits this thin Debian
       # and adds nothing; desktop profiles (xfce-desktop, gnome-desktop,
@@ -296,10 +300,14 @@ actions:
     description: "Run profile setup-chroot if present"
     chroot: true
     command: |
+      # debos's overlay action doesn't reliably preserve the executable
+      # bit on the resolved profile's setup-chroot file. Invoking via
+      # `sh "$script"` bypasses the -x check and runs the script via
+      # its shebang's interpreter.
       script=/tmp/fleetboot-profile/setup-chroot
-      if [ -x "$script" ]; then
+      if [ -f "$script" ]; then
         echo "fleetboot: running {{ $profile }} profile setup-chroot"
-        "$script"
+        sh "$script"
       fi
 
   - action: run

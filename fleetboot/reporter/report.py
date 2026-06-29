@@ -175,6 +175,50 @@ def _collect_hardware() -> Optional[dict]:
         })
     info["mounts"] = mounts
 
+    # PCI devices: VGA controllers, network adapters, USB controllers,
+    # storage controllers. lspci -mm gives a stable, easy-to-parse
+    # quoted format; we then bucket by device class.
+    pci_buckets: dict[str, list[str]] = {
+        "gpu": [], "network": [], "usb": [], "storage": [],
+    }
+    raw_pci = _run(["lspci", "-mm"])
+    for line in raw_pci.splitlines():
+        # Format: "00:02.0" "VGA compatible controller" "Intel..." "Device..." ...
+        # We use the class field (column 2) to bucket, and the vendor +
+        # device for display.
+        import shlex
+        try:
+            fields = shlex.split(line)
+        except ValueError:
+            continue
+        if len(fields) < 4:
+            continue
+        klass = fields[1].lower()
+        device_str = f"{fields[2]} {fields[3]}"
+        if "vga" in klass or "3d" in klass or "display" in klass:
+            pci_buckets["gpu"].append(device_str)
+        elif "network" in klass or "ethernet" in klass or "wireless" in klass:
+            pci_buckets["network"].append(device_str)
+        elif "usb" in klass:
+            pci_buckets["usb"].append(device_str)
+        elif "sata" in klass or "ide" in klass or "raid" in klass or "scsi" in klass:
+            pci_buckets["storage"].append(device_str)
+    info["pci"] = {k: v for k, v in pci_buckets.items() if v}
+
+    # USB devices currently attached. lsusb output is one device per line:
+    # "Bus 001 Device 003: ID 1d6b:0002 Linux Foundation 2.0 root hub".
+    # Skip the root hubs (they're noise); the rest is "what's actually
+    # plugged into this box".
+    usb_devices = []
+    raw_usb = _run(["lsusb"])
+    for line in raw_usb.splitlines():
+        if "root hub" in line.lower():
+            continue
+        # Take everything after the ID part for a readable label.
+        if "ID " in line:
+            usb_devices.append(line.split("ID ", 1)[1].strip())
+    info["usb_devices"] = usb_devices
+
     return info if info else None
 
 

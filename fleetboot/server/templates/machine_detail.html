@@ -122,6 +122,43 @@
       </ul>
     </td></tr>
     {% endif %}
+    {% if hardware.pci %}
+    {% if hardware.pci.gpu %}
+    <tr><th>GPU</th><td>
+      <ul style="margin: 0; padding-left: 20px;">
+        {% for d in hardware.pci.gpu %}<li>{{ d }}</li>{% endfor %}
+      </ul>
+    </td></tr>
+    {% endif %}
+    {% if hardware.pci.network %}
+    <tr><th>Network adapters</th><td>
+      <ul style="margin: 0; padding-left: 20px;">
+        {% for d in hardware.pci.network %}<li>{{ d }}</li>{% endfor %}
+      </ul>
+    </td></tr>
+    {% endif %}
+    {% if hardware.pci.usb %}
+    <tr><th>USB controllers</th><td>
+      <ul style="margin: 0; padding-left: 20px;">
+        {% for d in hardware.pci.usb %}<li>{{ d }}</li>{% endfor %}
+      </ul>
+    </td></tr>
+    {% endif %}
+    {% if hardware.pci.storage %}
+    <tr><th>Storage controllers</th><td>
+      <ul style="margin: 0; padding-left: 20px;">
+        {% for d in hardware.pci.storage %}<li>{{ d }}</li>{% endfor %}
+      </ul>
+    </td></tr>
+    {% endif %}
+    {% endif %}
+    {% if hardware.usb_devices %}
+    <tr><th>USB devices attached</th><td>
+      <ul style="margin: 0; padding-left: 20px;">
+        {% for d in hardware.usb_devices %}<li>{{ d }}</li>{% endfor %}
+      </ul>
+    </td></tr>
+    {% endif %}
   </tbody>
 </table>
 {% else %}

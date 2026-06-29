@@ -82,8 +82,6 @@
         {% endif %}
       </td>
       <td class="row-actions">
-        <a href="/dashboard/events?mac={{ m.mac }}">history</a>
-        &nbsp;
         {% if m.reboot_command %}
         <form method="post"
               action="/dashboard/machines/{{ m.mac }}/delete-and-reboot"
