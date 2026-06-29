@@ -127,6 +127,19 @@ actions:
     source: ./runtime
     destination: /usr/local/lib/fleetboot
 
+  - action: run
+    description: "Pre-create dirs for the networking hook overlays"
+    chroot: true
+    command: |
+      # NetworkManager isn't in the base image (the desktop profiles
+      # pull it in later); its dispatcher.d dir doesn't exist yet.
+      # Same logic for dhclient hooks — isc-dhcp-client may or may
+      # not be in the base depending on transitive deps. Belt-and-braces:
+      # create both. Empty dirs are harmless if the consuming daemon
+      # never lands in the image.
+      mkdir -p /etc/dhcp/dhclient-exit-hooks.d
+      mkdir -p /etc/NetworkManager/dispatcher.d
+
   - action: overlay
     description: "Install Fleetboot dhclient exit-hook for DHCP hostname"
     source: ./networking/dhclient
