@@ -8,6 +8,10 @@ requires-python = ">=3.11"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# fleetboot/tftp_glue imports tftpjail (sibling repo); tftpjail is a
+# pure-Python core that we use as a library, so adding it to the
+# pytest pythonpath is enough for tests to import.
+pythonpath = ["..", "../tftpjail"]
 # Each non-default suite has its own `make` target:
 #   make functional-test       — in-process fleetboot + tftpjail wire
 #   make vbox-functional-test  — real VirtualBox UEFI guest

@@ -17,7 +17,7 @@
     header a { color: #fff; text-decoration: none; margin-right: 18px; }
     header a:hover { text-decoration: underline; }
     header .title { font-weight: bold; margin-right: 28px; }
-    main { padding: 20px 28px; max-width: 1100px; margin: 0 auto; }
+    main { padding: 16px 14px; max-width: 1400px; margin: 0 auto; }
     h1, h2 { font-weight: 600; }
     h1 { margin-top: 0; }
     table { width: 100%; border-collapse: collapse; margin: 12px 0; background: #fff; }
@@ -47,7 +47,9 @@
     .muted { color: var(--muted); font-size: 13px; }
     .version-current { color: var(--good); font-weight: 500; }
     .version-stale   { color: #d97706; font-weight: 500; }
-    .row-actions form { display: inline; margin: 0; }
+    .row-actions { white-space: nowrap; }
+    .row-actions form { display: inline-block; margin: 0 4px 0 0; }
+    .row-actions form:last-child { margin-right: 0; }
   </style>
 </head>
 <body>

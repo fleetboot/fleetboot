@@ -42,14 +42,17 @@ sys.path.insert(0, str(TFTPJAIL_ROOT))
 
 from fleetboot.server.app import create_app  # noqa: E402
 from fleetboot.server.boot_sessions import BootSessionStore  # noqa: E402
+from fleetboot.server.grub_event_intercept import (  # noqa: E402
+    make_grub_event_intercept as _make_grub_event_intercept,
+)
 from fleetboot.server.registry import MachineRegistry  # noqa: E402
 
-from tftpjail.fleetboot_client import (  # noqa: E402
+from fleetboot.tftp_glue.client import (  # noqa: E402
     FleetbootClient,
     build_registry_lookup,
 )
+from fleetboot.tftp_glue.renderer import build_grub_config_renderer  # noqa: E402
 from tftpjail.policy import Policy  # noqa: E402
-from tftpjail.renderer import build_grub_config_renderer  # noqa: E402
 from tftpjail.server import TftpJailServer  # noqa: E402
 
 
@@ -204,6 +207,13 @@ def main(argv: list[str]) -> int:
         public_assets_dir=BOOT_DIR,
         ack_timeout_seconds=1.0,
         max_retries=5,
+        # Intercept /grub-event/<token>/<state> TFTP RRQs from the per-MAC
+        # grub.cfg's `source (tftp,...)` lines. Recording the boot event
+        # happens in-process — no HTTP round-trip — and we return empty
+        # bytes so `source` parses a no-op script.
+        rrq_intercept=_make_grub_event_intercept(
+            sessions=sessions, registry=registry,
+        ),
     )
     tftpjail.start()
     print(f"tftpjail listening on UDP/{TFTP_PORT}")

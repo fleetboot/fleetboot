@@ -87,9 +87,15 @@
         {% endif %}
       </td>
       <td class="row-actions">
-        {% set has_reboot = m.reboot_command or (pdudaemon_host and m.hostname) %}
+        {% set has_reboot = m.reboot_command or pdudaemon_host %}
         {% if has_reboot %}
-        {% set hint = m.reboot_command or ("pdudaemon alias=" ~ m.hostname) %}
+        {% if m.reboot_command %}
+          {% set hint = m.reboot_command %}
+        {% elif m.hostname %}
+          {% set hint = "pdudaemon alias=" ~ m.hostname %}
+        {% else %}
+          {% set hint = "pdudaemon — no hostname yet, command will fire but fail" %}
+        {% endif %}
         <form method="post"
               action="/dashboard/machines/{{ m.mac }}/delete-and-reboot"
               onsubmit="return confirm('Delete {{ m.mac }} AND power-cycle?');">
