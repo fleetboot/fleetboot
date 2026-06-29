@@ -477,6 +477,41 @@ def test_status_reply_carries_pending_reboot_when_armed(tmp_path: Path):
     assert response.json()["pending_reboot"] is False
 
 
+def test_mint_session_clears_pending_reboot(tmp_path: Path):
+    """A fresh /sessions mint means the machine PXE-booted. If the
+    soft-reboot signal triggered that boot, it has been consumed —
+    clear it so the new boot doesn't immediately reboot itself on
+    the first heartbeat (the exact loop the laptop hit in the
+    field)."""
+    from pathlib import Path as _P
+    from fastapi.testclient import TestClient
+    from fleetboot.server.app import create_app
+    from fleetboot.server.boot_sessions import BootSessionStore
+    from fleetboot.server.registry import MachineRegistry
+
+    sessions = BootSessionStore()
+    registry = MachineRegistry(_P(tmp_path) / "machines.sqlite")
+    registry.enroll(
+        mac="aa:bb:cc:dd:ee:ff", profile_name="default",
+        architecture="x86_64", platform="efi",
+    )
+    registry.set_pending_reboot("aa:bb:cc:dd:ee:ff", True)
+    mint_secret = "mint-shared-secret"
+    app = create_app(
+        sessions=sessions, registry=registry, mint_secret=mint_secret,
+    )
+    client = TestClient(app)
+    response = client.post(
+        "/sessions",
+        json={"mac": "aa:bb:cc:dd:ee:ff"},
+        headers={"Authorization": f"Bearer {mint_secret}"},
+    )
+    assert response.status_code == 201
+    refreshed = registry.lookup("aa:bb:cc:dd:ee:ff")
+    assert refreshed is not None
+    assert refreshed.pending_reboot is False
+
+
 def test_machine_detail_404_for_unknown_mac(dashboard_root: Path):
     client = _client(dashboard_root)
     response = client.get(

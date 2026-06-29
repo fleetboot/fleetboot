@@ -393,6 +393,13 @@ def create_app(
                 detail="unauthorised",
             )
         session = store.mint(request.mac)
+        # A new mint means the machine just PXE-booted again. If the
+        # previous boot was triggered by the soft-reboot signal, the
+        # signal has now been consumed — clear it so the new boot
+        # doesn't immediately reboot itself again on its first
+        # heartbeat (which was the exact loop seen in the field).
+        if registry is not None:
+            registry.set_pending_reboot(session.mac, False)
         return MintResponse(token=session.token, mac=session.mac)
 
     @app.get("/boot/{token}/{filename}")
