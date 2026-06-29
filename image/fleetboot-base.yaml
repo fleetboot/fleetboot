@@ -229,6 +229,30 @@ actions:
       # Heartbeat timer keeps the dashboard's "latest state" column fresh
       # and lets fleetboot detect machines that went silent.
       systemctl enable fleetboot-heartbeat.timer
+
+      # ---- Dev test account ----------------------------------------
+      #
+      # `fleetboot / fleetboot` — bootstrap login the dashboard admin
+      # can use before FreeIPA enrolment is set up, so the greeter is
+      # actually usable on a fresh fleet. Member of `sudo` for
+      # admin diagnosis, plus the standard hardware groups so audio /
+      # USB / video work without further config.
+      #
+      # SECURITY: This is a known weak credential. Production fleets
+      # MUST disable it after FreeIPA is wired up — overlay
+      # /etc/passwd or set the account password to `!` via an admin
+      # custom hook. The recipe still creates the account because not
+      # having ANY local login on a brand-new image was the worse
+      # failure mode (no FreeIPA → no users → unrecoverable greeter).
+      if ! id -u fleetboot >/dev/null 2>&1; then
+        useradd \
+          --create-home \
+          --shell /bin/bash \
+          --groups sudo,audio,video,plugdev,netdev \
+          --comment 'Fleetboot bootstrap login (CHANGE OR DISABLE IN PROD)' \
+          fleetboot
+        echo 'fleetboot:fleetboot' | chpasswd
+      fi
       # Scratch-disk setup runs once at boot, gated on
       # fleetboot.scratch=<mode> on the kernel cmdline.
       systemctl enable fleetboot-scratch-setup.service
