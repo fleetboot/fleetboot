@@ -815,15 +815,32 @@ def _humanise_seconds(seconds: int) -> str:
 def _latest_versions_by_artefact(boot_dir: Optional[Path]) -> dict[str, str]:
     """Scan boot_dir for fleetboot-<profile>-<arch>.version sidecars.
 
-    Returns a {"<profile>/<arch>": "<version>"} map. The machines template
-    looks up its own row's profile+arch and compares.
+    Returns a {"<profile>/<arch>": "<version>"} map. The machines
+    template looks up its own row's profile+arch and compares.
+
+    The same version is registered under every alias for that arch
+    (e.g. an `amd64` sidecar is keyed as both `<profile>/amd64` and
+    `<profile>/x86_64`) because the registry stores `x86_64` for
+    BIOS PXE clients while build artefacts always use Debian's
+    `amd64`. Without the alias the dashboard would render every
+    BIOS-PXE'd machine's version in grey.
     """
+    # Map every architecture name to its set of aliases. Lookups
+    # apply on BOTH the row's arch (whatever the registry stored)
+    # AND every sidecar's arch.
+    arch_aliases = {
+        "amd64": ("amd64", "x86_64", "x64"),
+        "x86_64": ("amd64", "x86_64", "x64"),
+        "x64": ("amd64", "x86_64", "x64"),
+        "arm64": ("arm64", "aarch64"),
+        "aarch64": ("arm64", "aarch64"),
+    }
     if boot_dir is None or not boot_dir.is_dir():
         return {}
     out: dict[str, str] = {}
     for path in boot_dir.glob("fleetboot-*-*.version"):
         # Filename shape: fleetboot-<profile>-<arch>.version
-        stem = path.stem  # "fleetboot-<profile>-<arch>"
+        stem = path.stem
         parts = stem.split("-")
         if len(parts) < 3 or parts[0] != "fleetboot":
             continue
@@ -834,8 +851,10 @@ def _latest_versions_by_artefact(boot_dir: Optional[Path]) -> dict[str, str]:
             version = path.read_text().strip().splitlines()[0]
         except (OSError, IndexError):
             continue
-        if version:
-            out[f"{profile}/{arch}"] = version
+        if not version:
+            continue
+        for alias in arch_aliases.get(arch, (arch,)):
+            out[f"{profile}/{alias}"] = version
     return out
 
 
