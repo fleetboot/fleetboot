@@ -733,9 +733,12 @@ def _pdudaemon_reboot_command(*, pdu_host: str, alias: str) -> str:
         base = pdu_host
     else:
         base = f"http://{pdu_host}"
-    return (
-        f'curl "{base}/power/control/reboot?alias={safe_alias}"'
-    )
+    # `--fail` makes curl exit non-zero on HTTP 4xx/5xx so our
+    # soft-reboot fallback fires when pdudaemon refuses the request
+    # (unknown alias, port unconfigured, server down). Without it
+    # curl returns 0 for a "404 alias not found" body, which would
+    # masquerade as success.
+    return f'curl --fail "{base}/power/control/reboot?alias={safe_alias}"'
 
 
 def _list_profile_names(profiles_root: Path) -> list[str]:
