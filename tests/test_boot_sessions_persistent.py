@@ -53,11 +53,11 @@ def test_session_survives_a_new_store_instance(db_path: Path):
 def test_record_state_persists_progression(db_path: Path):
     store = BootSessionStore(db_path)
     session = store.mint("aa:bb:cc:dd:ee:ff")
-    for state in (BootState.NETWORK_UP, BootState.NFS_MOUNTED, BootState.LOGIN_READY):
+    for state in (BootState.NETWORK_UP, BootState.NFS_MOUNTED, BootState.LOGIN_CONSOLE):
         store.record_state(session.token, state)
     later = BootSessionStore(db_path).lookup(session.token)
     assert later is not None
-    assert later.latest_state == BootState.LOGIN_READY
+    assert later.latest_state == BootState.LOGIN_CONSOLE
 
 
 def test_same_state_heartbeat_does_not_regress(db_path: Path):
@@ -65,19 +65,19 @@ def test_same_state_heartbeat_does_not_regress(db_path: Path):
     without raising and without dropping back."""
     store = BootSessionStore(db_path)
     session = store.mint("aa:bb:cc:dd:ee:ff")
-    store.record_state(session.token, BootState.USER_LOGGED_IN)
+    store.record_state(session.token, BootState.LOGIN_CONSOLE)
     # Two heartbeat reports — must not raise, must keep latest_state pinned.
-    store.record_state(session.token, BootState.USER_LOGGED_IN)
-    store.record_state(session.token, BootState.USER_LOGGED_IN)
+    store.record_state(session.token, BootState.LOGIN_CONSOLE)
+    store.record_state(session.token, BootState.LOGIN_CONSOLE)
     refreshed = store.lookup(session.token)
     assert refreshed is not None
-    assert refreshed.latest_state == BootState.USER_LOGGED_IN
+    assert refreshed.latest_state == BootState.LOGIN_CONSOLE
 
 
 def test_out_of_order_report_still_rejected(db_path: Path):
     store = BootSessionStore(db_path)
     session = store.mint("aa:bb:cc:dd:ee:ff")
-    store.record_state(session.token, BootState.LOGIN_READY)
+    store.record_state(session.token, BootState.LOGIN_CONSOLE)
     with pytest.raises(OutOfOrderStateError):
         store.record_state(session.token, BootState.NETWORK_UP)
 
@@ -100,7 +100,7 @@ def test_last_seen_by_mac_returns_latest_timestamp_per_mac(db_path: Path):
     a = store.mint("aa:bb:cc:dd:ee:01")
     b = store.mint("aa:bb:cc:dd:ee:02")
     store.record_state(a.token, BootState.NETWORK_UP)
-    store.record_state(b.token, BootState.LOGIN_READY)
+    store.record_state(b.token, BootState.LOGIN_CONSOLE)
     seen = store.last_seen_by_mac()
     assert sorted(seen.keys()) == ["aa:bb:cc:dd:ee:01", "aa:bb:cc:dd:ee:02"]
     # Both values must be parseable as SQLite-style ISO timestamps.

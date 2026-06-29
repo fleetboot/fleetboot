@@ -409,7 +409,7 @@ def test_machines_page_shows_last_seen_and_stale_indicator(
     a = sessions.mint("aa:bb:cc:dd:ee:01")
     b = sessions.mint("aa:bb:cc:dd:ee:02")
     sessions.record_state(a.token, BootState.NETWORK_UP)
-    sessions.record_state(b.token, BootState.LOGIN_READY)
+    sessions.record_state(b.token, BootState.LOGIN_CONSOLE)
     # Backdate one of them to simulate a machine that went silent. SQLite
     # stores `datetime('now')`, so we patch the row directly.
     import sqlite3

@@ -1,14 +1,13 @@
-"""Tests that the in-image trigger assets (systemd units, PAM hook) are wired
-to the boot states they claim to report and have the ordering directives we
-rely on.
+"""Tests that the in-image trigger assets (systemd units) are wired to
+the boot states they claim to report and have the ordering directives
+we rely on.
 
-These do not run systemd — they parse the unit files. The integration test
-that actually boots a UEFI guest will live with the image build step.
+These do not run systemd — they parse the unit files. The integration
+test that actually boots a UEFI guest will live with the image build
+step.
 """
 
 import configparser
-import os
-import stat
 from pathlib import Path
 
 import pytest
@@ -18,7 +17,6 @@ from fleetboot.boot_states import BootState
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SYSTEMD_DIR = REPO_ROOT / "image" / "systemd"
-PAM_HOOK = REPO_ROOT / "image" / "pam" / "fleetboot-session-hook"
 
 
 def _load_unit(name: str) -> configparser.ConfigParser:
@@ -39,7 +37,7 @@ def _load_unit(name: str) -> configparser.ConfigParser:
     [
         ("fleetboot-network-up.service", BootState.NETWORK_UP),
         ("fleetboot-nfs-mounted.service", BootState.NFS_MOUNTED),
-        ("fleetboot-login-ready.service", BootState.LOGIN_READY),
+        ("fleetboot-login-console.service", BootState.LOGIN_CONSOLE),
     ],
 )
 def test_unit_reports_expected_state(unit_name: str, expected_state: BootState):
@@ -63,8 +61,8 @@ def test_nfs_unit_waits_for_home_mount_and_for_network_report():
     assert "home.mount" in unit["Unit"]["Requires"]
 
 
-def test_login_ready_unit_waits_for_display_manager_and_nfs_report():
-    unit = _load_unit("fleetboot-login-ready.service")
+def test_login_console_unit_waits_for_display_manager_and_nfs_report():
+    unit = _load_unit("fleetboot-login-console.service")
     after = unit["Unit"]["After"]
     assert "display-manager.service" in after
     assert "fleetboot-nfs-mounted.service" in after
@@ -75,36 +73,9 @@ def test_login_ready_unit_waits_for_display_manager_and_nfs_report():
     [
         "fleetboot-network-up.service",
         "fleetboot-nfs-mounted.service",
-        "fleetboot-login-ready.service",
+        "fleetboot-login-console.service",
     ],
 )
 def test_units_are_oneshot(unit_name: str):
     unit = _load_unit(unit_name)
     assert unit["Service"]["Type"] == "oneshot"
-
-
-def test_pam_hook_is_executable():
-    mode = PAM_HOOK.stat().st_mode
-    assert mode & stat.S_IXUSR, "PAM hook script must be executable"
-
-
-def test_pam_hook_reports_user_logged_in_with_username():
-    contents = PAM_HOOK.read_text()
-    assert "user_logged_in" in contents
-    assert "$PAM_USER" in contents
-
-
-def test_pam_hook_only_fires_on_session_open():
-    """Without this guard PAM would fire it on close too, double-counting."""
-    contents = PAM_HOOK.read_text()
-    assert "open_session" in contents
-
-
-def test_pam_hook_is_failsafe_for_login():
-    """A reporting failure must never block the user from logging in.
-
-    We enforce that by requiring a `|| true` (or equivalent) on the report
-    call line, so the script always exits 0 from PAM's perspective.
-    """
-    contents = PAM_HOOK.read_text()
-    assert "|| true" in contents

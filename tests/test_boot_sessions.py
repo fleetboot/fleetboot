@@ -34,18 +34,18 @@ def test_record_state_in_order_succeeds():
     for state in (
         BootState.NETWORK_UP,
         BootState.NFS_MOUNTED,
-        BootState.LOGIN_READY,
-        BootState.USER_LOGGED_IN,
+        BootState.LOGIN_CONSOLE,
+        BootState.LOGIN_CONSOLE,
     ):
         store.record_state(session.token, state)
     refreshed = store.lookup(session.token)
     assert refreshed is not None
-    assert refreshed.latest_state == BootState.USER_LOGGED_IN
+    assert refreshed.latest_state == BootState.LOGIN_CONSOLE
     assert refreshed.reports == [
         BootState.NETWORK_UP,
         BootState.NFS_MOUNTED,
-        BootState.LOGIN_READY,
-        BootState.USER_LOGGED_IN,
+        BootState.LOGIN_CONSOLE,
+        BootState.LOGIN_CONSOLE,
     ]
 
 
@@ -62,7 +62,7 @@ def test_record_state_repeats_are_idempotent():
 def test_record_state_rejects_out_of_order():
     store = BootSessionStore()
     session = store.mint("aa:bb:cc:dd:ee:ff")
-    store.record_state(session.token, BootState.LOGIN_READY)
+    store.record_state(session.token, BootState.LOGIN_CONSOLE)
     with pytest.raises(OutOfOrderStateError):
         store.record_state(session.token, BootState.NETWORK_UP)
 

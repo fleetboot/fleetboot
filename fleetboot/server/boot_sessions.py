@@ -80,6 +80,19 @@ class BootSessionStore:
                     connection.execute("PRAGMA journal_mode=WAL")
                 except sqlite3.OperationalError:
                     pass
+                # One-shot rename migrations: a freshly-deployed server
+                # may inherit rows from before a state rename (e.g.
+                # login_ready→login_console) or a dropped state
+                # (user_logged_in). Convert the rows so the BootState
+                # constructor doesn't choke on load.
+                connection.execute(
+                    "UPDATE boot_sessions SET latest_state = 'login_console' "
+                    "WHERE latest_state = 'login_ready'"
+                )
+                connection.execute(
+                    "UPDATE boot_sessions SET latest_state = 'login_console' "
+                    "WHERE latest_state = 'user_logged_in'"
+                )
             self._sessions: dict[str, BootSession] = {}  # unused in DB mode
         else:
             # In-memory: a plain dict guarded by the same lock.

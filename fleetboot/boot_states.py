@@ -1,8 +1,9 @@
 """The ordered set of lifecycle states a booting machine reports back.
 
-Keeping this in one place means the systemd units, the PAM hook, the reporter,
-and the server all agree on the exact strings. Adding a new state is a single
-edit here plus a trigger in the image.
+Keeping this in one place means the systemd units, the renderer-emitted
+grub-events, the reporter, and the server all agree on the exact
+strings. Adding a new state is a single edit here plus a trigger in
+the image.
 """
 
 from enum import Enum
@@ -18,15 +19,19 @@ class BootState(str, Enum):
     NETWORK_UP = "network_up"
     SCRATCH_MOUNTED = "scratch_mounted"
     NFS_MOUNTED = "nfs_mounted"
-    LOGIN_READY = "login_ready"
-    USER_LOGGED_IN = "user_logged_in"
+    # `login_console` means the display-manager greeter is up — the
+    # on-screen login prompt is visible. We deliberately don't have a
+    # "user_logged_in" state: it used to fire from a PAM session hook,
+    # but that triggered on lightdm's own session opening too (not just
+    # real human logins), which made the signal misleading.
+    LOGIN_CONSOLE = "login_console"
 
 
 # The order matters: each state must be reached before the next one is valid.
 # The server uses this to reject out-of-order reports (a defence-in-depth check
 # against a confused or tampered-with client).
 BOOT_STATE_ORDER: tuple[BootState, ...] = (
-    # GRUB-emitted (via cat over HTTP) — earliest visible lifecycle stages.
+    # GRUB-emitted (via source over TFTP) — earliest visible lifecycle stages.
     BootState.GRUB_RUNNING,
     BootState.KERNEL_LOADED,
     BootState.INITRD_LOADED,
@@ -35,8 +40,7 @@ BOOT_STATE_ORDER: tuple[BootState, ...] = (
     BootState.NETWORK_UP,
     BootState.SCRATCH_MOUNTED,
     BootState.NFS_MOUNTED,
-    BootState.LOGIN_READY,
-    BootState.USER_LOGGED_IN,
+    BootState.LOGIN_CONSOLE,
 )
 
 

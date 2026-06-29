@@ -270,6 +270,16 @@ class MachineRegistry:
             _add_boot_version_columns_if_missing(connection)
             _add_scratch_mode_columns_if_missing(connection)
             _add_diagnostics_columns_if_missing(connection)
+            # Rename / drop boot_events.state values that no longer
+            # exist (e.g. login_ready → login_console; user_logged_in
+            # was dropped entirely). Idempotent — no-op on a fresh DB.
+            connection.execute(
+                "UPDATE boot_events SET state = 'login_console' "
+                "WHERE state = 'login_ready'"
+            )
+            connection.execute(
+                "DELETE FROM boot_events WHERE state = 'user_logged_in'"
+            )
             # WAL gives us safer concurrent reads without sacrificing
             # durability on writes. Harmless on in-memory databases.
             try:

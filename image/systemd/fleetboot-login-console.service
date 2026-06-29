@@ -1,5 +1,5 @@
 [Unit]
-Description=Report login_ready to the Fleetboot server
+Description=Report login_console to the Fleetboot server
 # Fires when the display manager has come up and the greeter is visible.
 # Chain after the nfs-mounted reporter so the two messages arrive in
 # lifecycle order.
@@ -8,7 +8,7 @@ Requires=display-manager.service
 
 [Service]
 Type=oneshot
-ExecStart=/usr/bin/python3 -m fleetboot.reporter.report login_ready
+ExecStart=/usr/bin/python3 -m fleetboot.reporter.report login_console
 
 [Install]
 WantedBy=graphical.target

@@ -178,11 +178,6 @@ actions:
       chmod 0755 /etc/NetworkManager/dispatcher.d/95-fleetboot-hostname
 
   - action: overlay
-    description: "Install Fleetboot PAM session hook"
-    source: ./pam
-    destination: /usr/local/lib/fleetboot
-
-  - action: overlay
     description: "Install FreeIPA enrolment helper and NFS autofs map"
     source: ./identity
     destination: /usr/local/lib/fleetboot/identity
@@ -253,22 +248,13 @@ actions:
       if systemctl list-unit-files home.mount >/dev/null 2>&1; then
         systemctl enable fleetboot-nfs-mounted.service
       fi
-      # login-ready unit is enabled unconditionally. If the profile didn't
+      # login-console unit is enabled unconditionally. If the profile didn't
       # install a display manager, the unit's Requires=display-manager
       # will skip it — that's the right behaviour for headless profiles.
-      systemctl enable fleetboot-login-ready.service
+      systemctl enable fleetboot-login-console.service
       # Thin default: boot to a text console. Desktop profiles flip this
       # to graphical.target from their setup-chroot.
       systemctl set-default multi-user.target
-
-  - action: run
-    description: "Wire the Fleetboot PAM session hook into common-session"
-    chroot: true
-    command: |
-      hook_line='session optional pam_exec.so type=open_session /usr/local/lib/fleetboot/fleetboot-session-hook'
-      if ! grep -qF "$hook_line" /etc/pam.d/common-session; then
-        echo "$hook_line" >> /etc/pam.d/common-session
-      fi
 
   # ---------- profile: built-in variant selected via PROFILE= ----------
   #

@@ -40,10 +40,10 @@ def test_reporter_posts_and_server_records():
             BootState.NFS_MOUNTED, settings=settings, client=client
         )
         report_state(
-            BootState.LOGIN_READY, settings=settings, client=client
+            BootState.LOGIN_CONSOLE, settings=settings, client=client
         )
         report_state(
-            BootState.USER_LOGGED_IN,
+            BootState.LOGIN_CONSOLE,
             detail="alice",
             settings=settings,
             client=client,
@@ -53,8 +53,8 @@ def test_reporter_posts_and_server_records():
     assert refreshed.reports == [
         BootState.NETWORK_UP,
         BootState.NFS_MOUNTED,
-        BootState.LOGIN_READY,
-        BootState.USER_LOGGED_IN,
+        BootState.LOGIN_CONSOLE,
+        BootState.LOGIN_CONSOLE,
     ]
 
 

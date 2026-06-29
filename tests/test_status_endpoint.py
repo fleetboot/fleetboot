@@ -164,10 +164,13 @@ def test_diagnostics_field_lands_on_machine_row(tmp_path):
     assert "lightdm.service" in m.last_diagnostics
 
 
-def test_user_logged_in_detail_is_recorded():
+def test_state_detail_is_recorded():
+    """The /status endpoint accepts an optional `detail` string alongside
+    the state — used for free-form context the reporter wants to surface
+    on the dashboard (e.g. a username, a diagnostic snippet)."""
     client, store = _client_and_store()
     session = store.mint("aa:bb:cc:dd:ee:ff")
-    for state in ("network_up", "nfs_mounted", "login_ready"):
+    for state in ("network_up", "nfs_mounted"):
         client.post(
             "/status",
             json={"state": state},
@@ -175,11 +178,11 @@ def test_user_logged_in_detail_is_recorded():
         )
     response = client.post(
         "/status",
-        json={"state": "user_logged_in", "detail": "alice"},
+        json={"state": "login_console", "detail": "lightdm"},
         headers={"Authorization": f"Bearer {session.token}"},
     )
     assert response.status_code == 200
-    assert response.json()["state"] == "user_logged_in"
+    assert response.json()["state"] == "login_console"
 
 
 def test_unknown_token_returns_401_uniformly():
@@ -217,7 +220,7 @@ def test_out_of_order_report_returns_409():
     session = store.mint("aa:bb:cc:dd:ee:ff")
     client.post(
         "/status",
-        json={"state": "login_ready"},
+        json={"state": "login_console"},
         headers={"Authorization": f"Bearer {session.token}"},
     )
     response = client.post(

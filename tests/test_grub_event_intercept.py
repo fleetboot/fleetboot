@@ -129,7 +129,7 @@ def test_intercept_out_of_order_state_returns_empty_without_recording(
     — the BootSessionStore rejects it; we don't propagate the
     rejection to GRUB."""
     session = sessions.mint("aa:bb:cc:dd:ee:ff")
-    sessions.record_state(session.token, BootState.LOGIN_READY)
+    sessions.record_state(session.token, BootState.LOGIN_CONSOLE)
     intercept = make_grub_event_intercept(
         sessions=sessions, registry=registry,
     )
@@ -139,11 +139,11 @@ def test_intercept_out_of_order_state_returns_empty_without_recording(
     )
 
     assert result == b""
-    # latest_state still LOGIN_READY (the earlier-state attempt was
+    # latest_state still LOGIN_CONSOLE (the earlier-state attempt was
     # silently dropped).
     refreshed = sessions.lookup(session.token)
     assert refreshed is not None
-    assert refreshed.latest_state == BootState.LOGIN_READY
+    assert refreshed.latest_state == BootState.LOGIN_CONSOLE
 
 
 def test_intercept_without_registry_still_records_session_state(

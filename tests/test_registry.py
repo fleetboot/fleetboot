@@ -203,7 +203,7 @@ def test_remove_machine_cascades_to_events(registry: MachineRegistry):
         architecture="x86_64", platform="efi",
     )
     registry.log_boot_event(mac="aa:bb:cc:dd:ee:ff", state="network_up")
-    registry.log_boot_event(mac="aa:bb:cc:dd:ee:ff", state="login_ready")
+    registry.log_boot_event(mac="aa:bb:cc:dd:ee:ff", state="login_console")
     assert len(registry.recent_boot_events(mac="aa:bb:cc:dd:ee:ff")) == 2
     assert registry.remove("aa:bb:cc:dd:ee:ff") is True
     assert registry.recent_boot_events(mac="aa:bb:cc:dd:ee:ff") == []
@@ -227,12 +227,12 @@ def test_enroll_tracks_provenance(registry: MachineRegistry):
 def test_log_and_list_boot_events(registry: MachineRegistry):
     registry.log_boot_event(mac="aa:bb:cc:dd:ee:ff", state="network_up")
     registry.log_boot_event(
-        mac="aa:bb:cc:dd:ee:ff", state="user_logged_in", detail="alice"
+        mac="aa:bb:cc:dd:ee:ff", state="login_console", detail="alice"
     )
     events = registry.recent_boot_events()
     assert len(events) == 2
     # Newest first.
-    assert events[0].state == "user_logged_in"
+    assert events[0].state == "login_console"
     assert events[0].detail == "alice"
     assert events[1].state == "network_up"
     assert events[1].detail is None

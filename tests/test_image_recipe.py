@@ -110,15 +110,18 @@ def test_systemd_units_overlaid_into_system_dir(recipe: dict):
     assert matches, "no overlay action installs the systemd units"
 
 
-def test_pam_hook_overlaid(recipe: dict):
+def test_no_pam_hook_overlaid(recipe: dict):
+    """The PAM session hook was removed (it fired for lightdm's own
+    session, not real human logins, which made the signal misleading).
+    The recipe must not re-introduce the overlay."""
     overlays = _actions_of_type(recipe, "overlay")
     matches = [
         a
         for a in overlays
-        if "pam" in (a.get("source", "") or "")
-        and "fleetboot" in (a.get("destination", "") or "")
+        if (a.get("source", "") or "").rstrip("/").endswith("/pam")
+        or (a.get("source", "") or "").rstrip("/").endswith("./pam")
     ]
-    assert matches, "no overlay action installs the PAM session hook"
+    assert not matches, "PAM hook overlay must not exist anymore"
 
 
 # NB: The base recipe used to install xfce4 + lightdm directly and set
@@ -141,12 +144,12 @@ def test_recipe_consumes_profile_extras(recipe: dict):
     assert "setup-chroot" in commands
 
 
-def test_login_ready_unit_always_enabled(recipe: dict):
-    """Once we ship a display manager, fleetboot-login-ready unconditionally
+def test_login_console_unit_always_enabled(recipe: dict):
+    """Once we ship a display manager, fleetboot-login-console unconditionally
     enables — no need for the previous 'only if present' guard."""
     runs = _actions_of_type(recipe, "run")
     commands = " \n".join((a.get("command", "") or "") for a in runs)
-    assert "systemctl enable fleetboot-login-ready.service" in commands
+    assert "systemctl enable fleetboot-login-console.service" in commands
 
 
 def test_freeipa_client_packages_present(recipe: dict):
@@ -219,13 +222,15 @@ def test_autofs_wired_to_auto_shared(recipe: dict):
     assert "/etc/auto.shared" in commands
 
 
-def test_pam_session_hook_is_wired_into_common_session(recipe: dict):
-    """One of the run actions must edit /etc/pam.d/common-session."""
+def test_recipe_does_not_install_a_pam_session_hook(recipe: dict):
+    """We used to install a PAM hook that reported `user_logged_in` on
+    any session open. That fired for lightdm's own session (not just
+    real users), making the signal misleading. The hook was removed
+    and the state was dropped — the recipe must NOT re-introduce it."""
     runs = _actions_of_type(recipe, "run")
-    found = any(
-        "common-session" in (a.get("command", "") or "") for a in runs
-    )
-    assert found, "PAM hook is not wired into common-session"
+    commands = " \n".join((a.get("command", "") or "") for a in runs)
+    assert "fleetboot-session-hook" not in commands
+    assert "/etc/pam.d/common-session" not in commands
 
 
 def test_network_up_unit_is_enabled(recipe: dict):
