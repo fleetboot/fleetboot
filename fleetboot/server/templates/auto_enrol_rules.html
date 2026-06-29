@@ -11,6 +11,17 @@
 </p>
 
 {% if rules %}
+<style>
+  /* Compact inline edit cells — fields are already labelled by the
+     column header so we don't need per-cell labels stealing height. */
+  tr.rule-edit td { vertical-align: middle; }
+  tr.rule-edit input[type=text],
+  tr.rule-edit select { width: 100%; min-width: 90px; }
+  tr.rule-edit input[name=name] { min-width: 130px; }
+  tr.rule-edit input[name=match_value] { font-family: ui-monospace, Menlo, Consolas, monospace; }
+  tr.rule-edit .match-pair { display: flex; gap: 4px; }
+  tr.rule-edit .match-pair select { width: 110px; }
+</style>
 <table>
   <thead>
     <tr>
@@ -19,20 +30,67 @@
       <th>Match</th>
       <th>Profile</th>
       <th>Arch</th>
+      <th>Platform</th>
       <th>Serial</th>
+      <th>Scratch</th>
       <th></th>
     </tr>
   </thead>
   <tbody>
     {% for r in rules %}
-    <tr>
+    <tr class="rule-edit">
+      <form method="post" action="/dashboard/auto-enrol-rules/{{ r.id }}" id="rule-form-{{ r.id }}"></form>
       <td>{{ r.id }}</td>
-      <td><strong>{{ r.name }}</strong></td>
-      <td>{{ r.match_kind }} = <code>{{ r.match_value or "(any)" }}</code></td>
-      <td>{{ r.profile_name }}</td>
-      <td>{{ r.architecture }}/{{ r.platform }}</td>
-      <td>{{ "yes" if r.serial_console else "—" }}</td>
+      <td>
+        <input form="rule-form-{{ r.id }}" type="text" name="name"
+               value="{{ r.name }}" required>
+      </td>
+      <td>
+        <div class="match-pair">
+          <select form="rule-form-{{ r.id }}" name="match_kind">
+            <option value="mac_prefix" {% if r.match_kind == "mac_prefix" %}selected{% endif %}>MAC prefix</option>
+            <option value="ip_cidr" {% if r.match_kind == "ip_cidr" %}selected{% endif %}>IP CIDR</option>
+          </select>
+          <input form="rule-form-{{ r.id }}" type="text" name="match_value"
+                 value="{{ r.match_value }}"
+                 placeholder="(any)">
+        </div>
+      </td>
+      <td>
+        <select form="rule-form-{{ r.id }}" name="profile_name">
+          {% for p in profile_names %}
+          <option value="{{ p }}" {% if p == r.profile_name %}selected{% endif %}>{{ p }}</option>
+          {% endfor %}
+        </select>
+      </td>
+      <td>
+        <select form="rule-form-{{ r.id }}" name="architecture">
+          {% for a in ["x86_64", "arm64", "i386"] %}
+          <option value="{{ a }}" {% if a == r.architecture %}selected{% endif %}>{{ a }}</option>
+          {% endfor %}
+        </select>
+      </td>
+      <td>
+        <select form="rule-form-{{ r.id }}" name="platform">
+          {% for p in ["any", "efi", "pc"] %}
+          <option value="{{ p }}" {% if p == r.platform %}selected{% endif %}>{{ p }}</option>
+          {% endfor %}
+        </select>
+      </td>
+      <td style="text-align: center;">
+        <input form="rule-form-{{ r.id }}"
+               type="checkbox" name="serial_console" value="1"
+               {% if r.serial_console %}checked{% endif %}>
+      </td>
+      <td>
+        <select form="rule-form-{{ r.id }}" name="scratch_mode">
+          {% for s in ["volatile", "persistent", "off"] %}
+          <option value="{{ s }}" {% if s == r.scratch_mode %}selected{% endif %}>{{ s }}</option>
+          {% endfor %}
+        </select>
+      </td>
       <td class="row-actions">
+        <button form="rule-form-{{ r.id }}" type="submit">save</button>
         <form method="post"
               action="/dashboard/auto-enrol-rules/{{ r.id }}/delete"
               onsubmit="return confirm('Delete rule {{ r.name }}?');">

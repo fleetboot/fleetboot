@@ -94,6 +94,11 @@ actions:
       # network, USB controllers + devices show up in the dashboard.
       - pciutils
       - usbutils
+      # zstd: in-image initramfs rebuilds (after kernel upgrades, dkms
+      # rebuilds, etc.) are noticeably faster with zstd compression
+      # than the default gzip — and live-boot's initrd unpacking is
+      # also quicker on cold-boot of slow hardware.
+      - zstd
       # No desktop, display manager, audio stack, or graphics drivers
       # in the base image. The default profile inherits this thin Debian
       # and adds nothing; desktop profiles (xfce-desktop, gnome-desktop,

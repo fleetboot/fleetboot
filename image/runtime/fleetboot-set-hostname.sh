@@ -31,7 +31,32 @@ for conf in /run/net-*.conf; do
 done
 
 if [ -z "$found" ]; then
-    echo "fleetboot-set-hostname: no HOSTNAME in /run/net-*.conf; leaving as-is" >&2
+    # No DHCP-supplied hostname available — fall back to a stable
+    # deterministic placeholder derived from the primary interface's
+    # MAC: "fleetboot-<last 6 hex chars without colons>". This gives
+    # every fleet machine a unique-ish name in the dashboard /
+    # FreeIPA stage BEFORE proper hostnames are issued, so admins
+    # aren't staring at five identical "fleetboot-client" rows.
+    #
+    # Pick the first non-loopback interface with a MAC. /sys/class/net
+    # is sorted alphabetically; en* / eth* come before wl* in the
+    # usual case.
+    for iface in /sys/class/net/*; do
+        ifname=$(basename "$iface")
+        [ "$ifname" = "lo" ] && continue
+        mac=$(cat "$iface/address" 2>/dev/null || true)
+        [ -z "$mac" ] && continue
+        [ "$mac" = "00:00:00:00:00:00" ] && continue
+        suffix=$(printf '%s' "$mac" | tr -d ':' | tr 'A-F' 'a-f')
+        # Take the last 6 hex chars — globally unique within an OUI.
+        suffix=$(printf '%s' "$suffix" | tail -c 6)
+        found="fleetboot-$suffix"
+        break
+    done
+fi
+
+if [ -z "$found" ]; then
+    echo "fleetboot-set-hostname: no DHCP hostname and no usable MAC; leaving as-is" >&2
     exit 0
 fi
 

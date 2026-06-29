@@ -393,6 +393,63 @@ def build_dashboard_router(
         )
 
     @router.post(
+        "/dashboard/auto-enrol-rules/{rule_id}",
+        response_class=HTMLResponse,
+        dependencies=[Depends(require_admin)],
+    )
+    def update_auto_enrol_rule_form(
+        rule_id: int,
+        name: str = Form(...),
+        match_kind: str = Form(...),
+        match_value: str = Form(""),
+        profile_name: str = Form(...),
+        architecture: str = Form("x86_64"),
+        platform: str = Form("any"),
+        serial_console: Optional[str] = Form(None),
+        scratch_mode: str = Form("volatile"),
+    ) -> RedirectResponse:
+        if match_kind not in ("mac_prefix", "ip_cidr"):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="invalid match_kind",
+            )
+        if platform not in ("any", "efi", "pc"):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="platform must be 'any', 'efi', or 'pc'",
+            )
+        if scratch_mode not in ("volatile", "persistent", "off"):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="scratch_mode must be volatile/persistent/off",
+            )
+        try:
+            updated = registry.update_auto_enrol_rule(
+                rule_id,
+                name=name,
+                match_kind=match_kind,
+                match_value=match_value,
+                profile_name=profile_name,
+                architecture=architecture,
+                platform=platform,
+                serial_console=bool(serial_console),
+                scratch_mode=scratch_mode,
+            )
+        except ValueError as err:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail=str(err),
+            )
+        if updated is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="rule not found",
+            )
+        return RedirectResponse(
+            url="/dashboard/auto-enrol-rules",
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+
+    @router.post(
         "/dashboard/auto-enrol-rules/{rule_id}/delete",
         response_class=HTMLResponse,
         dependencies=[Depends(require_admin)],

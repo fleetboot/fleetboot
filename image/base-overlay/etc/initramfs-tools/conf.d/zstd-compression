@@ -1,0 +1,6 @@
+# Use zstd to compress the initrd. Default is gzip, which is slow on
+# both compression (image-build time, in-image dkms / kernel-upgrade
+# rebuilds) and decompression (live-boot's initrd unpack on cold
+# boot of slow hardware). zstd is significantly faster on both
+# sides with negligible size penalty at the default level.
+COMPRESS=zstd

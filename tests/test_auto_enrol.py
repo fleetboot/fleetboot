@@ -291,3 +291,64 @@ def test_auto_enrol_rule_rejects_unknown_match_kind(registry: MachineRegistry):
         headers={"Authorization": f"Bearer {ADMIN_SECRET}"},
     )
     assert response.status_code == 400
+
+
+def test_update_auto_enrol_rule_replaces_fields(registry: MachineRegistry):
+    """In-place edit from the dashboard rewrites every editable field
+    on the rule, including scratch_mode."""
+    rule = registry.add_auto_enrol_rule(
+        name="lan-pcs", match_kind="ip_cidr",
+        match_value="192.168.25.0/24",
+        profile_name="cinnamon-desktop",
+    )
+    updated = registry.update_auto_enrol_rule(
+        rule.id,
+        name="lan-pcs-renamed",
+        match_kind="mac_prefix",
+        match_value="aa:bb:cc",
+        profile_name="default",
+        architecture="arm64",
+        platform="efi",
+        serial_console=True,
+        scratch_mode="persistent",
+    )
+    assert updated is not None
+    assert updated.name == "lan-pcs-renamed"
+    assert updated.match_kind == "mac_prefix"
+    assert updated.match_value == "aa:bb:cc"
+    assert updated.profile_name == "default"
+    assert updated.architecture == "arm64"
+    assert updated.platform == "efi"
+    assert updated.serial_console is True
+    assert updated.scratch_mode == "persistent"
+
+
+def test_update_auto_enrol_rule_unknown_id_returns_none(
+    registry: MachineRegistry,
+):
+    """Editing a deleted rule shouldn't 500. The dashboard turns the
+    None into a 404 redirect."""
+    result = registry.update_auto_enrol_rule(
+        9999,
+        name="nope", match_kind="mac_prefix", match_value="aa:bb:cc",
+        profile_name="default",
+    )
+    assert result is None
+
+
+def test_update_auto_enrol_rule_rejects_bad_scratch_mode(
+    registry: MachineRegistry,
+):
+    """Same value-validation surface as add_auto_enrol_rule."""
+    rule = registry.add_auto_enrol_rule(
+        name="x", match_kind="mac_prefix", match_value="aa:bb",
+        profile_name="default",
+    )
+    import pytest
+    with pytest.raises(ValueError):
+        registry.update_auto_enrol_rule(
+            rule.id,
+            name="x", match_kind="mac_prefix", match_value="aa:bb",
+            profile_name="default",
+            scratch_mode="wipe-on-friday",
+        )

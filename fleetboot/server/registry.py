@@ -630,6 +630,47 @@ class MachineRegistry:
             ).fetchall()
         return [_row_to_rule(r) for r in rows]
 
+    def update_auto_enrol_rule(
+        self,
+        rule_id: int,
+        *,
+        name: str,
+        match_kind: str,
+        match_value: str,
+        profile_name: str,
+        architecture: str = "x86_64",
+        platform: str = "any",
+        serial_console: bool = False,
+        scratch_mode: str = "volatile",
+    ) -> Optional[AutoEnrolRule]:
+        """Replace every editable field on a rule in-place. Returns
+        the refreshed row, or None if the rule_id didn't exist.
+
+        Caller is responsible for value validation (match_kind /
+        platform / scratch_mode) — same surface as add_auto_enrol_rule.
+        """
+        if scratch_mode not in ("volatile", "persistent", "off"):
+            raise ValueError(
+                f"scratch_mode must be volatile/persistent/off, got {scratch_mode!r}"
+            )
+        normalised = _normalise_match_value(match_kind, match_value)
+        with self._write_lock, self._connect() as connection:
+            cursor = connection.execute(
+                "UPDATE auto_enrol_rules SET "
+                "    name = ?, match_kind = ?, match_value = ?, "
+                "    profile_name = ?, architecture = ?, platform = ?, "
+                "    serial_console = ?, scratch_mode = ? "
+                "WHERE id = ?",
+                (
+                    name, match_kind, normalised, profile_name,
+                    architecture, platform, 1 if serial_console else 0,
+                    scratch_mode, rule_id,
+                ),
+            )
+            if cursor.rowcount == 0:
+                return None
+        return self.get_auto_enrol_rule(rule_id)
+
     def remove_auto_enrol_rule(self, rule_id: int) -> bool:
         with self._write_lock, self._connect() as connection:
             cursor = connection.execute(
