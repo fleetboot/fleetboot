@@ -359,11 +359,14 @@ def test_explicit_reboot_command_wins_over_pdudaemon(
     assert command == "echo explicit"
 
 
-def test_failed_pdu_arms_soft_reboot_signal_and_keeps_row(
+def test_reboot_button_pdu_failure_arms_soft_signal_and_keeps_row(
     dashboard_root: Path,
 ):
-    """When PDU exits non-zero, the row stays (so /status can ride the
-    signal out) and pending_reboot is armed on the machine row."""
+    """When the standalone /reboot button's PDU exits non-zero, the
+    row stays (so /status can ride the signal out) and pending_reboot
+    is armed on the machine row. NB: this is /reboot, not the
+    delete-variant — delete always removes the row regardless of PDU
+    outcome."""
     import subprocess
     import unittest.mock as mock
 
@@ -390,7 +393,7 @@ def test_failed_pdu_arms_soft_reboot_signal_and_keeps_row(
     with mock.patch.object(subprocess, "run") as run:
         run.return_value = mock.Mock(returncode=1)
         response = client.post(
-            "/dashboard/machines/aa:bb:cc:dd:ee:ff/delete-and-reboot",
+            "/dashboard/machines/aa:bb:cc:dd:ee:ff/reboot",
             headers=_auth_header(),
             follow_redirects=False,
         )
@@ -399,6 +402,48 @@ def test_failed_pdu_arms_soft_reboot_signal_and_keeps_row(
     # Row preserved; soft signal armed.
     assert refreshed is not None
     assert refreshed.pending_reboot is True
+
+
+def test_delete_and_reboot_always_deletes_even_on_pdu_failure(
+    dashboard_root: Path,
+):
+    """When the user hits "del + reboot" they expect the row to go,
+    full stop. Soft-reboot fallback doesn't apply here because /status
+    can't deliver pending_reboot to a deleted row (machine.lookup
+    returns None, the flag can't be read). Trade-off the admin opts
+    into by hitting the danger button labelled "delete"."""
+    import subprocess
+    import unittest.mock as mock
+
+    client = _client(dashboard_root)
+    client.post(
+        "/dashboard/machines",
+        data={
+            "mac": "aa:bb:cc:dd:ee:ff",
+            "profile_name": "school",
+            "architecture": "x86_64",
+            "platform": "efi",
+        },
+        headers=_auth_header(),
+    )
+    from fleetboot.server.registry import MachineRegistry
+    reg = MachineRegistry(dashboard_root / "machines.sqlite")
+    reg.update_hostname("aa:bb:cc:dd:ee:ff", "lab-pc-01")
+    client.post(
+        "/dashboard/settings",
+        data={"pdudaemon_host": "prowl:16421"},
+        headers=_auth_header(),
+    )
+    with mock.patch.object(subprocess, "run") as run:
+        run.return_value = mock.Mock(returncode=1)  # PDU fails
+        response = client.post(
+            "/dashboard/machines/aa:bb:cc:dd:ee:ff/delete-and-reboot",
+            headers=_auth_header(),
+            follow_redirects=False,
+        )
+    assert response.status_code == 303
+    # Row gone regardless of PDU failure.
+    assert reg.lookup("aa:bb:cc:dd:ee:ff") is None
 
 
 def test_reboot_only_button_keeps_row_even_on_pdu_success(

@@ -511,17 +511,25 @@ def build_dashboard_router(
              contents).
           2. Fleet-wide pdudaemon fallback when `pdudaemon_host` is set
              AND the machine has a known hostname: builds
-             `curl "<pdudaemon>/power/control/reboot?alias=<hostname>"`.
+             `curl --fail "<pdudaemon>/...?alias=<hostname>"`.
 
-        If the PDU command exits non-zero (or no PDU is configured at
-        all), the soft-reboot signal arms instead: pending_reboot=1 on
-        the row makes the next /status reply include
-        `pending_reboot: true`, and the in-image reporter calls
-        `systemctl reboot`. The row is preserved in that case because
-        the signal needs the row to ride out on a future /status.
+        Behaviour split by `then_delete`:
 
-        If `then_delete` is True and the PDU succeeded, we remove the
-        machine row so a fresh PXE re-enrols.
+          then_delete=True (the "del + reboot" button):
+            Always delete the row. Try PDU. The soft-reboot signal is
+            NOT armed here because /status can't deliver
+            `pending_reboot: true` for a deleted row — the boot
+            session lookup would find the token but the machine row
+            would be gone, so machine.pending_reboot can't be read.
+            If PDU fails, the row is gone but the machine keeps
+            running until its next manual reboot. That's the
+            trade-off the admin opts into by hitting "delete".
+
+          then_delete=False (the standalone "reboot" button):
+            Never delete. Try PDU. If PDU fails or isn't configured,
+            arm the soft-reboot signal so the machine reboots itself
+            on its next heartbeat. The row stays so /status can ride
+            the signal out.
         """
         import subprocess
 
@@ -540,9 +548,9 @@ def build_dashboard_router(
         pdu_succeeded = False
         if command:
             try:
-                # 10-second timeout keeps the dashboard responsive when
-                # the PDU host is unreachable. shell=True is intentional
-                # — admin owns the command string.
+                # 10-second timeout keeps the dashboard responsive
+                # when the PDU host is unreachable. shell=True is
+                # intentional — admin owns the command string.
                 result = subprocess.run(
                     command, shell=True, timeout=10,
                     stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT,
@@ -551,11 +559,13 @@ def build_dashboard_router(
             except subprocess.TimeoutExpired:
                 pdu_succeeded = False
 
-        if pdu_succeeded and then_delete:
+        if then_delete:
+            # Admin asked for the row to go; honour that even if PDU
+            # failed. (See docstring for why we can't soft-reboot a
+            # deleted row.)
             registry.remove(mac)
         elif not pdu_succeeded:
-            # PDU failed or wasn't configured. Arm the soft reboot
-            # signal — machine will reboot itself on next heartbeat.
+            # /reboot button, PDU failed/unset — arm the soft signal.
             registry.set_pending_reboot(mac, True)
 
     @router.get(

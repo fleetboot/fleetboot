@@ -92,10 +92,18 @@ def test_default_profile_does_not_install_a_desktop():
         )
 
 
-def test_school_profile_declares_xfce_desktop_parent():
+def test_school_profile_declares_a_desktop_parent():
+    """school/ must inherit from some *-desktop profile. Which one
+    is the default is a choice that can change (cinnamon today,
+    xfce in the past); the contract here is just 'declares a desktop
+    ancestor'."""
     parent_file = PROFILES_DIR / "school" / "parent"
     assert parent_file.is_file(), "school/ must declare a parent now"
-    assert "xfce-desktop" in parent_file.read_text()
+    parents = parent_file.read_text()
+    assert any(
+        line.strip().endswith("-desktop")
+        for line in parents.splitlines()
+    ), f"expected a *-desktop parent in:\n{parents}"
 
 
 def test_school_profile_still_installs_extrepo():
