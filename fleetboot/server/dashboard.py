@@ -317,6 +317,39 @@ def build_dashboard_router(
         )
 
     @router.get(
+        "/dashboard/machines/{mac}",
+        response_class=HTMLResponse,
+        dependencies=[Depends(require_admin)],
+    )
+    def machine_detail(
+        request: Request,
+        mac: str,
+        refresh: Optional[int] = None,
+    ) -> HTMLResponse:
+        machine = registry.lookup(mac)
+        if machine is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="machine not found",
+            )
+        states_by_mac = _states_by_mac(sessions)
+        latest_versions = _latest_versions_by_artefact(boot_dir)
+        events = registry.recent_boot_events(limit=200, mac=machine.mac)
+        last_seen = _format_last_seen(sessions.last_seen_by_mac())
+        return templates.TemplateResponse(
+            request,
+            "machine_detail.html",
+            {
+                "machine": machine,
+                "events": events,
+                "current_state": states_by_mac.get(machine.mac),
+                "latest_versions": latest_versions,
+                "last_seen": last_seen.get(machine.mac),
+                "auto_refresh": _clamp_refresh(refresh),
+            },
+        )
+
+    @router.get(
         "/dashboard/events",
         response_class=HTMLResponse,
         dependencies=[Depends(require_admin)],

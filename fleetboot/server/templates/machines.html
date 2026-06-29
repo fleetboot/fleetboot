@@ -29,13 +29,15 @@
     {% for m in machines %}
     <tr>
       <td>
+        <a href="/dashboard/machines/{{ m.mac }}">
         {% if m.hostname %}
           <strong>{{ m.hostname }}</strong>
         {% else %}
-          <span class="muted">—</span>
+          <span class="muted">{{ m.mac }}</span>
         {% endif %}
+        </a>
       </td>
-      <td><code>{{ m.mac }}</code></td>
+      <td><a href="/dashboard/machines/{{ m.mac }}"><code>{{ m.mac }}</code></a></td>
       <td>{{ m.profile_name }}</td>
       <td>{{ m.architecture }}/{{ m.platform }}</td>
       <td>

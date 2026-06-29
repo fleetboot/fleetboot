@@ -1,0 +1,112 @@
+{% extends "base.html" %}
+{% block title %}fleetboot — {{ machine.hostname or machine.mac }}{% endblock %}
+{% block content %}
+<h1>
+  {% if machine.hostname %}
+    {{ machine.hostname }}
+    <span class="muted">— {{ machine.mac }}</span>
+  {% else %}
+    <code>{{ machine.mac }}</code>
+    <span class="muted">(no hostname reported)</span>
+  {% endif %}
+  {% if auto_refresh %}
+    <span class="muted">— live ({{ auto_refresh }}s)</span>
+    &nbsp;<a class="muted" href="?">[stop]</a>
+  {% else %}
+    &nbsp;<a class="muted" href="?refresh=5">[live view]</a>
+  {% endif %}
+</h1>
+
+<p><a href="/dashboard">&larr; back to all machines</a></p>
+
+<h2>Registry</h2>
+<table>
+  <tbody>
+    <tr><th>MAC</th><td><code>{{ machine.mac }}</code></td></tr>
+    <tr><th>Hostname</th><td>
+      {% if machine.hostname %}
+        <strong>{{ machine.hostname }}</strong>
+        <span class="muted">— last seen {{ machine.hostname_seen_at or "(never)" }}</span>
+      {% else %}
+        <span class="muted">—</span>
+      {% endif %}
+    </td></tr>
+    <tr><th>Profile</th><td>{{ machine.profile_name }}</td></tr>
+    <tr><th>Arch / platform</th><td>{{ machine.architecture }} / {{ machine.platform }}</td></tr>
+    <tr><th>Source</th><td>
+      {% if machine.enrolled_by == "manual" %}
+        <span class="muted">manual enrolment</span>
+      {% else %}
+        <span class="state-network_up">{{ machine.enrolled_by }}</span>
+      {% endif %}
+    </td></tr>
+    <tr><th>Serial console</th><td>{{ "yes" if machine.serial_console else "no" }}</td></tr>
+    <tr><th>Scratch mode</th><td>{{ machine.scratch_mode }}</td></tr>
+    <tr><th>Build version (reported)</th><td>
+      {% set latest = latest_versions.get(machine.profile_name ~ "/" ~ machine.architecture) %}
+      {% if machine.boot_version %}
+        {% if latest and machine.boot_version == latest %}
+          <span class="version-current">{{ machine.boot_version }}</span>
+          <span class="muted">— up to date</span>
+        {% elif latest %}
+          <span class="version-stale">{{ machine.boot_version }}</span>
+          <span class="muted">— latest is {{ latest }}, reboot to update</span>
+        {% else %}
+          <span class="muted">{{ machine.boot_version }} (no sidecar to compare)</span>
+        {% endif %}
+        <br><span class="muted">last seen {{ machine.boot_version_seen_at }}</span>
+      {% else %}
+        <span class="muted">—</span>
+      {% endif %}
+    </td></tr>
+    <tr><th>Latest state</th><td>
+      {% if current_state %}
+        <span class="state-{{ current_state }}">{{ current_state }}</span>
+      {% else %}
+        <span class="muted">—</span>
+      {% endif %}
+    </td></tr>
+    <tr><th>Last seen</th><td>
+      {% if last_seen %}
+        {% if last_seen.stale %}
+          <span class="version-stale">{{ last_seen.label }}</span>
+          <span class="muted">— machine may be offline</span>
+        {% else %}
+          {{ last_seen.label }}
+        {% endif %}
+      {% else %}
+        <span class="muted">—</span>
+      {% endif %}
+    </td></tr>
+    <tr><th>Enrolled at</th><td><span class="muted">{{ machine.created_at }}</span></td></tr>
+  </tbody>
+</table>
+
+<h2>Recent boot events</h2>
+{% if events %}
+<table>
+  <thead>
+    <tr><th>When</th><th>State</th><th>Detail</th></tr>
+  </thead>
+  <tbody>
+    {% for e in events %}
+    <tr>
+      <td><span class="muted">{{ e.occurred_at }}</span></td>
+      <td><span class="state-{{ e.state }}">{{ e.state }}</span></td>
+      <td>{% if e.detail %}<pre>{{ e.detail }}</pre>{% else %}<span class="muted">—</span>{% endif %}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+<p class="muted">Showing up to 200 events, newest first.</p>
+{% else %}
+<p class="muted">No boot events recorded yet.</p>
+{% endif %}
+
+<h2>Actions</h2>
+<form method="post" action="/dashboard/machines/{{ machine.mac }}/delete"
+      onsubmit="return confirm('Delete {{ machine.mac }}? (auto-enrol rules may re-create the row on next boot.)');"
+      style="display:inline">
+  <button type="submit" class="danger">delete machine row</button>
+</form>
+{% endblock %}

@@ -162,6 +162,62 @@ def test_machines_page_colours_version_current_and_stale(
     assert "version-stale" in page
 
 
+def test_machine_detail_page_shows_all_fields(dashboard_root: Path):
+    """The detail page is the place an admin goes to see EVERYTHING
+    about one machine — registry fields, recent events, scratch mode,
+    enrolled_by, etc."""
+    client = _client(dashboard_root)
+    client.post(
+        "/dashboard/machines",
+        data={
+            "mac": "aa:bb:cc:dd:ee:ff",
+            "profile_name": "school",
+            "architecture": "x86_64",
+            "platform": "efi",
+            "scratch_mode": "persistent",
+        },
+        headers=_auth_header(),
+    )
+    response = client.get(
+        "/dashboard/machines/aa:bb:cc:dd:ee:ff", headers=_auth_header()
+    )
+    assert response.status_code == 200
+    body = response.text
+    # Each field worth surfacing must appear.
+    assert "aa:bb:cc:dd:ee:ff" in body
+    assert "school" in body
+    assert "persistent" in body  # scratch_mode
+    assert "Recent boot events" in body
+
+
+def test_machine_detail_404_for_unknown_mac(dashboard_root: Path):
+    client = _client(dashboard_root)
+    response = client.get(
+        "/dashboard/machines/aa:bb:cc:dd:ee:ff", headers=_auth_header()
+    )
+    assert response.status_code == 404
+
+
+def test_machine_detail_supports_refresh_query_param(dashboard_root: Path):
+    client = _client(dashboard_root)
+    client.post(
+        "/dashboard/machines",
+        data={
+            "mac": "aa:bb:cc:dd:ee:ff",
+            "profile_name": "school",
+            "architecture": "x86_64",
+            "platform": "efi",
+        },
+        headers=_auth_header(),
+    )
+    response = client.get(
+        "/dashboard/machines/aa:bb:cc:dd:ee:ff?refresh=5",
+        headers=_auth_header(),
+    )
+    assert response.status_code == 200
+    assert '<meta http-equiv="refresh" content="5">' in response.text
+
+
 def test_machines_page_shows_last_seen_and_stale_indicator(
     dashboard_root: Path,
 ):
