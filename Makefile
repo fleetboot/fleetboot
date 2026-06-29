@@ -116,6 +116,10 @@ grub-binary: $(BUILD_DIR)/fleetboot-x64-uefi
 # Bootfile name is fleetboot-branded so a `tcpdump tftp` capture or a
 # next-server inspect makes it obvious which fleet this client is asking
 # for. arm64 will get its own fleetboot-arm64-uefi.efi target.
+#
+# We also drop a `.efi` symlink alongside. Some UEFI PXE ROMs (and many
+# admin habits) expect the extension; tftpjail follows the symlink and
+# serves the same bytes, so DHCP can advertise either name.
 $(BUILD_DIR)/fleetboot-x64-uefi: image/grub-embedded.cfg
 	mkdir -p $(BUILD_DIR)
 	grub-mkimage \
@@ -125,6 +129,7 @@ $(BUILD_DIR)/fleetboot-x64-uefi: image/grub-embedded.cfg
 	  --config=$< \
 	  efinet tftp http normal linux configfile \
 	  smbios search echo serial terminal net regexp
+	ln -sf fleetboot-x64-uefi $(BUILD_DIR)/fleetboot-x64-uefi.efi
 
 # Stage Debian's signed shim + signed grub binaries for Secure Boot PXE.
 #
@@ -148,6 +153,7 @@ signed-boot-assets: $(BUILD_DIR)/fleetboot-x64-uefi-signed \
 $(BUILD_DIR)/fleetboot-x64-uefi-signed: $(SHIM_SOURCE)
 	mkdir -p $(BUILD_DIR)
 	cp $< $@
+	ln -sf fleetboot-x64-uefi-signed $(BUILD_DIR)/fleetboot-x64-uefi-signed.efi
 
 # Shim looks for the chained loader as `grubx64.efi` in the same dir, so
 # we rename the signed network grub to that filename when staging.

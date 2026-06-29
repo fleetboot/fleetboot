@@ -15,6 +15,7 @@ something tick through the dashboard.
 from __future__ import annotations
 
 import argparse
+import logging
 import secrets as _secrets
 import signal
 import socket
@@ -25,6 +26,14 @@ from pathlib import Path
 from typing import Optional
 
 import uvicorn
+
+# Surface tftpjail's INFO-level logs (RRQ, ALLOW/DENY, public-asset
+# serves) on stdout so admins can diagnose "client isn't booting" issues
+# without packet capture.
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(name)s %(levelname)s %(message)s",
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 TFTPJAIL_ROOT = REPO_ROOT.parent / "tftpjail"
