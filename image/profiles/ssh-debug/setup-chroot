@@ -30,3 +30,9 @@ chmod 0644 /etc/ssh/sshd_config.d/50-fleetboot.conf
 # Make sure root has its .ssh dir with the right perms; the fetch
 # service later writes authorized_keys into it.
 install -d -m 0700 -o root -g root /root/.ssh
+
+# The chroot's policy-rc.d denies daemon start during install, which
+# also blocks `systemctl enable` from succeeding via the postinst.
+# Make sure ssh.service is wanted by multi-user.target so it starts
+# at boot.
+systemctl enable ssh.service

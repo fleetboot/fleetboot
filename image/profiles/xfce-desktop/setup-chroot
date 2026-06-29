@@ -4,3 +4,7 @@
 # needs to opt in.
 set -eu
 systemctl set-default graphical.target
+# policy-rc.d in the chroot build prevents lightdm's postinst from
+# auto-enabling the service. Enable explicitly so display-manager.service
+# is wanted by graphical.target and starts at boot.
+systemctl enable lightdm.service

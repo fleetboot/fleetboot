@@ -188,11 +188,31 @@ def _collect_diagnostics() -> Optional[str]:
     ).strip()
     sections.append("# systemctl --failed\n" + (failed or "(none)"))
 
-    # Display manager state is the #1 thing that gates login_ready.
-    dm_state = _run(
-        ["systemctl", "is-active", "display-manager.service"],
+    # Active state of services we care about for typical "stuck"
+    # scenarios. is-active prints 'active', 'inactive', 'failed', etc.
+    service_states = []
+    for svc in (
+        "display-manager.service",
+        "lightdm.service",
+        "ssh.service",
+        "fleetboot-scratch-setup.service",
+        "fleetboot-set-hostname.service",
+    ):
+        state = _run(["systemctl", "is-active", svc]).strip() or "unknown"
+        service_states.append(f"  {svc}: {state}")
+    sections.append("# key service states\n" + "\n".join(service_states))
+
+    # Recent log lines for the scratch setup — if mounts is empty in
+    # the hardware inventory, this tells us why.
+    scratch_log = _run(
+        [
+            "journalctl", "-u", "fleetboot-scratch-setup.service",
+            "-n", "30", "--no-pager", "--no-hostname",
+        ],
+        timeout=6.0,
     ).strip()
-    sections.append(f"# display-manager.service: {dm_state or 'unknown'}")
+    if scratch_log:
+        sections.append("# scratch-setup journal\n" + scratch_log)
 
     # Show the most-recent log lines for whatever has just crashed — bounded
     # so a verbose service can't blow the payload budget.

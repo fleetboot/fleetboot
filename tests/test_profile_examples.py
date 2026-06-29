@@ -32,6 +32,21 @@ def test_profile_dir_and_readme_exist(name: str):
 
 
 @pytest.mark.parametrize("name", DESKTOP_PROFILES)
+def test_desktop_profile_enables_its_display_manager(name: str):
+    """policy-rc.d in the chroot build prevents the DM's postinst from
+    auto-enabling the service, so every desktop profile must enable
+    it from setup-chroot. Without this the image lands at a black
+    screen — installed but not started."""
+    setup = (PROFILES_DIR / name / "setup-chroot").read_text()
+    # Each profile must enable at least one common DM.
+    enabled_any = any(
+        f"systemctl enable {dm}" in setup
+        for dm in ("lightdm.service", "gdm3.service", "sddm.service")
+    )
+    assert enabled_any, f"{name}/setup-chroot doesn't enable a display manager"
+
+
+@pytest.mark.parametrize("name", DESKTOP_PROFILES)
 def test_desktop_profile_sets_graphical_target(name: str):
     """Every desktop profile must flip the systemd default to
     `graphical.target` — otherwise the base recipe's text-console

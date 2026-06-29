@@ -1,3 +1,6 @@
 #!/bin/sh
 set -eu
 systemctl set-default graphical.target
+# policy-rc.d in the chroot build prevents sddm's postinst from
+# auto-enabling the service. Enable explicitly.
+systemctl enable sddm.service
