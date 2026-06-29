@@ -74,12 +74,18 @@ lint:
 # value back via /status. Mismatch => orange row, time to reboot.
 BUILD_VERSION := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 
+# Leave one CPU for the host so `make image` doesn't peg every core
+# while the dev server + dashboard are still responsive. Falls back to
+# 1 CPU on a single-core host (or where nproc is missing).
+IMAGE_CPUS := $(shell n=$$(nproc 2>/dev/null || echo 2); if [ "$$n" -gt 1 ]; then echo $$((n - 1)); else echo 1; fi)
+
 .PHONY: image
 image: stage-fleetboot-package resolve-profile
 	mkdir -p $(BUILD_DIR)
 	$(DEBOS) \
 	  --memory=4Gb \
 	  --scratchsize=8Gb \
+	  --cpus=$(IMAGE_CPUS) \
 	  --artifactdir=$(BUILD_DIR) \
 	  --template-var=architecture:$(ARCH) \
 	  --template-var=profile:$(PROFILE) \
