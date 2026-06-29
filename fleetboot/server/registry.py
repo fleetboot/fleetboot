@@ -44,6 +44,11 @@ CREATE TABLE IF NOT EXISTS machines (
     last_ip          TEXT,
     last_ip_at       TEXT,
     reboot_command   TEXT,
+    -- Soft-reboot signal. When non-zero, the next /status reply tells
+    -- the machine to `systemctl reboot`. Used as a fallback when the
+    -- PDU power-cycle command fails (or no PDU is configured): the
+    -- machine reboots itself on its next heartbeat.
+    pending_reboot   INTEGER NOT NULL DEFAULT 0,
     created_at      TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -158,6 +163,7 @@ def _add_diagnostics_columns_if_missing(
         "ALTER TABLE machines ADD COLUMN last_ip TEXT",
         "ALTER TABLE machines ADD COLUMN last_ip_at TEXT",
         "ALTER TABLE machines ADD COLUMN reboot_command TEXT",
+        "ALTER TABLE machines ADD COLUMN pending_reboot INTEGER NOT NULL DEFAULT 0",
     ):
         try:
             connection.execute(column_def)
@@ -225,6 +231,11 @@ class Machine:
     # shell=True semantics — this is dev-only power control; a real
     # structured-power-control layer is a future task.
     reboot_command: Optional[str] = None
+    # When True, the next /status response tells the machine to
+    # `systemctl reboot`. Set as a soft fallback when an explicit
+    # PDU power-cycle has failed (or no PDU is configured); cleared
+    # implicitly when the machine re-enrols on its next PXE.
+    pending_reboot: bool = False
 
 
 @dataclass(frozen=True)
@@ -368,6 +379,26 @@ class MachineRegistry:
                 (cleaned, normalised_mac),
             )
 
+    def set_pending_reboot(self, mac: str, pending: bool) -> None:
+        """Toggle the soft-reboot signal on the machine row.
+
+        When True, the next /status response includes
+        `pending_reboot: true` and the in-image reporter calls
+        `systemctl reboot`. Used as a fallback after a failed PDU
+        power-cycle: even if the PDU is unreachable or unconfigured,
+        the machine reboots itself on its next heartbeat.
+
+        Cleared implicitly when the machine re-enrols on its next
+        PXE (enroll() resets every field), so the signal naturally
+        de-armed once the reboot succeeds.
+        """
+        normalised_mac = _normalise_mac(mac)
+        with self._write_lock, self._connect() as connection:
+            connection.execute(
+                "UPDATE machines SET pending_reboot = ? WHERE mac = ?",
+                (1 if pending else 0, normalised_mac),
+            )
+
     def set_reboot_command(self, mac: str, command: Optional[str]) -> None:
         """Set or clear the machine's reboot shell command. None / empty
         clears it (admin's way of disabling the delete+reboot button)."""
@@ -472,6 +503,7 @@ class MachineRegistry:
         "last_hardware", "last_hardware_at",
         "last_ip", "last_ip_at",
         "reboot_command",
+        "pending_reboot",
         "created_at",
     )
 
@@ -830,5 +862,8 @@ def _row_to_machine(row: sqlite3.Row) -> Machine:
         last_ip=row["last_ip"],
         last_ip_at=row["last_ip_at"],
         reboot_command=row["reboot_command"],
+        pending_reboot=bool(row["pending_reboot"]) if (
+            "pending_reboot" in row.keys()
+        ) else False,
         created_at=row["created_at"],
     )

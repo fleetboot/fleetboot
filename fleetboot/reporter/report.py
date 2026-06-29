@@ -393,6 +393,33 @@ def report_state(
     # read-only fs just leaves the heartbeat with nothing to send, which is
     # also benign.
     _remember_current_state(state)
+    # Soft-reboot signal: the server tells us to reboot via the
+    # `pending_reboot` field in the /status reply. Used as a fallback
+    # when the dashboard's PDU power-cycle attempt failed (or no PDU
+    # is configured). We honour it best-effort — a missing systemd or
+    # non-zero return is benign for the current call (the next
+    # heartbeat will see the flag still set and try again).
+    try:
+        body = response.json() or {}
+    except Exception:
+        body = {}
+    if body.get("pending_reboot"):
+        try:
+            import subprocess
+            subprocess.Popen(
+                ["systemctl", "reboot"],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            )
+        except (FileNotFoundError, OSError):
+            # /sbin/systemctl missing in unusual setups — try the
+            # legacy `reboot` binary as a last resort.
+            try:
+                subprocess.Popen(
+                    ["reboot"],
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                )
+            except (FileNotFoundError, OSError):
+                pass
 
 
 def main(argv: list[str]) -> int:

@@ -47,8 +47,13 @@
     .version-current { color: var(--good); font-weight: 500; }
     .version-stale   { color: #d97706; font-weight: 500; }
     .row-actions { white-space: nowrap; }
-    .row-actions form { display: inline-block; margin: 0 4px 0 0; }
+    .row-actions form { display: inline-block; margin: 0 2px 0 0; }
     .row-actions form:last-child { margin-right: 0; }
+    /* Compact row-action buttons — smaller padding / font so the
+       three-button stack fits without forcing the table wider. */
+    .row-actions button {
+       padding: 3px 8px; font-size: 12px; border-radius: 2px;
+    }
   </style>
 </head>
 <body>

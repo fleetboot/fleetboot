@@ -301,15 +301,17 @@ def test_delete_and_reboot_falls_back_to_pdudaemon_when_no_explicit_command(
         data={"pdudaemon_host": "prowl:16421"},
         headers=_auth_header(),
     )
-    with mock.patch.object(subprocess, "Popen") as popen:
+    with mock.patch.object(subprocess, "run") as run:
+        # Pretend PDU accepted the request.
+        run.return_value = mock.Mock(returncode=0)
         response = client.post(
             "/dashboard/machines/aa:bb:cc:dd:ee:ff/delete-and-reboot",
             headers=_auth_header(),
             follow_redirects=False,
         )
     assert response.status_code == 303
-    popen.assert_called_once()
-    command = popen.call_args.args[0]
+    run.assert_called_once()
+    command = run.call_args.args[0]
     assert "http://prowl:16421/power/control/reboot?alias=lab-pc-01" in command
 
 
@@ -346,14 +348,133 @@ def test_explicit_reboot_command_wins_over_pdudaemon(
         data={"reboot_command": "echo explicit"},
         headers=_auth_header(),
     )
-    with mock.patch.object(subprocess, "Popen") as popen:
+    with mock.patch.object(subprocess, "run") as run:
+        run.return_value = mock.Mock(returncode=0)
         client.post(
             "/dashboard/machines/aa:bb:cc:dd:ee:ff/delete-and-reboot",
             headers=_auth_header(),
             follow_redirects=False,
         )
-    command = popen.call_args.args[0]
+    command = run.call_args.args[0]
     assert command == "echo explicit"
+
+
+def test_failed_pdu_arms_soft_reboot_signal_and_keeps_row(
+    dashboard_root: Path,
+):
+    """When PDU exits non-zero, the row stays (so /status can ride the
+    signal out) and pending_reboot is armed on the machine row."""
+    import subprocess
+    import unittest.mock as mock
+
+    client = _client(dashboard_root)
+    client.post(
+        "/dashboard/machines",
+        data={
+            "mac": "aa:bb:cc:dd:ee:ff",
+            "profile_name": "school",
+            "architecture": "x86_64",
+            "platform": "efi",
+        },
+        headers=_auth_header(),
+    )
+    from fleetboot.server.registry import MachineRegistry
+    reg = MachineRegistry(dashboard_root / "machines.sqlite")
+    reg.update_hostname("aa:bb:cc:dd:ee:ff", "lab-pc-01")
+    client.post(
+        "/dashboard/settings",
+        data={"pdudaemon_host": "prowl:16421"},
+        headers=_auth_header(),
+    )
+    # PDU exits non-zero (e.g. server unreachable, alias unknown).
+    with mock.patch.object(subprocess, "run") as run:
+        run.return_value = mock.Mock(returncode=1)
+        response = client.post(
+            "/dashboard/machines/aa:bb:cc:dd:ee:ff/delete-and-reboot",
+            headers=_auth_header(),
+            follow_redirects=False,
+        )
+    assert response.status_code == 303
+    refreshed = reg.lookup("aa:bb:cc:dd:ee:ff")
+    # Row preserved; soft signal armed.
+    assert refreshed is not None
+    assert refreshed.pending_reboot is True
+
+
+def test_reboot_only_button_keeps_row_even_on_pdu_success(
+    dashboard_root: Path,
+):
+    """The standalone /reboot button always keeps the machine row,
+    regardless of PDU outcome — admin uses it when they want the
+    machine cycled but the registry config to stay."""
+    import subprocess
+    import unittest.mock as mock
+
+    client = _client(dashboard_root)
+    client.post(
+        "/dashboard/machines",
+        data={
+            "mac": "aa:bb:cc:dd:ee:ff",
+            "profile_name": "school",
+            "architecture": "x86_64",
+            "platform": "efi",
+        },
+        headers=_auth_header(),
+    )
+    client.post(
+        "/dashboard/machines/aa:bb:cc:dd:ee:ff/reboot-command",
+        data={"reboot_command": "echo ok"},
+        headers=_auth_header(),
+    )
+    with mock.patch.object(subprocess, "run") as run:
+        run.return_value = mock.Mock(returncode=0)
+        response = client.post(
+            "/dashboard/machines/aa:bb:cc:dd:ee:ff/reboot",
+            headers=_auth_header(),
+            follow_redirects=False,
+        )
+    assert response.status_code == 303
+    from fleetboot.server.registry import MachineRegistry
+    reg = MachineRegistry(dashboard_root / "machines.sqlite")
+    assert reg.lookup("aa:bb:cc:dd:ee:ff") is not None
+
+
+def test_status_reply_carries_pending_reboot_when_armed(tmp_path: Path):
+    """/status reply includes pending_reboot=True when the machine
+    row has it set. The in-image reporter watches for this and calls
+    `systemctl reboot`."""
+    from pathlib import Path as _P
+    from fleetboot.boot_states import BootState
+    from fleetboot.server.app import create_app
+    from fleetboot.server.boot_sessions import BootSessionStore
+    from fleetboot.server.registry import MachineRegistry
+    from fastapi.testclient import TestClient
+
+    sessions = BootSessionStore()
+    registry = MachineRegistry(_P(tmp_path) / "machines.sqlite")
+    registry.enroll(
+        mac="aa:bb:cc:dd:ee:ff", profile_name="default",
+        architecture="x86_64", platform="efi",
+    )
+    registry.set_pending_reboot("aa:bb:cc:dd:ee:ff", True)
+    app = create_app(sessions=sessions, registry=registry)
+    client = TestClient(app)
+    session = sessions.mint("aa:bb:cc:dd:ee:ff")
+    response = client.post(
+        "/status",
+        json={"state": "network_up"},
+        headers={"Authorization": f"Bearer {session.token}"},
+    )
+    assert response.status_code == 200
+    assert response.json()["pending_reboot"] is True
+    # Clear path: when the flag is reset, the reply reverts to False.
+    registry.set_pending_reboot("aa:bb:cc:dd:ee:ff", False)
+    response = client.post(
+        "/status",
+        json={"state": "network_up"},
+        headers={"Authorization": f"Bearer {session.token}"},
+    )
+    assert response.json()["pending_reboot"] is False
 
 
 def test_machine_detail_404_for_unknown_mac(dashboard_root: Path):

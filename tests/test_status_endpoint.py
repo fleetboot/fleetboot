@@ -23,7 +23,14 @@ def test_valid_report_records_state():
     )
     assert response.status_code == 200
     body = response.json()
-    assert body == {"ok": True, "mac": "aa:bb:cc:dd:ee:ff", "state": "network_up"}
+    assert body == {
+        "ok": True,
+        "mac": "aa:bb:cc:dd:ee:ff",
+        "state": "network_up",
+        # pending_reboot defaults False — the dashboard arms it via
+        # registry.set_pending_reboot when a PDU power-cycle fails.
+        "pending_reboot": False,
+    }
     refreshed = store.lookup(session.token)
     assert refreshed is not None
     assert refreshed.latest_state == BootState.NETWORK_UP

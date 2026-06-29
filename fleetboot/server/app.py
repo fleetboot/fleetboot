@@ -126,6 +126,10 @@ class StatusAcknowledgement(BaseModel):
     ok: bool = True
     mac: str
     state: BootState
+    # Soft-reboot signal. When true, the in-image reporter should
+    # `systemctl reboot` — used as a fallback after a failed PDU
+    # power-cycle.
+    pending_reboot: bool = False
 
 
 class MintRequest(BaseModel):
@@ -350,8 +354,19 @@ def create_app(
                     mac=session.mac,
                     hardware_json=_json.dumps(report.hardware),
                 )
+        # Soft-reboot signal: read the machine row's pending_reboot
+        # flag and surface it on the reply. The in-image reporter
+        # acts on this with `systemctl reboot`.
+        pending_reboot = False
+        if registry is not None:
+            machine = registry.lookup(session.mac)
+            if machine is not None and machine.pending_reboot:
+                pending_reboot = True
         return StatusAcknowledgement(
-            ok=True, mac=session.mac, state=report.state
+            ok=True,
+            mac=session.mac,
+            state=report.state,
+            pending_reboot=pending_reboot,
         )
 
     @app.post(

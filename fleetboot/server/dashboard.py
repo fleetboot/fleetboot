@@ -482,23 +482,46 @@ def build_dashboard_router(
         dependencies=[Depends(require_admin)],
     )
     def delete_and_reboot(mac: str) -> RedirectResponse:
-        """Delete the machine row, then power-cycle the host.
+        """Reboot the host, then delete its row if PDU accepted."""
+        _reboot_machine(mac, then_delete=True)
+        return RedirectResponse(
+            url="/dashboard", status_code=status.HTTP_303_SEE_OTHER,
+        )
 
-        Two paths in priority order:
+    @router.post(
+        "/dashboard/machines/{mac}/reboot",
+        response_class=HTMLResponse,
+        dependencies=[Depends(require_admin)],
+    )
+    def reboot_machine_route(mac: str) -> RedirectResponse:
+        """Reboot but keep the row. Useful when the admin wants the
+        machine power-cycled (or soft-rebooted via the in-image
+        reporter) without re-triggering auto-enrolment."""
+        _reboot_machine(mac, then_delete=False)
+        return RedirectResponse(
+            url="/dashboard", status_code=status.HTTP_303_SEE_OTHER,
+        )
 
-          1. Explicit per-machine `reboot_command` — free-text shell run
-             with shell=True on the fleetboot host. The admin owns the
-             contents.
-          2. Fleet-wide pdudaemon fallback — if `pdudaemon_host` is set
-             AND the machine has a known hostname, build
-             `curl http://<pdudaemon_host>/power/control/reboot?alias=<hostname>`
-             and run that. This means most machines never need their own
-             reboot_command — the alias on pdudaemon resolves which PDU
-             port to flip.
+    def _reboot_machine(mac: str, *, then_delete: bool) -> None:
+        """Shared reboot path used by /reboot and /delete-and-reboot.
 
-        Either way: the machine row is deleted first so the page
-        refresh shows it gone immediately; the power command is
-        Popen'd detached so the dashboard isn't blocked.
+        Two PDU paths in priority order:
+          1. Explicit per-machine `reboot_command` (free-text shell run
+             with shell=True on the fleetboot host — admin owns the
+             contents).
+          2. Fleet-wide pdudaemon fallback when `pdudaemon_host` is set
+             AND the machine has a known hostname: builds
+             `curl "<pdudaemon>/power/control/reboot?alias=<hostname>"`.
+
+        If the PDU command exits non-zero (or no PDU is configured at
+        all), the soft-reboot signal arms instead: pending_reboot=1 on
+        the row makes the next /status reply include
+        `pending_reboot: true`, and the in-image reporter calls
+        `systemctl reboot`. The row is preserved in that case because
+        the signal needs the row to ride out on a future /status.
+
+        If `then_delete` is True and the PDU succeeded, we remove the
+        machine row so a fresh PXE re-enrols.
         """
         import subprocess
 
@@ -513,17 +536,27 @@ def build_dashboard_router(
                     command = _pdudaemon_reboot_command(
                         pdu_host=pdu_host, alias=machine.hostname,
                     )
-        registry.remove(mac)
+
+        pdu_succeeded = False
         if command:
-            # Detach: don't block the dashboard response on the curl
-            # finishing. stderr goes to the dev server log.
-            subprocess.Popen(
-                command, shell=True,
-                stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT,
-            )
-        return RedirectResponse(
-            url="/dashboard", status_code=status.HTTP_303_SEE_OTHER,
-        )
+            try:
+                # 10-second timeout keeps the dashboard responsive when
+                # the PDU host is unreachable. shell=True is intentional
+                # — admin owns the command string.
+                result = subprocess.run(
+                    command, shell=True, timeout=10,
+                    stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT,
+                )
+                pdu_succeeded = result.returncode == 0
+            except subprocess.TimeoutExpired:
+                pdu_succeeded = False
+
+        if pdu_succeeded and then_delete:
+            registry.remove(mac)
+        elif not pdu_succeeded:
+            # PDU failed or wasn't configured. Arm the soft reboot
+            # signal — machine will reboot itself on next heartbeat.
+            registry.set_pending_reboot(mac, True)
 
     @router.get(
         "/dashboard/machines/{mac}",
