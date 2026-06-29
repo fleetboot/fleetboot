@@ -3,7 +3,7 @@
 What this proves, on success:
 
   1. libvirt's dnsmasq on virbr-fbt advertises our bootfile + next-server.
-  2. QEMU UEFI fetches grubnetx64.efi from tftpjail via TFTP.
+  2. QEMU UEFI fetches fleetboot-x64-uefi.efi from tftpjail via TFTP.
   3. GRUB's embedded config fetches /jail/<mac>/x86_64/efi via TFTP.
   4. tftpjail mints a token, renders the per-MAC grub.cfg.
   5. GRUB TFTP-fetches vmlinuz + initrd.img from tftpjail's public assets.
@@ -66,7 +66,7 @@ BUILD_DIR = REPO_ROOT / "build"
 NETWORK_XML = REPO_ROOT / "image" / "libvirt-fleetboot-network.xml"
 
 REQUIRED_ARTIFACTS = (
-    BUILD_DIR / "grubnetx64.efi",
+    BUILD_DIR / "fleetboot-x64-uefi.efi",
     BUILD_DIR / "vmlinuz",
     BUILD_DIR / "initrd.img",
     BUILD_DIR / "fleetboot-school-amd64.squashfs",
@@ -153,7 +153,7 @@ def _domain_xml(serial_log_path: str) -> str:
           <os firmware='efi'>
             <!-- libvirt picks an OVMF descriptor based on these feature
                  flags. With the defaults we'd get the Secure Boot variant
-                 and our self-built (unsigned) grubnetx64.efi would be
+                 and our self-built (unsigned) fleetboot-x64-uefi.efi would be
                  rejected with "access denied" at PXE. Explicitly off. -->
             <firmware>
               <feature enabled='no' name='secure-boot'/>

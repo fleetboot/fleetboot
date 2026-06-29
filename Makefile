@@ -111,9 +111,12 @@ image-smoke:
 # config from tftpjail and chainloads it. Cheap to (re)build; we ship it
 # alongside vmlinuz / initrd.img in build/.
 .PHONY: grub-binary
-grub-binary: $(BUILD_DIR)/grubnetx64.efi
+grub-binary: $(BUILD_DIR)/fleetboot-x64-uefi.efi
 
-$(BUILD_DIR)/grubnetx64.efi: image/grub-embedded.cfg
+# Bootfile name is fleetboot-branded so a `tcpdump tftp` capture or a
+# next-server inspect makes it obvious which fleet this client is asking
+# for. arm64 will get its own fleetboot-arm64-uefi.efi target.
+$(BUILD_DIR)/fleetboot-x64-uefi.efi: image/grub-embedded.cfg
 	mkdir -p $(BUILD_DIR)
 	grub-mkimage \
 	  --format=x86_64-efi \
@@ -125,23 +128,24 @@ $(BUILD_DIR)/grubnetx64.efi: image/grub-embedded.cfg
 
 # Stage Debian's signed shim + signed grub binaries for Secure Boot PXE.
 #
-# DHCP advertises `shimx64.efi.signed` as the bootfile. UEFI loads shim
-# (trusted via Microsoft's UEFI CA in firmware), shim chainloads
-# `grubx64.efi` from the same TFTP path, and the signed grub looks for
+# DHCP advertises `fleetboot-x64-uefi-signed.efi` as the bootfile. UEFI
+# loads shim (trusted via Microsoft's UEFI CA in firmware), shim
+# chainloads `grubx64.efi` from the same TFTP path (this filename is
+# baked into shim so we keep it), and the signed grub looks for
 # `grub/grub.cfg` next — which we serve from `image/signed-boot/`.
 # That initial grub.cfg then `configfile`s to tftpjail's per-MAC dynamic
-# config exactly as our self-built `grubnetx64.efi` does today.
+# config exactly as our self-built `fleetboot-x64-uefi.efi` does today.
 #
 # Requires `shim-signed` and `grub-efi-amd64-signed` on the build host.
 SHIM_SOURCE  ?= /usr/lib/shim/shimx64.efi.signed
 GRUB_SOURCE  ?= /usr/lib/grub/x86_64-efi-signed/grubnetx64.efi.signed
 
 .PHONY: signed-boot-assets
-signed-boot-assets: $(BUILD_DIR)/shimx64.efi.signed \
+signed-boot-assets: $(BUILD_DIR)/fleetboot-x64-uefi-signed.efi \
                     $(BUILD_DIR)/grubx64.efi \
                     $(BUILD_DIR)/grub/grub.cfg
 
-$(BUILD_DIR)/shimx64.efi.signed: $(SHIM_SOURCE)
+$(BUILD_DIR)/fleetboot-x64-uefi-signed.efi: $(SHIM_SOURCE)
 	mkdir -p $(BUILD_DIR)
 	cp $< $@
 

@@ -2,7 +2,7 @@
 
 What this proves, when it passes:
 
-  1. VBox UEFI fetches grubnetx64.efi (our built chainload binary) from
+  1. VBox UEFI fetches fleetboot-x64-uefi.efi (our built chainload binary) from
      tftpjail's public-asset directory — no identity / registry check yet.
   2. GRUB starts. Its embedded config fetches
      /jail/<mac>/x86_64/efi from tftpjail over TFTP.
@@ -63,14 +63,14 @@ VM_MAC_RAW = "080027aabbcc"
 VM_MAC_COLON = "08:00:27:aa:bb:cc"
 
 # What VBox tells the guest's UEFI to TFTP-fetch as its first stage.
-BOOTFILE = "grubnetx64.efi"
+BOOTFILE = "fleetboot-x64-uefi.efi"
 
 # Build artifacts the test reads (and points clients at). All produced by
 # the project's Make targets; we skip rather than fail if any is missing.
 REPO_ROOT = Path(__file__).resolve().parents[2]
 BUILD_DIR = REPO_ROOT / "build"
 REQUIRED_ARTIFACTS = (
-    BUILD_DIR / "grubnetx64.efi",
+    BUILD_DIR / "fleetboot-x64-uefi.efi",
     BUILD_DIR / "vmlinuz",
     BUILD_DIR / "initrd.img",
     BUILD_DIR / "fleetboot-amd64.squashfs",
@@ -233,7 +233,7 @@ def test_vbox_uefi_pxe_boots_kernel_and_reporter_calls_home():
         port=TFTP_PORT,
         policy=policy,
         neighbour_lookup=permissive_neighbour,
-        # Lets UEFI PXE fetch grubnetx64.efi without registry auth.
+        # Lets UEFI PXE fetch fleetboot-x64-uefi.efi without registry auth.
         public_assets_dir=BUILD_DIR,
         ack_timeout_seconds=1.0,
         max_retries=3,

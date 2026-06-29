@@ -128,7 +128,7 @@ Outputs land in `build/`:
 build/fleetboot-school-amd64.squashfs    # the rootfs students boot into
 build/vmlinuz                            # kernel
 build/initrd.img                         # initrd, includes live-boot
-build/grubnetx64.efi                     # the chainload GRUB binary
+build/fleetboot-x64-uefi.efi                     # the chainload GRUB binary
 ```
 
 To define your own profile — e.g. a `lab` profile with engineering tools
@@ -148,9 +148,9 @@ profile, so admin choices win.
 Whatever DHCP server your network already runs, you need to advertise:
 
 - **DHCP option 54 (next-server)** = the fleetboot server's LAN IP.
-- **DHCP option 67 (bootfile-name)** = `grubnetx64.efi` for the
+- **DHCP option 67 (bootfile-name)** = `fleetboot-x64-uefi.efi` for the
   unsigned chain (Secure Boot **disabled** on every client), or
-  `shimx64.efi.signed` for the signed chain (Secure Boot **enabled**;
+  `fleetboot-x64-uefi-signed.efi` for the signed chain (Secure Boot **enabled**;
   needs `make signed-boot-assets` once on the build host — see "Signed
   Secure Boot" below).
 - **DHCP option 93 (Client System Architecture)** — clients send this;
@@ -164,7 +164,7 @@ option arch code 93 = unsigned integer 16;
 class "uefi-x64" {
     match if option arch = 00:07;
     next-server 10.0.0.10;            # fleetboot server LAN IP
-    filename "grubnetx64.efi";
+    filename "fleetboot-x64-uefi.efi";
 }
 class "uefi-arm64" {
     match if option arch = 00:0b;
@@ -178,7 +178,7 @@ class "uefi-arm64" {
 ```
 dhcp-match=set:efi64,option:client-arch,7
 dhcp-match=set:efiarm64,option:client-arch,11
-dhcp-boot=tag:efi64,grubnetx64.efi,fleetboot,10.0.0.10
+dhcp-boot=tag:efi64,fleetboot-x64-uefi.efi,fleetboot,10.0.0.10
 dhcp-boot=tag:efiarm64,grubnetaa64.efi,fleetboot,10.0.0.10
 ```
 
@@ -191,7 +191,7 @@ should show:
 >>Start PXE over IPv4.
   Station IP address is 10.0.0.50
   Server IP address is 10.0.0.10
-  NBP filename is grubnetx64.efi
+  NBP filename is fleetboot-x64-uefi.efi
   NBP filesize is 720000 Bytes
   Downloading NBP file...
   NBP file downloaded successfully.
@@ -204,7 +204,7 @@ the bootp options correctly — re-check `next-server` and `filename`.
 
 ## Signed Secure Boot (optional)
 
-Out of the box, fleetboot ships a self-built `grubnetx64.efi` that has to
+Out of the box, fleetboot ships a self-built `fleetboot-x64-uefi.efi` that has to
 run with Secure Boot **off** in each client's firmware. To use Debian's
 signed shim + signed grub chain instead — which firmware accepts even
 with Secure Boot **on** — install the packages once on the build host:
@@ -216,11 +216,11 @@ apt install shim-signed grub-efi-amd64-signed
 Then build the signed-boot assets alongside your image:
 
 ```sh
-make signed-boot-assets   # produces build/shimx64.efi.signed, grubx64.efi, grub/grub.cfg
+make signed-boot-assets   # produces build/fleetboot-x64-uefi-signed.efi, grubx64.efi, grub/grub.cfg
 ```
 
-The DHCP configuration changes one line — `filename "shimx64.efi.signed";`
-instead of `filename "grubnetx64.efi";`. The signed grub looks for
+The DHCP configuration changes one line — `filename "fleetboot-x64-uefi-signed.efi";`
+instead of `filename "fleetboot-x64-uefi.efi";`. The signed grub looks for
 `grub/grub.cfg` next to where it was loaded; that file (our
 `image/signed-boot/initial-grub.cfg`) just hands control to tftpjail's
 per-MAC config exactly as the unsigned binary does.
@@ -603,7 +603,7 @@ These are real gaps. None block initial deployment but each is on the
 list:
 
 - **Signed shim + grub for Secure Boot.** Today we serve a self-built
-  unsigned `grubnetx64.efi`. Secure Boot must be off in firmware. Using
+  unsigned `fleetboot-x64-uefi.efi`. Secure Boot must be off in firmware. Using
   Debian's signed shim chain is documented in DESIGN.md but not yet
   packaged in the build.
 - **Per-MAC enrolment keytab delivery via fleetboot's API.** Today, the

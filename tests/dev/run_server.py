@@ -130,6 +130,16 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         "--host", default="0.0.0.0",
         help="HTTP bind address (default 0.0.0.0)",
     )
+    parser.add_argument(
+        "--client-base-url", default=None,
+        help=(
+            "URL the BOOTED machine should use to reach fleetboot. Baked "
+            "into the rendered grub.cfg (kernel/initrd/squashfs fetch + "
+            "status reports). Default: the libvirt-bridge IP, which only "
+            "works for dev VMs on virbr-fbt. For real LAN clients, set "
+            "this to http://<this-host-LAN-IP>:<port>."
+        ),
+    )
     return parser.parse_args(argv)
 
 
@@ -153,8 +163,14 @@ def main(argv: list[str]) -> int:
         dashboard_repo_root=REPO_ROOT,
     )
 
-    # Bring up tftpjail in the same process — the VMs need both.
-    fleetboot_url = f"http://{BRIDGE_IP_GUEST_VIEW}:{args.port}"
+    # Bring up tftpjail in the same process — the VMs need both. The URL
+    # baked into grub.cfg is the one the BOOTED machine uses, which can
+    # differ from where the admin connects: dev VMs on virbr-fbt only
+    # reach 192.168.99.1; real LAN clients only reach the host's LAN IP.
+    fleetboot_url = (
+        args.client_base_url
+        or f"http://{BRIDGE_IP_GUEST_VIEW}:{args.port}"
+    )
     client = FleetbootClient(
         base_url=fleetboot_url,
         mint_secret=secrets_env["FLEETBOOT_MINT_SECRET"],
@@ -178,6 +194,7 @@ def main(argv: list[str]) -> int:
     tftpjail.start()
     print(f"tftpjail listening on UDP/{TFTP_PORT}")
     print(f"fleetboot listening on http://{args.host}:{args.port}")
+    print(f"client-side fleetboot URL (baked into grub.cfg): {fleetboot_url}")
     print()
     print("dashboard URLs (auth: 'admin' / <admin-secret> below):")
     print(f"  on this host:        http://localhost:{args.port}/dashboard")

@@ -8,7 +8,7 @@
   Subnet:        192.168.99.0/24
   Host on br:    192.168.99.1   (where tftpjail and fleetboot listen)
   DHCP pool:     192.168.99.10 — .50
-  bootp file:    grubnetx64.efi (served by tftpjail at 192.168.99.1:69)
+  bootp file:    fleetboot-x64-uefi.efi (served by tftpjail at 192.168.99.1:69)
   Forward mode:  nat — VMs reach the outside world through the host's
                        default route, masqueraded.
 -->
@@ -24,7 +24,7 @@
     <dhcp>
       <range start='192.168.99.10' end='192.168.99.50'/>
       <!-- DHCP option 67 (bootfile) + option 54 (next-server). -->
-      <bootp file='grubnetx64.efi' server='192.168.99.1'/>
+      <bootp file='fleetboot-x64-uefi.efi' server='192.168.99.1'/>
     </dhcp>
   </ip>
 </network>

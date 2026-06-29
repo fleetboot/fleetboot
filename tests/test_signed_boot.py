@@ -57,6 +57,11 @@ def test_makefile_signed_boot_target_present():
     """The structural test that proves admins can run `make signed-boot-assets`."""
     makefile = (REPO_ROOT / "Makefile").read_text()
     assert "signed-boot-assets:" in makefile
-    assert "shimx64.efi.signed" in makefile
+    # The bootfile we ADVERTISE is now fleetboot-branded; the SOURCE
+    # filename in Debian's shim-signed package keeps its upstream name.
+    assert "fleetboot-x64-uefi-signed.efi" in makefile
+    assert "/usr/lib/shim/shimx64.efi.signed" in makefile
+    # shim looks for `grubx64.efi` specifically; this filename must
+    # not be renamed.
     assert "grubx64.efi" in makefile
     assert "/grub/grub.cfg" in makefile
