@@ -88,6 +88,13 @@
     <input type="checkbox" name="serial_console" value="1">
     Enable serial console
   </label>
+  <label>Local-disk scratch
+    <select name="scratch_mode">
+      <option value="volatile" selected>volatile (wiped each boot)</option>
+      <option value="persistent">persistent (kept across reboots)</option>
+      <option value="off">off (ignore the disk)</option>
+    </select>
+  </label>
   <button type="submit">add rule</button>
 </form>
 {% endblock %}

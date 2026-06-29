@@ -1,0 +1,19 @@
+[Unit]
+Description=Set up local-disk scratch filesystem at /var/scratch
+DefaultDependencies=no
+# Run after udev has settled (so /sys/block is populated) but before any
+# service that might want to write to /var/scratch.
+After=systemd-udevd.service systemd-udev-settle.service
+Wants=systemd-udev-settle.service
+Before=local-fs.target
+# Only when the cmdline explicitly enables a scratch mode (the
+# fleetboot-scratch-setup.sh additionally honours the value).
+ConditionKernelCommandLine=fleetboot.scratch
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/lib/fleetboot/fleetboot-scratch-setup.sh
+
+[Install]
+WantedBy=local-fs.target

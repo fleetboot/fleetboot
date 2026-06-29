@@ -137,13 +137,20 @@ def build_dashboard_router(
         architecture: str = Form("x86_64"),
         platform: str = Form("efi"),
         serial_console: Optional[str] = Form(None),
+        scratch_mode: str = Form("volatile"),
     ) -> RedirectResponse:
+        if scratch_mode not in ("volatile", "persistent", "off"):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="scratch_mode must be volatile/persistent/off",
+            )
         registry.enroll(
             mac=mac,
             profile_name=profile_name,
             architecture=architecture,
             platform=platform,
             serial_console=bool(serial_console),
+            scratch_mode=scratch_mode,
         )
         return RedirectResponse(
             url="/dashboard", status_code=status.HTTP_303_SEE_OTHER
@@ -260,6 +267,7 @@ def build_dashboard_router(
         architecture: str = Form("x86_64"),
         platform: str = Form("any"),
         serial_console: Optional[str] = Form(None),
+        scratch_mode: str = Form("volatile"),
     ) -> RedirectResponse:
         if match_kind not in ("mac_prefix", "ip_cidr"):
             raise HTTPException(
@@ -271,6 +279,11 @@ def build_dashboard_router(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="platform must be 'any', 'efi', or 'pc'",
             )
+        if scratch_mode not in ("volatile", "persistent", "off"):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="scratch_mode must be volatile/persistent/off",
+            )
         try:
             registry.add_auto_enrol_rule(
                 name=name,
@@ -280,6 +293,7 @@ def build_dashboard_router(
                 architecture=architecture,
                 platform=platform,
                 serial_console=bool(serial_console),
+                scratch_mode=scratch_mode,
             )
         except ValueError as err:
             raise HTTPException(

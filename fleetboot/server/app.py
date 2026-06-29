@@ -137,6 +137,14 @@ class MachineEnrolment(BaseModel):
     platform: str = Field(..., description="Firmware platform: efi or pc.")
     # Off by default — real student desktops do not have or need a serial.
     # Tests and headless lab boxes opt in.
+    scratch_mode: str = Field(
+        default="volatile",
+        description=(
+            "Local-disk scratch behaviour: 'volatile' (wipe + reformat every "
+            "boot, default), 'persistent' (kept across reboots), or 'off' "
+            "(ignore local disk entirely)."
+        ),
+    )
     serial_console: bool = Field(
         default=False,
         description=(
@@ -157,6 +165,7 @@ class MachineRecord(BaseModel):
     enrolled_by: str = "manual"
     hostname: Optional[str] = None
     hostname_seen_at: Optional[str] = None
+    scratch_mode: str = "volatile"
     created_at: str
 
     @classmethod
@@ -170,6 +179,7 @@ class MachineRecord(BaseModel):
             enrolled_by=machine.enrolled_by,
             hostname=machine.hostname,
             hostname_seen_at=machine.hostname_seen_at,
+            scratch_mode=machine.scratch_mode,
             created_at=machine.created_at,
         )
 
@@ -188,6 +198,9 @@ class AutoEnrolRuleRequest(BaseModel):
     # defaults in mixed-firmware subnets.
     platform: str = "any"
     serial_console: bool = False
+    # Local-disk scratch behaviour applied to machines auto-enrolled by
+    # this rule. See Machine.scratch_mode for the value semantics.
+    scratch_mode: str = "volatile"
 
 
 class AutoEnrolRuleRecord(BaseModel):
@@ -199,6 +212,7 @@ class AutoEnrolRuleRecord(BaseModel):
     architecture: str
     platform: str
     serial_console: bool
+    scratch_mode: str = "volatile"
     created_at: str
 
     @classmethod
@@ -207,7 +221,9 @@ class AutoEnrolRuleRecord(BaseModel):
             id=rule.id, name=rule.name, match_kind=rule.match_kind,
             match_value=rule.match_value, profile_name=rule.profile_name,
             architecture=rule.architecture, platform=rule.platform,
-            serial_console=rule.serial_console, created_at=rule.created_at,
+            serial_console=rule.serial_console,
+            scratch_mode=rule.scratch_mode,
+            created_at=rule.created_at,
         )
 
 
@@ -382,12 +398,18 @@ def create_app(
         _require_admin(authorization)
         # registry is non-None: _require_admin only returns successfully when
         # it has been configured.
+        if body.scratch_mode not in ("volatile", "persistent", "off"):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="scratch_mode must be volatile/persistent/off",
+            )
         machine = registry.enroll(  # type: ignore[union-attr]
             mac=body.mac,
             profile_name=body.profile_name,
             architecture=body.architecture,
             platform=body.platform,
             serial_console=body.serial_console,
+            scratch_mode=body.scratch_mode,
         )
         return MachineRecord.from_machine(machine)
 
@@ -473,6 +495,7 @@ def create_app(
                     platform=effective_platform,
                     serial_console=rule.serial_console,
                     enrolled_by=f"rule:{rule.name}",
+                    scratch_mode=rule.scratch_mode,
                 )
         if machine is None:
             raise HTTPException(

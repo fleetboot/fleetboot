@@ -35,6 +35,8 @@ CREATE TABLE IF NOT EXISTS machines (
     hostname_seen_at TEXT,
     boot_version    TEXT,
     boot_version_seen_at TEXT,
+    scratch_mode    TEXT NOT NULL DEFAULT 'volatile'
+                    CHECK(scratch_mode IN ('volatile', 'persistent', 'off')),
     created_at      TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -57,8 +59,10 @@ CREATE TABLE IF NOT EXISTS auto_enrol_rules (
     match_value     TEXT NOT NULL,
     profile_name    TEXT NOT NULL,
     architecture    TEXT NOT NULL DEFAULT 'x86_64',
-    platform        TEXT NOT NULL DEFAULT 'efi',
+    platform        TEXT NOT NULL DEFAULT 'any',
     serial_console  INTEGER NOT NULL DEFAULT 0,
+    scratch_mode    TEXT NOT NULL DEFAULT 'volatile'
+                    CHECK(scratch_mode IN ('volatile', 'persistent', 'off')),
     created_at      TEXT NOT NULL DEFAULT (datetime('now'))
 );
 """
@@ -110,6 +114,20 @@ def _add_boot_version_columns_if_missing(connection: sqlite3.Connection) -> None
             pass
 
 
+def _add_scratch_mode_columns_if_missing(
+    connection: sqlite3.Connection,
+) -> None:
+    """Migration: local-disk scratch behaviour, per machine + per rule."""
+    for table in ("machines", "auto_enrol_rules"):
+        try:
+            connection.execute(
+                f"ALTER TABLE {table} "
+                "ADD COLUMN scratch_mode TEXT NOT NULL DEFAULT 'volatile'"
+            )
+        except sqlite3.OperationalError:
+            pass
+
+
 @dataclass(frozen=True)
 class BootEvent:
     """One row from the boot_events log."""
@@ -147,6 +165,11 @@ class Machine:
     # orange (stale; needs reboot to pick up the new image).
     boot_version: Optional[str] = None
     boot_version_seen_at: Optional[str] = None
+    # How the image should treat any local disk it finds:
+    #   - volatile:   wipe + format ext4 every boot, mount /var/scratch
+    #   - persistent: keep ext4 across boots (browser cache survives)
+    #   - off:        ignore the disk entirely
+    scratch_mode: str = "volatile"
 
 
 @dataclass(frozen=True)
@@ -170,6 +193,7 @@ class AutoEnrolRule:
     platform: str
     serial_console: bool
     created_at: str
+    scratch_mode: str = "volatile"
 
 
 class MachineRegistry:
@@ -189,6 +213,7 @@ class MachineRegistry:
             _add_enrolled_by_column_if_missing(connection)
             _add_hostname_columns_if_missing(connection)
             _add_boot_version_columns_if_missing(connection)
+            _add_scratch_mode_columns_if_missing(connection)
             # WAL gives us safer concurrent reads without sacrificing
             # durability on writes. Harmless on in-memory databases.
             try:
@@ -213,6 +238,7 @@ class MachineRegistry:
         platform: str,
         serial_console: bool = False,
         enrolled_by: str = "manual",
+        scratch_mode: str = "volatile",
     ) -> Machine:
         """Insert (or replace) a machine. Returns the canonical row.
 
@@ -220,16 +246,21 @@ class MachineRegistry:
         path passes `enrolled_by='rule:<name>'` so the dashboard can show
         provenance.
         """
+        if scratch_mode not in ("volatile", "persistent", "off"):
+            raise ValueError(
+                f"scratch_mode must be volatile/persistent/off, got {scratch_mode!r}"
+            )
         normalised_mac = _normalise_mac(mac)
         with self._write_lock, self._connect() as connection:
             connection.execute(
                 "INSERT OR REPLACE INTO machines "
                 "(mac, profile_name, architecture, platform, "
-                " serial_console, enrolled_by) "
-                "VALUES (?, ?, ?, ?, ?, ?)",
+                " serial_console, enrolled_by, scratch_mode) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
                 (
                     normalised_mac, profile_name, architecture,
                     platform, 1 if serial_console else 0, enrolled_by,
+                    scratch_mode,
                 ),
             )
         result = self.lookup(normalised_mac)
@@ -276,6 +307,7 @@ class MachineRegistry:
         "mac", "profile_name", "architecture", "platform",
         "serial_console", "enrolled_by", "hostname", "hostname_seen_at",
         "boot_version", "boot_version_seen_at",
+        "scratch_mode",
         "created_at",
     )
 
@@ -365,17 +397,23 @@ class MachineRegistry:
         # default. 'efi'/'pc' gate the rule to one firmware type.
         platform: str = "any",
         serial_console: bool = False,
+        scratch_mode: str = "volatile",
     ) -> AutoEnrolRule:
+        if scratch_mode not in ("volatile", "persistent", "off"):
+            raise ValueError(
+                f"scratch_mode must be volatile/persistent/off, got {scratch_mode!r}"
+            )
         normalised = _normalise_match_value(match_kind, match_value)
         with self._write_lock, self._connect() as connection:
             cursor = connection.execute(
                 "INSERT INTO auto_enrol_rules "
                 "(name, match_kind, match_value, profile_name, "
-                " architecture, platform, serial_console) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                " architecture, platform, serial_console, scratch_mode) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     name, match_kind, normalised, profile_name,
                     architecture, platform, 1 if serial_console else 0,
+                    scratch_mode,
                 ),
             )
             rule_id = cursor.lastrowid
@@ -387,7 +425,8 @@ class MachineRegistry:
         with self._connect() as connection:
             row = connection.execute(
                 "SELECT id, name, match_kind, match_value, profile_name, "
-                "       architecture, platform, serial_console, created_at "
+                "       architecture, platform, serial_console, "
+                "       scratch_mode, created_at "
                 "FROM auto_enrol_rules WHERE id = ?",
                 (rule_id,),
             ).fetchone()
@@ -397,7 +436,8 @@ class MachineRegistry:
         with self._connect() as connection:
             rows = connection.execute(
                 "SELECT id, name, match_kind, match_value, profile_name, "
-                "       architecture, platform, serial_console, created_at "
+                "       architecture, platform, serial_console, "
+                "       scratch_mode, created_at "
                 "FROM auto_enrol_rules ORDER BY id"
             ).fetchall()
         return [_row_to_rule(r) for r in rows]
@@ -517,6 +557,7 @@ def _row_to_rule(row: sqlite3.Row) -> "AutoEnrolRule":
         architecture=row["architecture"],
         platform=row["platform"],
         serial_console=bool(row["serial_console"]),
+        scratch_mode=row["scratch_mode"] or "volatile",
         created_at=row["created_at"],
     )
 
@@ -533,5 +574,6 @@ def _row_to_machine(row: sqlite3.Row) -> Machine:
         hostname_seen_at=row["hostname_seen_at"],
         boot_version=row["boot_version"],
         boot_version_seen_at=row["boot_version_seen_at"],
+        scratch_mode=row["scratch_mode"] or "volatile",
         created_at=row["created_at"],
     )

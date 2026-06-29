@@ -130,7 +130,9 @@ actions:
   - action: run
     description: "Mark Fleetboot runtime helpers executable"
     chroot: true
-    command: chmod 0755 /usr/local/lib/fleetboot/fleetboot-heartbeat.sh
+    command: |
+      chmod 0755 /usr/local/lib/fleetboot/fleetboot-heartbeat.sh
+      chmod 0755 /usr/local/lib/fleetboot/fleetboot-scratch-setup.sh
 
   - action: overlay
     description: "Install Fleetboot PAM session hook"
@@ -181,6 +183,9 @@ actions:
       # Heartbeat timer keeps the dashboard's "latest state" column fresh
       # and lets fleetboot detect machines that went silent.
       systemctl enable fleetboot-heartbeat.timer
+      # Scratch-disk setup runs once at boot, gated on
+      # fleetboot.scratch=<mode> on the kernel cmdline.
+      systemctl enable fleetboot-scratch-setup.service
       # Overwrite debos's fakemachine hostname leak from the chroot build.
       # `fleetboot-client` is the deliberate placeholder; the reporter
       # filters it out, so the dashboard shows "—" until DHCP option 12

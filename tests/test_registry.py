@@ -141,6 +141,33 @@ def test_update_boot_version_is_noop_for_unknown_mac(registry: MachineRegistry):
     assert registry.lookup("aa:bb:cc:dd:ee:ff") is None
 
 
+def test_enroll_stores_scratch_mode_default_volatile(registry: MachineRegistry):
+    m = registry.enroll(
+        mac="aa:bb:cc:dd:ee:01", profile_name="default",
+        architecture="x86_64", platform="efi",
+    )
+    assert m.scratch_mode == "volatile"
+
+
+def test_enroll_stores_scratch_mode_persistent(registry: MachineRegistry):
+    m = registry.enroll(
+        mac="aa:bb:cc:dd:ee:02", profile_name="default",
+        architecture="x86_64", platform="efi",
+        scratch_mode="persistent",
+    )
+    assert m.scratch_mode == "persistent"
+
+
+def test_enroll_rejects_unknown_scratch_mode(registry: MachineRegistry):
+    import pytest
+    with pytest.raises(ValueError):
+        registry.enroll(
+            mac="aa:bb:cc:dd:ee:03", profile_name="default",
+            architecture="x86_64", platform="efi",
+            scratch_mode="wipe-on-friday",
+        )
+
+
 def test_enroll_tracks_provenance(registry: MachineRegistry):
     """enrolled_by defaults to 'manual'; passing rule:<name> keeps it."""
     m1 = registry.enroll(
