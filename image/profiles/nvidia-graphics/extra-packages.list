@@ -10,7 +10,10 @@
 # build.
 nvidia-driver
 nvidia-settings
-firmware-misc-nonfree
+# Note: firmware-misc-nonfree (~700MB!) intentionally NOT included —
+# nvidia-driver brings its own firmware. Admins targeting hardware
+# that also needs Linux firmware blobs (e.g. some Wi-Fi adapters)
+# can add it via image/custom/extra-packages.list.
 # Mesa is still useful as a fallback (e.g. for software rendering on
 # initial boot before the nvidia module loads).
 mesa-utils

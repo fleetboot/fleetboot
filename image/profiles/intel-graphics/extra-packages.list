@@ -17,7 +17,10 @@ xserver-xorg-video-fbdev
 mesa-vulkan-drivers
 mesa-utils
 libgl1-mesa-dri
-# CPU microcode updates and the catch-all firmware blob. Both Debian
-# main + non-free-firmware (which trixie enables by default).
+# CPU microcode updates. Small (~50MB) and useful for any Intel CPU.
 intel-microcode
-firmware-misc-nonfree
+# Note: firmware-misc-nonfree (~700MB!) is a catch-all containing
+# firmware for hundreds of devices most fleets don't have. We
+# deliberately don't include it — admins targeting hardware that
+# needs it (some recent Intel Wi-Fi cards, certain network adapters)
+# can add it via image/custom/extra-packages.list per-deployment.
