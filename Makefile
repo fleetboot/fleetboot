@@ -138,7 +138,7 @@ $(BUILD_DIR)/fleetboot-x86-bios: image/grub-embedded.cfg
 	  --prefix='(tftp,$$pxe_default_server)/' \
 	  --config=$< \
 	  pxe tftp http normal linux configfile \
-	  smbios search echo serial terminal net regexp
+	  smbios search echo serial terminal net regexp cat
 
 # Bootfile name is fleetboot-branded so a `tcpdump tftp` capture or a
 # next-server inspect makes it obvious which fleet this client is asking
@@ -155,7 +155,7 @@ $(BUILD_DIR)/fleetboot-x64-uefi: image/grub-embedded.cfg
 	  --prefix='(tftp,$$pxe_default_server)/' \
 	  --config=$< \
 	  efinet tftp http normal linux configfile \
-	  smbios search echo serial terminal net regexp
+	  smbios search echo serial terminal net regexp cat
 	ln -sf fleetboot-x64-uefi $(BUILD_DIR)/fleetboot-x64-uefi.efi
 
 # Stage Debian's signed shim + signed grub binaries for Secure Boot PXE.

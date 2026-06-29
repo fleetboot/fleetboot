@@ -39,6 +39,15 @@ actions:
     mirror: {{ $mirror }}
     components:
       - main
+      # `contrib` carries some helper packages (e.g. extrepo).
+      # `non-free-firmware` is where firmware blobs live (firmware-*
+      # packages). `non-free` separately holds redistributability-
+      # restricted software like intel-microcode (not classed as
+      # firmware in Debian's taxonomy). The intel-graphics and
+      # amd-graphics profiles need packages from both.
+      - contrib
+      - non-free
+      - non-free-firmware
     variant: minbase
 
   - action: apt
@@ -267,6 +276,15 @@ actions:
   # extra-packages.list, an overlay/ tree, and an executable setup-chroot
   # script. The recipe applies them BEFORE the admin custom block so that
   # admin overrides win.
+
+  - action: run
+    description: "Pre-create /var/lib/fleetboot-build for staging"
+    chroot: true
+    command: |
+      # The overlays below don't auto-create parent dirs, and the path
+      # is deliberately off /tmp so apt-get install postinst scripts
+      # don't sweep it away mid-build.
+      mkdir -p /var/lib/fleetboot-build
 
   - action: overlay
     description: "Stage the {{ $profile }} profile into the image"

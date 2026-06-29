@@ -663,7 +663,14 @@ def create_app(
             registry.log_boot_event(
                 mac=session.mac, state=state.value, detail=None,
             )
-        return Response(status_code=status.HTTP_200_OK, content=b"")
+        # Return a single byte so GRUB's `cat` has something to read
+        # without erroring. A bare newline shows as a blank line in
+        # GRUB's output — visually a clean separator between echoes.
+        return Response(
+            status_code=status.HTTP_200_OK,
+            content=b"\n",
+            media_type="text/plain",
+        )
 
     @app.get("/enrol/{token}/keytab")
     def serve_keytab(
