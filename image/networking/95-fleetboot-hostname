@@ -1,0 +1,27 @@
+#!/bin/sh
+# Honour DHCP option 12 (Hostname) — set the system hostname to whatever
+# the DHCP server says, so the fleetboot dashboard sees something
+# meaningful instead of the build-time placeholder.
+#
+# Lives at /etc/dhcp/dhclient-exit-hooks.d/95-fleetboot-hostname.
+# dhclient invokes every executable in that directory after each lease
+# event, with $reason set to the DHCP state machine event and
+# $new_host_name set to option 12 (if the server provided it).
+#
+# We only act on lease-grant events; the placeholder (fleetboot-client,
+# from the build) is kept as a fallback if DHCP didn't send a hostname.
+
+case "$reason" in
+    BOUND|RENEW|REBIND|REBOOT)
+        if [ -n "${new_host_name:-}" ]; then
+            hostnamectl set-hostname --static "$new_host_name" 2>/dev/null \
+                || hostname "$new_host_name"
+            # Also reflect in /etc/hosts so `hostname -f` doesn't return
+            # nonsense when the user's first shell looks it up.
+            ip=$(echo "$new_ip_address")
+            if [ -n "$ip" ] && ! grep -q "[[:space:]]$new_host_name\([[:space:]]\|$\)" /etc/hosts; then
+                printf '%s\t%s\n' "$ip" "$new_host_name" >> /etc/hosts
+            fi
+        fi
+        ;;
+esac

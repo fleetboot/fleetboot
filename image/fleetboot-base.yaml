@@ -127,12 +127,18 @@ actions:
     source: ./runtime
     destination: /usr/local/lib/fleetboot
 
+  - action: overlay
+    description: "Install Fleetboot dhclient exit-hook for DHCP hostname"
+    source: ./networking
+    destination: /etc/dhcp/dhclient-exit-hooks.d
+
   - action: run
     description: "Mark Fleetboot runtime helpers executable"
     chroot: true
     command: |
       chmod 0755 /usr/local/lib/fleetboot/fleetboot-heartbeat.sh
       chmod 0755 /usr/local/lib/fleetboot/fleetboot-scratch-setup.sh
+      chmod 0755 /etc/dhcp/dhclient-exit-hooks.d/95-fleetboot-hostname
 
   - action: overlay
     description: "Install Fleetboot PAM session hook"
