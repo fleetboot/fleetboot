@@ -35,6 +35,15 @@ def test_bootstrap_account_is_idempotent():
     assert "id -u fleetboot" in text
 
 
+def test_bootstrap_account_home_is_outside_slash_home():
+    """autofs takes over /home for FreeIPA users (auto.home wildcard
+    match), which shadows any local /home/<name> directory at login
+    time. The bootstrap account's home MUST be outside /home so its
+    .Xauthority etc. can be created by lightdm."""
+    text = RECIPE.read_text()
+    assert "--home-dir /var/local/fleetboot" in text
+
+
 def test_bootstrap_account_has_hardware_groups():
     """The account needs to be in audio/video/plugdev so the desktop
     is actually usable (sound, USB, screen settings) — otherwise

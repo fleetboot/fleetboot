@@ -250,8 +250,14 @@ actions:
       # having ANY local login on a brand-new image was the worse
       # failure mode (no FreeIPA → no users → unrecoverable greeter).
       if ! id -u fleetboot >/dev/null 2>&1; then
+        # Home lives OUTSIDE /home: that path is taken over by autofs
+        # which maps every /home/<name> to NFSv4 via Kerberos. A local
+        # user with home=/home/fleetboot gets shadowed at login —
+        # lightdm can't write .Xauthority, session aborts, greeter
+        # bounce. /var/local/fleetboot is untouched by autofs.
         useradd \
           --create-home \
+          --home-dir /var/local/fleetboot \
           --shell /bin/bash \
           --groups sudo,audio,video,plugdev,netdev \
           --comment 'Fleetboot bootstrap login (CHANGE OR DISABLE IN PROD)' \
