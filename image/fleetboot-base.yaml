@@ -157,6 +157,7 @@ actions:
       chmod 0755 /usr/local/lib/fleetboot/fleetboot-heartbeat.sh
       chmod 0755 /usr/local/lib/fleetboot/fleetboot-scratch-setup.sh
       chmod 0755 /usr/local/lib/fleetboot/fleetboot-set-hostname.sh
+      chmod 0755 /usr/local/lib/fleetboot/fleetboot-fetch-authorized-keys.sh
       chmod 0755 /etc/dhcp/dhclient-exit-hooks.d/95-fleetboot-hostname
       chmod 0755 /etc/NetworkManager/dispatcher.d/95-fleetboot-hostname
 
@@ -215,6 +216,10 @@ actions:
       # Adopt the DHCP-supplied hostname from initramfs ipconfig BEFORE
       # the reporter starts, so socket.gethostname() returns it.
       systemctl enable fleetboot-set-hostname.service
+      # When the ssh-debug profile is included, this unit fetches root
+      # SSH keys at boot from fleetboot — installed unconditionally
+      # because it's a no-op if sshd isn't in the image.
+      systemctl enable fleetboot-fetch-authorized-keys.service
       # Overwrite debos's fakemachine hostname leak from the chroot build.
       # `fleetboot-client` is the deliberate placeholder; the reporter
       # filters it out, so the dashboard shows "—" until DHCP option 12

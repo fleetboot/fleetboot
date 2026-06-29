@@ -190,6 +190,86 @@ def test_machine_detail_page_shows_all_fields(dashboard_root: Path):
     assert "Recent boot events" in body
 
 
+def test_set_reboot_command_and_then_clear(dashboard_root: Path):
+    """The detail page's form persists / clears the reboot_command."""
+    client = _client(dashboard_root)
+    client.post(
+        "/dashboard/machines",
+        data={
+            "mac": "aa:bb:cc:dd:ee:ff",
+            "profile_name": "school",
+            "architecture": "x86_64",
+            "platform": "efi",
+        },
+        headers=_auth_header(),
+    )
+    cmd = "curl http://pdu/reboot?port=6"
+    client.post(
+        "/dashboard/machines/aa:bb:cc:dd:ee:ff/reboot-command",
+        data={"reboot_command": cmd},
+        headers=_auth_header(),
+    )
+    body = client.get(
+        "/dashboard/machines/aa:bb:cc:dd:ee:ff",
+        headers=_auth_header(),
+    ).text
+    assert cmd in body
+    # Empty submission clears it.
+    client.post(
+        "/dashboard/machines/aa:bb:cc:dd:ee:ff/reboot-command",
+        data={"reboot_command": ""},
+        headers=_auth_header(),
+    )
+    body = client.get(
+        "/dashboard/machines/aa:bb:cc:dd:ee:ff",
+        headers=_auth_header(),
+    ).text
+    # Form's input value is empty; the command title attr is gone too.
+    assert "value=\"\"" in body or "value=''" in body
+
+
+def test_delete_and_reboot_runs_stored_command_then_deletes(
+    dashboard_root: Path, tmp_path: Path,
+):
+    """When the admin clicks delete+reboot, the stored command runs on
+    the fleetboot host (subprocess.Popen with shell=True) and the
+    machine row is then removed from the registry."""
+    client = _client(dashboard_root)
+    client.post(
+        "/dashboard/machines",
+        data={
+            "mac": "aa:bb:cc:dd:ee:ff",
+            "profile_name": "school",
+            "architecture": "x86_64",
+            "platform": "efi",
+        },
+        headers=_auth_header(),
+    )
+    # Write a sentinel file; the "reboot command" just touches it.
+    marker = tmp_path / "rebooted"
+    client.post(
+        "/dashboard/machines/aa:bb:cc:dd:ee:ff/reboot-command",
+        data={"reboot_command": f"touch {marker}"},
+        headers=_auth_header(),
+    )
+    response = client.post(
+        "/dashboard/machines/aa:bb:cc:dd:ee:ff/delete-and-reboot",
+        headers=_auth_header(),
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+    # subprocess.Popen is async; give it a moment.
+    import time
+    for _ in range(30):
+        if marker.exists():
+            break
+        time.sleep(0.1)
+    assert marker.exists(), "reboot command didn't run"
+    # And the registry row is gone.
+    listing = client.get("/dashboard", headers=_auth_header()).text
+    assert "<code>aa:bb:cc:dd:ee:ff</code>" not in listing
+
+
 def test_machine_detail_404_for_unknown_mac(dashboard_root: Path):
     client = _client(dashboard_root)
     response = client.get(

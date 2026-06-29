@@ -1,0 +1,16 @@
+[Unit]
+Description=Fetch root SSH authorized_keys from fleetboot
+After=network-online.target fleetboot-network-up.service
+Wants=network-online.target
+# Run before sshd so the keys are in place when it starts accepting
+# connections. ssh.service is the standard Debian unit name.
+Before=ssh.service
+ConditionKernelCommandLine=fleetboot.boot_token
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/lib/fleetboot/fleetboot-fetch-authorized-keys.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

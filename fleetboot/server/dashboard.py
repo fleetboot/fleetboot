@@ -316,6 +316,46 @@ def build_dashboard_router(
             status_code=status.HTTP_303_SEE_OTHER,
         )
 
+    @router.post(
+        "/dashboard/machines/{mac}/reboot-command",
+        response_class=HTMLResponse,
+        dependencies=[Depends(require_admin)],
+    )
+    def set_reboot_command(
+        mac: str,
+        reboot_command: str = Form(""),
+    ) -> RedirectResponse:
+        registry.set_reboot_command(mac, reboot_command)
+        return RedirectResponse(
+            url=f"/dashboard/machines/{mac}",
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+
+    @router.post(
+        "/dashboard/machines/{mac}/delete-and-reboot",
+        response_class=HTMLResponse,
+        dependencies=[Depends(require_admin)],
+    )
+    def delete_and_reboot(mac: str) -> RedirectResponse:
+        """Delete the machine row, then run its stored reboot_command on
+        the fleetboot host. shell=True; the admin owns the command's
+        contents — a structured power-control layer is future work.
+        """
+        machine = registry.lookup(mac)
+        command = machine.reboot_command if machine else None
+        registry.remove(mac)
+        if command:
+            import subprocess
+            # Detach: don't block the dashboard response on the curl
+            # finishing. stderr goes to the dev server log.
+            subprocess.Popen(
+                command, shell=True,
+                stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT,
+            )
+        return RedirectResponse(
+            url="/dashboard", status_code=status.HTTP_303_SEE_OTHER,
+        )
+
     @router.get(
         "/dashboard/machines/{mac}",
         response_class=HTMLResponse,
@@ -336,6 +376,13 @@ def build_dashboard_router(
         latest_versions = _latest_versions_by_artefact(boot_dir)
         events = registry.recent_boot_events(limit=200, mac=machine.mac)
         last_seen = _format_last_seen(sessions.last_seen_by_mac())
+        hardware: Optional[dict] = None
+        if machine.last_hardware:
+            import json as _json
+            try:
+                hardware = _json.loads(machine.last_hardware)
+            except _json.JSONDecodeError:
+                hardware = None
         return templates.TemplateResponse(
             request,
             "machine_detail.html",
@@ -346,6 +393,7 @@ def build_dashboard_router(
                 "latest_versions": latest_versions,
                 "last_seen": last_seen.get(machine.mac),
                 "auto_refresh": _clamp_refresh(refresh),
+                "hardware": hardware,
             },
         )
 

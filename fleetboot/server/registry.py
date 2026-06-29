@@ -39,6 +39,9 @@ CREATE TABLE IF NOT EXISTS machines (
                     CHECK(scratch_mode IN ('volatile', 'persistent', 'off')),
     last_diagnostics TEXT,
     last_diagnostics_at TEXT,
+    last_hardware    TEXT,
+    last_hardware_at TEXT,
+    reboot_command   TEXT,
     created_at      TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -137,6 +140,9 @@ def _add_diagnostics_columns_if_missing(
     for column_def in (
         "ALTER TABLE machines ADD COLUMN last_diagnostics TEXT",
         "ALTER TABLE machines ADD COLUMN last_diagnostics_at TEXT",
+        "ALTER TABLE machines ADD COLUMN last_hardware TEXT",
+        "ALTER TABLE machines ADD COLUMN last_hardware_at TEXT",
+        "ALTER TABLE machines ADD COLUMN reboot_command TEXT",
     ):
         try:
             connection.execute(column_def)
@@ -191,6 +197,15 @@ class Machine:
     # to answer "why is this machine stuck?".
     last_diagnostics: Optional[str] = None
     last_diagnostics_at: Optional[str] = None
+    # Latest hardware inventory (CPU, RAM, disks) — JSON blob from the
+    # reporter, rendered as a table on the machine detail page.
+    last_hardware: Optional[str] = None
+    last_hardware_at: Optional[str] = None
+    # Per-machine shell command run on the fleetboot host when an admin
+    # clicks "delete + reboot". For now a free-text string with
+    # shell=True semantics — this is dev-only power control; a real
+    # structured-power-control layer is a future task.
+    reboot_command: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -310,6 +325,35 @@ class MachineRegistry:
                 (cleaned, normalised_mac),
             )
 
+    def set_reboot_command(self, mac: str, command: Optional[str]) -> None:
+        """Set or clear the machine's reboot shell command. None / empty
+        clears it (admin's way of disabling the delete+reboot button)."""
+        normalised_mac = _normalise_mac(mac)
+        value = (command or "").strip() or None
+        with self._write_lock, self._connect() as connection:
+            connection.execute(
+                "UPDATE machines SET reboot_command = ? WHERE mac = ?",
+                (value, normalised_mac),
+            )
+
+    def update_hardware(self, mac: str, hardware_json: str) -> None:
+        """Replace the machine row's latest hardware inventory blob.
+
+        Stored as a JSON string; the dashboard parses on render.
+        """
+        normalised_mac = _normalise_mac(mac)
+        cleaned = (hardware_json or "").strip()
+        if not cleaned:
+            return
+        with self._write_lock, self._connect() as connection:
+            connection.execute(
+                "UPDATE machines "
+                "SET last_hardware = ?, "
+                "    last_hardware_at = datetime('now') "
+                "WHERE mac = ?",
+                (cleaned, normalised_mac),
+            )
+
     def update_diagnostics(self, mac: str, diagnostics: str) -> None:
         """Replace the machine row's latest diagnostics blob."""
         normalised_mac = _normalise_mac(mac)
@@ -346,6 +390,8 @@ class MachineRegistry:
         "boot_version", "boot_version_seen_at",
         "scratch_mode",
         "last_diagnostics", "last_diagnostics_at",
+        "last_hardware", "last_hardware_at",
+        "reboot_command",
         "created_at",
     )
 
@@ -615,5 +661,8 @@ def _row_to_machine(row: sqlite3.Row) -> Machine:
         scratch_mode=row["scratch_mode"] or "volatile",
         last_diagnostics=row["last_diagnostics"],
         last_diagnostics_at=row["last_diagnostics_at"],
+        last_hardware=row["last_hardware"],
+        last_hardware_at=row["last_hardware_at"],
+        reboot_command=row["reboot_command"],
         created_at=row["created_at"],
     )

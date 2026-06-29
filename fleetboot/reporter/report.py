@@ -84,6 +84,100 @@ def _run(argv: list[str], timeout: float = 4.0) -> str:
 DIAGNOSTICS_MAX_BYTES = 6 * 1024
 
 
+def _collect_hardware() -> Optional[dict]:
+    """Snapshot CPU/RAM/disks/mounts for the dashboard's machine view.
+
+    Best-effort: each subsection is wrapped in its own try/except, so
+    a kernel without one of the /sys/proc layouts (e.g. inside an
+    unusual container) doesn't kill the whole inventory.
+    """
+    import os
+    from pathlib import Path
+
+    info: dict = {}
+
+    # CPU model + core count. /proc/cpuinfo lists one block per logical
+    # CPU; the `model name` line is the human-readable string.
+    try:
+        with open("/proc/cpuinfo") as handle:
+            for line in handle:
+                if line.startswith("model name"):
+                    info["cpu_model"] = line.split(":", 1)[1].strip()
+                    break
+    except OSError:
+        pass
+    try:
+        info["cpu_count"] = os.cpu_count() or 0
+    except Exception:
+        pass
+
+    # Memory (MemTotal + MemAvailable from /proc/meminfo, in MB).
+    try:
+        with open("/proc/meminfo") as handle:
+            for line in handle:
+                if line.startswith("MemTotal:"):
+                    info["mem_total_mb"] = int(line.split()[1]) // 1024
+                elif line.startswith("MemAvailable:"):
+                    info["mem_available_mb"] = int(line.split()[1]) // 1024
+    except (OSError, ValueError):
+        pass
+
+    # Block devices from /sys/block. Skip loop/ram/sr/dm/zram entries
+    # since they're not physical disks.
+    disks = []
+    try:
+        for sysblk in Path("/sys/block").iterdir():
+            name = sysblk.name
+            if name.startswith(("loop", "ram", "sr", "fd", "dm-", "zram")):
+                continue
+            try:
+                size_sectors = int((sysblk / "size").read_text().strip())
+                size_gb = (size_sectors * 512) // (1024 ** 3)
+            except (OSError, ValueError):
+                continue
+            removable = False
+            try:
+                removable = (sysblk / "removable").read_text().strip() == "1"
+            except OSError:
+                pass
+            model = ""
+            try:
+                model = (sysblk / "device/model").read_text().strip()
+            except OSError:
+                pass
+            disks.append({
+                "name": name,
+                "size_gb": size_gb,
+                "model": model,
+                "removable": removable,
+            })
+    except OSError:
+        pass
+    info["disks"] = disks
+
+    # Mount-point free space — only paths that exist; statvfs raises on
+    # missing paths. /var/scratch is the canonical fleetboot scratch
+    # mountpoint, /home is the autofs root for FreeIPA user homes.
+    mounts = []
+    for path in ("/", "/var/scratch", "/home"):
+        try:
+            stat = os.statvfs(path)
+        except OSError:
+            continue
+        total = stat.f_frsize * stat.f_blocks
+        if total <= 0:
+            continue
+        free = stat.f_frsize * stat.f_bavail
+        mounts.append({
+            "path": path,
+            "total_gb": total // (1024 ** 3),
+            "free_gb": free // (1024 ** 3),
+        })
+    info["mounts"] = mounts
+
+    return info if info else None
+
+
 def _collect_diagnostics() -> Optional[str]:
     """A short snapshot of systemd state useful for "why is boot stuck"
     questions. Server stores the latest on the machine row; the
@@ -189,6 +283,12 @@ def report_state(
     diagnostics = _collect_diagnostics()
     if diagnostics:
         payload["diagnostics"] = diagnostics
+    # Hardware inventory: CPU + RAM + disks + free space. Useful for
+    # fleet visibility (which machine has which hardware) and for
+    # operational alerts (a disk is filling up).
+    hardware = _collect_hardware()
+    if hardware:
+        payload["hardware"] = hardware
     url = urljoin(effective_settings.server_url, STATUS_PATH)
     headers = {"Authorization": f"Bearer {effective_settings.boot_token}"}
 

@@ -163,6 +163,10 @@ def main(argv: list[str]) -> int:
     sessions = BootSessionStore(REGISTRY_PATH)
     registry = MachineRegistry(REGISTRY_PATH)
 
+    # If the admin has dropped an authorized_keys file alongside the
+    # registry, it'll be served at /enrol/<token>/authorized_keys for
+    # the ssh-debug profile to consume on first boot.
+    authorized_keys_path = DEV_DIR / "authorized_keys"
     app = create_app(
         sessions=sessions,
         mint_secret=secrets_env["FLEETBOOT_MINT_SECRET"],
@@ -170,6 +174,7 @@ def main(argv: list[str]) -> int:
         registry=registry,
         boot_dir=BOOT_DIR,
         dashboard_repo_root=REPO_ROOT,
+        authorized_keys_path=authorized_keys_path,
     )
 
     # Bring up tftpjail in the same process — the VMs need both. The URL

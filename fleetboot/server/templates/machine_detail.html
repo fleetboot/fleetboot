@@ -82,6 +82,52 @@
   </tbody>
 </table>
 
+<h2>Hardware inventory</h2>
+{% if hardware %}
+<p class="muted">Reported {{ machine.last_hardware_at }}.</p>
+<table>
+  <tbody>
+    {% if hardware.cpu_model %}
+    <tr><th>CPU</th><td>{{ hardware.cpu_model }}
+      {% if hardware.cpu_count %}<span class="muted">({{ hardware.cpu_count }} cores)</span>{% endif %}
+    </td></tr>
+    {% endif %}
+    {% if hardware.mem_total_mb %}
+    <tr><th>Memory</th><td>
+      {{ "%.1f"|format(hardware.mem_total_mb / 1024) }} GiB total
+      {% if hardware.mem_available_mb is not none %}
+        / {{ "%.1f"|format(hardware.mem_available_mb / 1024) }} GiB available
+      {% endif %}
+    </td></tr>
+    {% endif %}
+    {% if hardware.disks %}
+    <tr><th>Block devices</th><td>
+      <ul style="margin: 0; padding-left: 20px;">
+        {% for d in hardware.disks %}
+        <li>
+          <code>{{ d.name }}</code> — {{ d.size_gb }} GiB
+          {% if d.model %}<span class="muted">({{ d.model }})</span>{% endif %}
+          {% if d.removable %}<span class="muted">[removable]</span>{% endif %}
+        </li>
+        {% endfor %}
+      </ul>
+    </td></tr>
+    {% endif %}
+    {% if hardware.mounts %}
+    <tr><th>Mount points</th><td>
+      <ul style="margin: 0; padding-left: 20px;">
+        {% for m in hardware.mounts %}
+        <li><code>{{ m.path }}</code> — {{ m.free_gb }} GiB free of {{ m.total_gb }} GiB</li>
+        {% endfor %}
+      </ul>
+    </td></tr>
+    {% endif %}
+  </tbody>
+</table>
+{% else %}
+<p class="muted">No hardware inventory reported yet.</p>
+{% endif %}
+
 <h2>Latest diagnostics</h2>
 {% if machine.last_diagnostics %}
 <p class="muted">Captured {{ machine.last_diagnostics_at }} — refreshed on each /status report.</p>
@@ -111,10 +157,36 @@
 <p class="muted">No boot events recorded yet.</p>
 {% endif %}
 
+<h2>Power control</h2>
+<p class="muted">
+  Free-text shell command run on the fleetboot host when "delete + reboot"
+  is clicked. Runs with <code>shell=True</code> as the dev server user.
+  A structured power-control layer is future work; for now, anything
+  shell-callable works (curl to a PDU, IPMI, wake-on-LAN tool, …).
+</p>
+<form method="post" action="/dashboard/machines/{{ machine.mac }}/reboot-command">
+  <label>Reboot command
+    <input type="text" name="reboot_command"
+           value="{{ machine.reboot_command or '' }}"
+           placeholder='e.g. curl "http://pdu/reboot?port=6"'
+           style="width: 600px;">
+  </label>
+  <button type="submit">save</button>
+</form>
+
 <h2>Actions</h2>
+<form method="post" action="/dashboard/machines/{{ machine.mac }}/delete-and-reboot"
+      onsubmit="return confirm('Delete {{ machine.mac }} AND run\n\n  {{ machine.reboot_command or "(no reboot command set)" }}\n\non the fleetboot host?');"
+      style="display:inline">
+  <button type="submit" class="danger"
+          {% if not machine.reboot_command %}title="no reboot command set"{% endif %}>
+    delete + reboot
+  </button>
+</form>
+&nbsp;
 <form method="post" action="/dashboard/machines/{{ machine.mac }}/delete"
       onsubmit="return confirm('Delete {{ machine.mac }}? (auto-enrol rules may re-create the row on next boot.)');"
       style="display:inline">
-  <button type="submit" class="danger">delete machine row</button>
+  <button type="submit" class="danger">delete only</button>
 </form>
 {% endblock %}

@@ -84,6 +84,13 @@
       <td class="row-actions">
         <a href="/dashboard/events?mac={{ m.mac }}">history</a>
         &nbsp;
+        {% if m.reboot_command %}
+        <form method="post"
+              action="/dashboard/machines/{{ m.mac }}/delete-and-reboot"
+              onsubmit="return confirm('Delete {{ m.mac }} AND run reboot command?');">
+          <button type="submit" class="danger" title="{{ m.reboot_command }}">delete + reboot</button>
+        </form>
+        {% endif %}
         <form method="post" action="/dashboard/machines/{{ m.mac }}/delete"
               onsubmit="return confirm('Delete {{ m.mac }}?');">
           <button type="submit" class="danger">delete</button>

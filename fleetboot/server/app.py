@@ -109,6 +109,15 @@ class StatusReport(BaseModel):
             "latest non-empty value on the machine row."
         ),
     )
+    hardware: Optional[dict] = Field(
+        default=None,
+        description=(
+            "Hardware inventory: cpu_model, cpu_count, mem_total_mb, "
+            "mem_available_mb, disks[], mounts[]. Stored as JSON; the "
+            "dashboard parses for display. No server-side validation of "
+            "the inner shape — best-effort telemetry."
+        ),
+    )
 
 
 class StatusAcknowledgement(BaseModel):
@@ -153,6 +162,14 @@ class MachineEnrolment(BaseModel):
             "(ignore local disk entirely)."
         ),
     )
+    reboot_command: Optional[str] = Field(
+        default=None,
+        description=(
+            "Free-text shell command run on the fleetboot host when an "
+            "admin clicks 'delete + reboot' on this machine. shell=True; "
+            "admin owns the contents."
+        ),
+    )
     serial_console: bool = Field(
         default=False,
         description=(
@@ -174,6 +191,7 @@ class MachineRecord(BaseModel):
     hostname: Optional[str] = None
     hostname_seen_at: Optional[str] = None
     scratch_mode: str = "volatile"
+    reboot_command: Optional[str] = None
     created_at: str
 
     @classmethod
@@ -188,6 +206,7 @@ class MachineRecord(BaseModel):
             hostname=machine.hostname,
             hostname_seen_at=machine.hostname_seen_at,
             scratch_mode=machine.scratch_mode,
+            reboot_command=machine.reboot_command,
             created_at=machine.created_at,
         )
 
@@ -244,6 +263,7 @@ def create_app(
     admin_secret: str | None = None,
     dashboard_repo_root: Path | None = None,
     keytabs_dir: Path | None = None,
+    authorized_keys_path: Path | None = None,
 ) -> FastAPI:
     """Build the FastAPI app.
 
@@ -315,6 +335,12 @@ def create_app(
             if report.diagnostics:
                 registry.update_diagnostics(
                     mac=session.mac, diagnostics=report.diagnostics,
+                )
+            if report.hardware:
+                import json as _json
+                registry.update_hardware(
+                    mac=session.mac,
+                    hardware_json=_json.dumps(report.hardware),
                 )
         return StatusAcknowledgement(
             ok=True, mac=session.mac, state=report.state
@@ -624,6 +650,40 @@ def create_app(
                 detail="no keytab provisioned",
             )
         return FileResponse(str(path), media_type="application/octet-stream")
+
+    @app.get("/enrol/{token}/authorized_keys")
+    def serve_authorized_keys(
+        token: str,
+        store: BootSessionStore = Depends(get_store),
+    ) -> FileResponse:
+        """Deployment-wide SSH authorized_keys fetched at boot time.
+
+        Same auth pattern as /enrol/<token>/keytab: a valid per-boot token
+        is enough — the keys aren't per-machine secrets, they're the
+        admin's pubkeys that grant root SSH on any fleetboot machine.
+        We refuse if the token is invalid (so a random LAN host can't
+        snoop the admin's keys) and 503 if the deployment didn't
+        configure a keys file (most production deployments won't).
+        """
+        if authorized_keys_path is None:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="authorized_keys delivery not configured",
+            )
+        session = store.lookup(token)
+        if session is None:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="unauthorised",
+            )
+        if not authorized_keys_path.is_file():
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="no authorized_keys provisioned",
+            )
+        return FileResponse(
+            str(authorized_keys_path), media_type="text/plain",
+        )
 
     # ---- Dashboard --------------------------------------------------------
     #

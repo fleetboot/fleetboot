@@ -1,0 +1,32 @@
+#!/bin/sh
+# ssh-debug profile setup, run inside the image chroot.
+#
+# Hardens sshd config defaults for fleet use: no password auth (only
+# pubkeys), no root-login-with-password (only with keys), no challenge-
+# response. The actual authorized_keys file is NOT baked in — it's
+# fetched at boot time from fleetboot's /enrol/<token>/authorized_keys
+# endpoint by fleetboot-fetch-authorized-keys.service, so the squashfs
+# never contains anyone's pubkey.
+
+set -eu
+
+cat > /etc/ssh/sshd_config.d/50-fleetboot.conf <<'EOF'
+# fleetboot defaults — password auth off, pubkeys only.
+# authorized_keys file is fetched at boot by
+# fleetboot-fetch-authorized-keys.service. Without that file, no one
+# can log in.
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+ChallengeResponseAuthentication no
+# Root login is allowed but only with a key.
+PermitRootLogin prohibit-password
+# Pubkey lookups happen against /root/.ssh/authorized_keys (root) or
+# ~/.ssh/authorized_keys (other users). We only deliver root's; admins
+# wanting per-user keys can add a deployment-specific overlay.
+AuthorizedKeysFile /root/.ssh/authorized_keys
+EOF
+chmod 0644 /etc/ssh/sshd_config.d/50-fleetboot.conf
+
+# Make sure root has its .ssh dir with the right perms; the fetch
+# service later writes authorized_keys into it.
+install -d -m 0700 -o root -g root /root/.ssh
