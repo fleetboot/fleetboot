@@ -134,7 +134,9 @@ def test_recipe_consumes_profile_extras(recipe: dict):
     setup-chroot — that's the contract for built-in profiles."""
     runs = _actions_of_type(recipe, "run")
     commands = " \n".join((a.get("command", "") or "") for a in runs)
-    assert "fleetboot-profile/extra-packages.list" in commands
+    # The profile is staged into a durable build-only path (not /tmp,
+    # where apt-get install can wipe it).
+    assert "fleetboot-build/profile/extra-packages.list" in commands
     assert "profiles/" in commands  # overlay copy
     assert "setup-chroot" in commands
 

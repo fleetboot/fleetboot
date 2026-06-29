@@ -54,6 +54,83 @@ def test_hostname_field_is_persisted_on_registered_machine(tmp_path):
     assert machine.hostname == "lab-pc-01"
 
 
+def test_grub_event_records_boot_event(tmp_path):
+    """GET /grub-event/<token>/<state> from grub records as a boot
+    event, validated against the token + state index."""
+    from pathlib import Path
+    from fleetboot.server.registry import MachineRegistry
+
+    store = BootSessionStore()
+    registry = MachineRegistry(Path(tmp_path) / "machines.sqlite")
+    registry.enroll(
+        mac="aa:bb:cc:dd:ee:ff", profile_name="default",
+        architecture="x86_64", platform="efi",
+    )
+    app = create_app(sessions=store, registry=registry)
+    client = TestClient(app)
+    session = store.mint("aa:bb:cc:dd:ee:ff")
+
+    response = client.get(f"/grub-event/{session.token}/grub_running")
+    assert response.status_code == 200
+    assert response.content == b""
+
+    events = registry.recent_boot_events(mac="aa:bb:cc:dd:ee:ff")
+    assert any(e.state == "grub_running" for e in events)
+
+
+def test_grub_event_rejects_unknown_state(tmp_path):
+    from pathlib import Path
+    from fleetboot.server.registry import MachineRegistry
+
+    store = BootSessionStore()
+    registry = MachineRegistry(Path(tmp_path) / "machines.sqlite")
+    app = create_app(sessions=store, registry=registry)
+    client = TestClient(app)
+    session = store.mint("aa:bb:cc:dd:ee:ff")
+    response = client.get(f"/grub-event/{session.token}/nonsense")
+    assert response.status_code == 400
+
+
+def test_grub_event_rejects_unknown_token(tmp_path):
+    from pathlib import Path
+    from fleetboot.server.registry import MachineRegistry
+
+    store = BootSessionStore()
+    registry = MachineRegistry(Path(tmp_path) / "machines.sqlite")
+    app = create_app(sessions=store, registry=registry)
+    client = TestClient(app)
+    response = client.get("/grub-event/not-a-token/grub_running")
+    assert response.status_code == 401
+
+
+def test_consecutive_same_state_dedups_event_rows(tmp_path):
+    """The heartbeat re-reports the same state every 2 min; the events
+    table should not grow without bound."""
+    from pathlib import Path
+    from fleetboot.boot_states import BootState
+    from fleetboot.server.registry import MachineRegistry
+
+    store = BootSessionStore()
+    registry = MachineRegistry(Path(tmp_path) / "machines.sqlite")
+    registry.enroll(
+        mac="aa:bb:cc:dd:ee:ff", profile_name="default",
+        architecture="x86_64", platform="efi",
+    )
+    app = create_app(sessions=store, registry=registry)
+    client = TestClient(app)
+    session = store.mint("aa:bb:cc:dd:ee:ff")
+    # Three consecutive same-state reports.
+    for _ in range(3):
+        client.post(
+            "/status",
+            json={"state": "network_up"},
+            headers={"Authorization": f"Bearer {session.token}"},
+        )
+    events = registry.recent_boot_events(mac="aa:bb:cc:dd:ee:ff")
+    # Exactly one event row for the three identical reports.
+    assert len([e for e in events if e.state == "network_up"]) == 1
+
+
 def test_diagnostics_field_lands_on_machine_row(tmp_path):
     """A /status post with a diagnostics body overwrites the latest
     machine.last_diagnostics."""

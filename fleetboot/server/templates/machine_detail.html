@@ -23,6 +23,14 @@
 <table>
   <tbody>
     <tr><th>MAC</th><td><code>{{ machine.mac }}</code></td></tr>
+    <tr><th>IP address</th><td>
+      {% if machine.last_ip %}
+        <code>{{ machine.last_ip }}</code>
+        <span class="muted">— observed {{ machine.last_ip_at }}</span>
+      {% else %}
+        <span class="muted">—</span>
+      {% endif %}
+    </td></tr>
     <tr><th>Hostname</th><td>
       {% if machine.hostname %}
         <strong>{{ machine.hostname }}</strong>
@@ -137,13 +145,6 @@
       </ul>
     </td></tr>
     {% endif %}
-    {% if hardware.pci.usb %}
-    <tr><th>USB controllers</th><td>
-      <ul style="margin: 0; padding-left: 20px;">
-        {% for d in hardware.pci.usb %}<li>{{ d }}</li>{% endfor %}
-      </ul>
-    </td></tr>
-    {% endif %}
     {% if hardware.pci.storage %}
     <tr><th>Storage controllers</th><td>
       <ul style="margin: 0; padding-left: 20px;">
@@ -153,7 +154,7 @@
     {% endif %}
     {% endif %}
     {% if hardware.usb_devices %}
-    <tr><th>USB devices attached</th><td>
+    <tr><th>USB devices</th><td>
       <ul style="margin: 0; padding-left: 20px;">
         {% for d in hardware.usb_devices %}<li>{{ d }}</li>{% endfor %}
       </ul>

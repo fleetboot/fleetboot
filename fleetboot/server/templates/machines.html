@@ -15,7 +15,7 @@
   <thead>
     <tr>
       <th>Hostname</th>
-      <th>MAC</th>
+      <th>Network</th>
       <th>Profile</th>
       <th>Arch</th>
       <th>Source</th>
@@ -37,14 +37,19 @@
         {% endif %}
         </a>
       </td>
-      <td><a href="/dashboard/machines/{{ m.mac }}"><code>{{ m.mac }}</code></a></td>
+      <td>
+        <a href="/dashboard/machines/{{ m.mac }}"><code>{{ m.mac }}</code></a>
+        {% if m.last_ip %}
+        <br><span class="muted">{{ m.last_ip }}</span>
+        {% endif %}
+      </td>
       <td>{{ m.profile_name }}</td>
       <td>{{ m.architecture }}/{{ m.platform }}</td>
       <td>
         {% if m.enrolled_by == "manual" %}
           <span class="muted">manual</span>
         {% else %}
-          <span class="state-network_up">{{ m.enrolled_by }}</span>
+          <a class="state-network_up" href="/dashboard/auto-enrol-rules">{{ m.enrolled_by }}</a>
         {% endif %}
       </td>
       <td>

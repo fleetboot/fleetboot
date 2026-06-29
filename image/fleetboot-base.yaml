@@ -271,13 +271,13 @@ actions:
   - action: overlay
     description: "Stage the {{ $profile }} profile into the image"
     source: ./profiles_resolved/{{ $profile }}
-    destination: /tmp/fleetboot-profile
+    destination: /var/lib/fleetboot-build/profile
 
   - action: run
     description: "Install profile-specified extra Debian packages"
     chroot: true
     command: |
-      list=/tmp/fleetboot-profile/extra-packages.list
+      list=/var/lib/fleetboot-build/profile/extra-packages.list
       if [ -s "$list" ]; then
         packages=$(grep -vE '^\s*(#|$)' "$list" || true)
         if [ -n "$packages" ]; then
@@ -297,36 +297,36 @@ actions:
       fi
 
   - action: run
-    description: "Run profile setup-chroot if present"
+    description: "Run profile setup-chroot"
     chroot: true
     command: |
-      # debos's overlay action doesn't reliably preserve the executable
-      # bit on the resolved profile's setup-chroot file. Invoking via
-      # `sh "$script"` bypasses the -x check and runs the script via
-      # its shebang's interpreter.
-      script=/tmp/fleetboot-profile/setup-chroot
-      if [ -f "$script" ]; then
-        echo "fleetboot: running {{ $profile }} profile setup-chroot"
-        sh "$script"
-      fi
+      # Always run the resolved profile's setup-chroot. The resolver
+      # synthesises one even when no ancestor contributes any commands —
+      # it's at minimum a `#!/bin/sh\nset -eu\n` stub. Invoke via `sh`
+      # so the executable bit (which debos's overlay action doesn't
+      # always preserve) doesn't matter.
+      echo "fleetboot: profile dir contents:"
+      ls -la /var/lib/fleetboot-build/profile/
+      echo "fleetboot: running {{ $profile }} profile setup-chroot"
+      sh -x /var/lib/fleetboot-build/profile/setup-chroot
 
   - action: run
     description: "Remove the staged profile directory from the image"
     chroot: true
-    command: rm -rf /tmp/fleetboot-profile
+    command: rm -rf /var/lib/fleetboot-build/profile
 
   # ---------- admin customisation: extra packages and overlay ----------
 
   - action: overlay
     description: "Stage admin extras into the image for the next step"
     source: ./custom
-    destination: /tmp/fleetboot-custom
+    destination: /var/lib/fleetboot-build/custom
 
   - action: run
     description: "Install admin-specified extra Debian packages"
     chroot: true
     command: |
-      list=/tmp/fleetboot-custom/extra-packages.list
+      list=/var/lib/fleetboot-build/custom/extra-packages.list
       if [ -s "$list" ]; then
         packages=$(grep -vE '^\s*(#|$)' "$list" || true)
         if [ -n "$packages" ]; then
@@ -350,7 +350,7 @@ actions:
     description: "Run admin post-install hook if present"
     chroot: true
     command: |
-      hook=/tmp/fleetboot-custom/hooks/post-install
+      hook=/var/lib/fleetboot-build/custom/hooks/post-install
       if [ -x "$hook" ]; then
         echo "fleetboot: running admin post-install hook"
         "$hook"
@@ -359,7 +359,7 @@ actions:
   - action: run
     description: "Remove the staged admin extras directory from the image"
     chroot: true
-    command: rm -rf /tmp/fleetboot-custom
+    command: rm -rf /var/lib/fleetboot-build/custom
 
   # ---------- admin customisation: local.yaml extension ----------
 

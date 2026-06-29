@@ -41,6 +41,8 @@ CREATE TABLE IF NOT EXISTS machines (
     last_diagnostics_at TEXT,
     last_hardware    TEXT,
     last_hardware_at TEXT,
+    last_ip          TEXT,
+    last_ip_at       TEXT,
     reboot_command   TEXT,
     created_at      TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -142,6 +144,8 @@ def _add_diagnostics_columns_if_missing(
         "ALTER TABLE machines ADD COLUMN last_diagnostics_at TEXT",
         "ALTER TABLE machines ADD COLUMN last_hardware TEXT",
         "ALTER TABLE machines ADD COLUMN last_hardware_at TEXT",
+        "ALTER TABLE machines ADD COLUMN last_ip TEXT",
+        "ALTER TABLE machines ADD COLUMN last_ip_at TEXT",
         "ALTER TABLE machines ADD COLUMN reboot_command TEXT",
     ):
         try:
@@ -201,6 +205,10 @@ class Machine:
     # reporter, rendered as a table on the machine detail page.
     last_hardware: Optional[str] = None
     last_hardware_at: Optional[str] = None
+    # Last IP the machine was seen reporting from (server-side observed,
+    # not client-claimed). Updated on every /status post.
+    last_ip: Optional[str] = None
+    last_ip_at: Optional[str] = None
     # Per-machine shell command run on the fleetboot host when an admin
     # clicks "delete + reboot". For now a free-text string with
     # shell=True semantics — this is dev-only power control; a real
@@ -325,6 +333,20 @@ class MachineRegistry:
                 (cleaned, normalised_mac),
             )
 
+    def update_last_ip(self, mac: str, ip: str) -> None:
+        """Stamp the IP we observed the machine reporting from."""
+        normalised_mac = _normalise_mac(mac)
+        cleaned = (ip or "").strip()
+        if not cleaned:
+            return
+        with self._write_lock, self._connect() as connection:
+            connection.execute(
+                "UPDATE machines "
+                "SET last_ip = ?, last_ip_at = datetime('now') "
+                "WHERE mac = ?",
+                (cleaned, normalised_mac),
+            )
+
     def set_reboot_command(self, mac: str, command: Optional[str]) -> None:
         """Set or clear the machine's reboot shell command. None / empty
         clears it (admin's way of disabling the delete+reboot button)."""
@@ -391,6 +413,7 @@ class MachineRegistry:
         "scratch_mode",
         "last_diagnostics", "last_diagnostics_at",
         "last_hardware", "last_hardware_at",
+        "last_ip", "last_ip_at",
         "reboot_command",
         "created_at",
     )
@@ -425,14 +448,38 @@ class MachineRegistry:
         state: str,
         detail: Optional[str] = None,
     ) -> None:
-        """Append-only log of state transitions reported by /status."""
+        """Record a state transition. Consecutive same-state events for
+        the same MAC are coalesced — the existing row's timestamp is
+        bumped to now, no new row inserted. This stops the heartbeat's
+        per-2-minute re-report from flooding the events list with
+        identical rows.
+
+        State *change* always inserts a new row. detail changes also
+        insert a new row (different content is interesting).
+        """
         normalised_mac = _normalise_mac(mac)
         with self._write_lock, self._connect() as connection:
-            connection.execute(
-                "INSERT INTO boot_events (mac, state, detail) "
-                "VALUES (?, ?, ?)",
-                (normalised_mac, state, detail),
-            )
+            latest = connection.execute(
+                "SELECT id, state, detail FROM boot_events "
+                "WHERE mac = ? ORDER BY id DESC LIMIT 1",
+                (normalised_mac,),
+            ).fetchone()
+            if (
+                latest is not None
+                and latest["state"] == state
+                and (latest["detail"] or "") == (detail or "")
+            ):
+                connection.execute(
+                    "UPDATE boot_events "
+                    "SET occurred_at = datetime('now') WHERE id = ?",
+                    (latest["id"],),
+                )
+            else:
+                connection.execute(
+                    "INSERT INTO boot_events (mac, state, detail) "
+                    "VALUES (?, ?, ?)",
+                    (normalised_mac, state, detail),
+                )
 
     def recent_boot_events(
         self, *, limit: int = 200, mac: Optional[str] = None,
@@ -663,6 +710,8 @@ def _row_to_machine(row: sqlite3.Row) -> Machine:
         last_diagnostics_at=row["last_diagnostics_at"],
         last_hardware=row["last_hardware"],
         last_hardware_at=row["last_hardware_at"],
+        last_ip=row["last_ip"],
+        last_ip_at=row["last_ip_at"],
         reboot_command=row["reboot_command"],
         created_at=row["created_at"],
     )

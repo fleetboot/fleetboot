@@ -25,7 +25,7 @@ import re
 from pathlib import Path
 from typing import Optional
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Query, Response, status
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Response, status
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
@@ -300,6 +300,7 @@ def create_app(
     @app.post("/status", response_model=StatusAcknowledgement)
     def post_status(
         report: StatusReport,
+        request: Request,
         authorization: str | None = Header(default=None),
         store: BootSessionStore = Depends(get_store),
     ) -> StatusAcknowledgement:
@@ -324,6 +325,13 @@ def create_app(
             registry.log_boot_event(
                 mac=session.mac, state=report.state.value, detail=report.detail,
             )
+            # Server-side observed IP — more trustworthy than anything
+            # the client could claim. /status arrives via a TCP socket;
+            # request.client.host is the booted-machine's IP.
+            if request.client is not None and request.client.host:
+                registry.update_last_ip(
+                    mac=session.mac, ip=request.client.host,
+                )
             if report.hostname and report.hostname.lower() not in _BORING_HOSTNAMES:
                 registry.update_hostname(
                     mac=session.mac, hostname=report.hostname,
@@ -613,6 +621,49 @@ def create_app(
                 status_code=status.HTTP_404_NOT_FOUND, detail="not found"
             )
         return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+    @app.get("/grub-event/{token}/{state_str}")
+    def grub_event(
+        token: str, state_str: str,
+        store: BootSessionStore = Depends(get_store),
+    ) -> Response:
+        """Boot-stage event from GRUB.
+
+        GRUB can't HTTP-POST, but it can `cat (http,host:port)/path` —
+        a GET. The renderer emits these between linux/initrd/boot
+        commands so the dashboard sees grub_running / kernel_loaded /
+        initrd_loaded / booting_kernel before the kernel takes over.
+
+        Token-bound (the per-boot token is already in the rendered
+        grub.cfg). Unknown token → 401. Unknown state → 400. State that
+        goes backward → 409 (same protection as /status).
+
+        Returns 200 with empty body so `cat` shows nothing on screen.
+        """
+        try:
+            state = BootState(state_str)
+        except ValueError:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="unknown state",
+            )
+        try:
+            session = store.record_state(token, state)
+        except UnknownTokenError:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="unauthorised",
+            )
+        except OutOfOrderStateError as err:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=str(err),
+            )
+        if registry is not None:
+            registry.log_boot_event(
+                mac=session.mac, state=state.value, detail=None,
+            )
+        return Response(status_code=status.HTTP_200_OK, content=b"")
 
     @app.get("/enrol/{token}/keytab")
     def serve_keytab(

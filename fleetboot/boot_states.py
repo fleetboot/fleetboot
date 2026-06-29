@@ -11,6 +11,10 @@ from enum import Enum
 class BootState(str, Enum):
     """Lifecycle states a machine progresses through during a boot."""
 
+    GRUB_RUNNING = "grub_running"
+    KERNEL_LOADED = "kernel_loaded"
+    INITRD_LOADED = "initrd_loaded"
+    BOOTING_KERNEL = "booting_kernel"
     NETWORK_UP = "network_up"
     SCRATCH_MOUNTED = "scratch_mounted"
     NFS_MOUNTED = "nfs_mounted"
@@ -22,6 +26,12 @@ class BootState(str, Enum):
 # The server uses this to reject out-of-order reports (a defence-in-depth check
 # against a confused or tampered-with client).
 BOOT_STATE_ORDER: tuple[BootState, ...] = (
+    # GRUB-emitted (via cat over HTTP) — earliest visible lifecycle stages.
+    BootState.GRUB_RUNNING,
+    BootState.KERNEL_LOADED,
+    BootState.INITRD_LOADED,
+    BootState.BOOTING_KERNEL,
+    # Image-side (reporter Python). After this point the kernel is up.
     BootState.NETWORK_UP,
     BootState.SCRATCH_MOUNTED,
     BootState.NFS_MOUNTED,
