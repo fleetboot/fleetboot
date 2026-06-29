@@ -261,6 +261,25 @@ def test_boot_events_respect_limit(registry: MachineRegistry):
     assert len(registry.recent_boot_events(limit=10)) == 10
 
 
+def test_settings_kv_round_trip(registry: MachineRegistry):
+    """Fleet-wide KV store. Empty / whitespace clears."""
+    assert registry.get_setting("pdudaemon_host") is None
+    registry.set_setting("pdudaemon_host", "prowl:16421")
+    assert registry.get_setting("pdudaemon_host") == "prowl:16421"
+    registry.set_setting("pdudaemon_host", "  ")
+    assert registry.get_setting("pdudaemon_host") is None
+    registry.set_setting("pdudaemon_host", "prowl:16421")
+    registry.set_setting("pdudaemon_host", "")
+    assert registry.get_setting("pdudaemon_host") is None
+
+
+def test_settings_update_replaces_value(registry: MachineRegistry):
+    """Setting an existing key updates rather than duplicating."""
+    registry.set_setting("pdudaemon_host", "a:1")
+    registry.set_setting("pdudaemon_host", "b:2")
+    assert registry.get_setting("pdudaemon_host") == "b:2"
+
+
 def test_registry_persists_across_instances(tmp_path: Path):
     """A second registry pointing at the same file sees the same rows."""
     path = tmp_path / "fleet.sqlite"

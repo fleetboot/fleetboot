@@ -666,10 +666,18 @@ def create_app(
         # Return a single byte so GRUB's `cat` has something to read
         # without erroring. A bare newline shows as a blank line in
         # GRUB's output — visually a clean separator between echoes.
+        #
+        # `Connection: close` matters: BIOS GRUB's HTTP module reads
+        # Content-Length bytes but then waits for the server to close
+        # the TCP socket before declaring the fetch "done". Without
+        # this header uvicorn keeps the socket open for keep-alive,
+        # causing a ~30s timeout per grub-event call and adding ~2 min
+        # to each boot. Eager close avoids that entire wait.
         return Response(
             status_code=status.HTTP_200_OK,
             content=b"\n",
             media_type="text/plain",
+            headers={"Connection": "close"},
         )
 
     @app.get("/enrol/{token}/keytab")

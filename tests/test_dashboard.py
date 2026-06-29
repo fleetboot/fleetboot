@@ -270,6 +270,92 @@ def test_delete_and_reboot_runs_stored_command_then_deletes(
     assert "<code>aa:bb:cc:dd:ee:ff</code>" not in listing
 
 
+def test_delete_and_reboot_falls_back_to_pdudaemon_when_no_explicit_command(
+    dashboard_root: Path, tmp_path: Path,
+):
+    """If the machine has no explicit reboot_command but pdudaemon_host
+    is set fleet-wide AND the machine has a hostname, delete+reboot
+    should fire a curl to pdudaemon using the hostname as alias."""
+    import subprocess
+    import unittest.mock as mock
+
+    client = _client(dashboard_root)
+    # Register, give it a hostname, set fleet-wide pdudaemon host.
+    client.post(
+        "/dashboard/machines",
+        data={
+            "mac": "aa:bb:cc:dd:ee:ff",
+            "profile_name": "school",
+            "architecture": "x86_64",
+            "platform": "efi",
+        },
+        headers=_auth_header(),
+    )
+    # Hostname comes from a /status post normally — go straight to
+    # registry for the test fixture.
+    from fleetboot.server.registry import MachineRegistry
+    reg = MachineRegistry(dashboard_root / "machines.sqlite")
+    reg.update_hostname("aa:bb:cc:dd:ee:ff", "lab-pc-01")
+    client.post(
+        "/dashboard/settings",
+        data={"pdudaemon_host": "prowl:16421"},
+        headers=_auth_header(),
+    )
+    with mock.patch.object(subprocess, "Popen") as popen:
+        response = client.post(
+            "/dashboard/machines/aa:bb:cc:dd:ee:ff/delete-and-reboot",
+            headers=_auth_header(),
+            follow_redirects=False,
+        )
+    assert response.status_code == 303
+    popen.assert_called_once()
+    command = popen.call_args.args[0]
+    assert "http://prowl:16421/power/control/reboot?alias=lab-pc-01" in command
+
+
+def test_explicit_reboot_command_wins_over_pdudaemon(
+    dashboard_root: Path, tmp_path: Path,
+):
+    """An explicit per-machine reboot_command must take precedence over
+    the pdudaemon fallback — admins use explicit commands for the
+    machines whose power isn't routed through pdudaemon."""
+    import subprocess
+    import unittest.mock as mock
+
+    client = _client(dashboard_root)
+    client.post(
+        "/dashboard/machines",
+        data={
+            "mac": "aa:bb:cc:dd:ee:ff",
+            "profile_name": "school",
+            "architecture": "x86_64",
+            "platform": "efi",
+        },
+        headers=_auth_header(),
+    )
+    from fleetboot.server.registry import MachineRegistry
+    reg = MachineRegistry(dashboard_root / "machines.sqlite")
+    reg.update_hostname("aa:bb:cc:dd:ee:ff", "lab-pc-01")
+    client.post(
+        "/dashboard/settings",
+        data={"pdudaemon_host": "prowl:16421"},
+        headers=_auth_header(),
+    )
+    client.post(
+        "/dashboard/machines/aa:bb:cc:dd:ee:ff/reboot-command",
+        data={"reboot_command": "echo explicit"},
+        headers=_auth_header(),
+    )
+    with mock.patch.object(subprocess, "Popen") as popen:
+        client.post(
+            "/dashboard/machines/aa:bb:cc:dd:ee:ff/delete-and-reboot",
+            headers=_auth_header(),
+            follow_redirects=False,
+        )
+    command = popen.call_args.args[0]
+    assert command == "echo explicit"
+
+
 def test_machine_detail_404_for_unknown_mac(dashboard_root: Path):
     client = _client(dashboard_root)
     response = client.get(

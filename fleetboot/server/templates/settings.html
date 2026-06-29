@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}fleetboot — settings{% endblock %}
+{% block content %}
+<h1>Fleet-wide settings</h1>
+
+<form method="post" action="/dashboard/settings">
+  <h2>Power control (pdudaemon)</h2>
+  <p class="muted">
+    If you set this, the dashboard's <em>delete + reboot</em> button on a
+    machine without an explicit shell-command falls back to:
+    <br>
+    <code>curl "http://&lt;pdudaemon_host&gt;/power/control/reboot?alias=&lt;machine_hostname&gt;"</code>
+    <br>
+    Most machines never need their own per-row reboot command — the
+    PDU side maps the alias (machine hostname) to the right outlet.
+    Leave blank to disable the fallback.
+  </p>
+  <label for="pdudaemon_host">pdudaemon host:port</label>
+  <input
+    type="text"
+    id="pdudaemon_host"
+    name="pdudaemon_host"
+    placeholder="e.g. prowl:16421"
+    value="{{ pdudaemon_host }}"
+    style="width: 360px"
+  >
+  <p>
+    <button type="submit">Save settings</button>
+  </p>
+</form>
+{% endblock %}

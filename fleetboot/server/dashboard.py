@@ -167,6 +167,36 @@ def build_dashboard_router(
             url="/dashboard", status_code=status.HTTP_303_SEE_OTHER
         )
 
+    # ---- Settings -------------------------------------------------------
+
+    @router.get(
+        "/dashboard/settings",
+        response_class=HTMLResponse,
+        dependencies=[Depends(require_admin)],
+    )
+    def show_settings(request: Request) -> HTMLResponse:
+        return templates.TemplateResponse(
+            request,
+            "settings.html",
+            {
+                "pdudaemon_host": registry.get_setting("pdudaemon_host") or "",
+            },
+        )
+
+    @router.post(
+        "/dashboard/settings",
+        response_class=HTMLResponse,
+        dependencies=[Depends(require_admin)],
+    )
+    def update_settings(
+        pdudaemon_host: str = Form(""),
+    ) -> RedirectResponse:
+        registry.set_setting("pdudaemon_host", pdudaemon_host)
+        return RedirectResponse(
+            url="/dashboard/settings",
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+
     # ---- Profiles -------------------------------------------------------
 
     @router.get(
@@ -337,15 +367,39 @@ def build_dashboard_router(
         dependencies=[Depends(require_admin)],
     )
     def delete_and_reboot(mac: str) -> RedirectResponse:
-        """Delete the machine row, then run its stored reboot_command on
-        the fleetboot host. shell=True; the admin owns the command's
-        contents — a structured power-control layer is future work.
+        """Delete the machine row, then power-cycle the host.
+
+        Two paths in priority order:
+
+          1. Explicit per-machine `reboot_command` — free-text shell run
+             with shell=True on the fleetboot host. The admin owns the
+             contents.
+          2. Fleet-wide pdudaemon fallback — if `pdudaemon_host` is set
+             AND the machine has a known hostname, build
+             `curl http://<pdudaemon_host>/power/control/reboot?alias=<hostname>`
+             and run that. This means most machines never need their own
+             reboot_command — the alias on pdudaemon resolves which PDU
+             port to flip.
+
+        Either way: the machine row is deleted first so the page
+        refresh shows it gone immediately; the power command is
+        Popen'd detached so the dashboard isn't blocked.
         """
+        import subprocess
+
         machine = registry.lookup(mac)
-        command = machine.reboot_command if machine else None
+        command: Optional[str] = None
+        if machine is not None:
+            if machine.reboot_command:
+                command = machine.reboot_command
+            else:
+                pdu_host = registry.get_setting("pdudaemon_host")
+                if pdu_host and machine.hostname:
+                    command = _pdudaemon_reboot_command(
+                        pdu_host=pdu_host, alias=machine.hostname,
+                    )
         registry.remove(mac)
         if command:
-            import subprocess
             # Detach: don't block the dashboard response on the curl
             # finishing. stderr goes to the dev server log.
             subprocess.Popen(
@@ -503,6 +557,27 @@ def build_dashboard_router(
 
 
 # ---- Helpers -------------------------------------------------------------
+
+
+def _pdudaemon_reboot_command(*, pdu_host: str, alias: str) -> str:
+    """Build the curl line that asks pdudaemon to reboot a given alias.
+
+    The hostname is URL-quoted because aliases can legitimately include
+    characters that need escaping (a school's host naming scheme might
+    use dots or dashes). pdu_host is taken verbatim — the admin set it
+    so they can include port, scheme, etc.
+    """
+    from urllib.parse import quote
+    safe_alias = quote(alias, safe="")
+    # pdu_host typically lacks the scheme; default to http if missing
+    # so the admin can just paste "prowl:16421".
+    if "://" in pdu_host:
+        base = pdu_host
+    else:
+        base = f"http://{pdu_host}"
+    return (
+        f'curl "{base}/power/control/reboot?alias={safe_alias}"'
+    )
 
 
 def _list_profile_names(profiles_root: Path) -> list[str]:

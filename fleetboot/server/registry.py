@@ -59,6 +59,17 @@ CREATE INDEX IF NOT EXISTS idx_boot_events_mac_time
 CREATE INDEX IF NOT EXISTS idx_boot_events_time
     ON boot_events(occurred_at);
 
+-- Simple key-value store for admin-set fleet-wide settings (e.g. the
+-- pdudaemon hostname used to assemble per-machine reboot URLs). Keeping
+-- it as a flat KV table avoids a schema change every time we add a
+-- single configurable; the keys themselves are documented at the call
+-- sites that read them.
+CREATE TABLE IF NOT EXISTS settings (
+    key             TEXT PRIMARY KEY NOT NULL,
+    value           TEXT NOT NULL,
+    updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE TABLE IF NOT EXISTS auto_enrol_rules (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     name            TEXT NOT NULL,
@@ -356,6 +367,42 @@ class MachineRegistry:
             connection.execute(
                 "UPDATE machines SET reboot_command = ? WHERE mac = ?",
                 (value, normalised_mac),
+            )
+
+    # ---- Fleet-wide key/value settings ----------------------------------
+    #
+    # Keys currently recognised:
+    #   pdudaemon_host — e.g. "prowl:16421". When set, delete-and-reboot
+    #                    on a machine with no explicit reboot_command but
+    #                    a known hostname auto-fires
+    #                    http://<pdudaemon_host>/power/control/reboot?alias=<hostname>
+
+    def get_setting(self, key: str) -> Optional[str]:
+        """Return the stored value for `key`, or None if unset / blank."""
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT value FROM settings WHERE key = ?", (key,),
+            ).fetchone()
+        if row is None:
+            return None
+        value = (row["value"] or "").strip()
+        return value or None
+
+    def set_setting(self, key: str, value: Optional[str]) -> None:
+        """Set or clear a fleet-wide setting. Empty/whitespace clears."""
+        cleaned = (value or "").strip()
+        with self._write_lock, self._connect() as connection:
+            if not cleaned:
+                connection.execute(
+                    "DELETE FROM settings WHERE key = ?", (key,),
+                )
+                return
+            connection.execute(
+                "INSERT INTO settings (key, value) VALUES (?, ?) "
+                "ON CONFLICT(key) DO UPDATE SET "
+                "    value = excluded.value, "
+                "    updated_at = datetime('now')",
+                (key, cleaned),
             )
 
     def update_hardware(self, mac: str, hardware_json: str) -> None:
