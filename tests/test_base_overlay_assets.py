@@ -67,6 +67,16 @@ def test_networkd_dhcp_drop_in_matches_any_wired_ethernet():
     assert "UseDNS=yes" in text
 
 
+def test_base_recipe_installs_systemd_resolved_package():
+    """systemd-resolved is a separate apt package in trixie. Without
+    it the resolved.service unit exists (it's a static dependency
+    from elsewhere) but the binary doesn't, so service-active=no,
+    /run/systemd/resolve/ never exists, and our resolv.conf symlink
+    is dangling. DNS completely broken."""
+    recipe = (REPO_ROOT / "image" / "fleetboot-base.yaml").read_text()
+    assert "\n      - systemd-resolved\n" in recipe
+
+
 def test_recipe_enables_systemd_networkd_and_resolved():
     """Wiring the .network file isn't enough — the units must also be
     enabled, and /etc/resolv.conf must point at resolved's stub so

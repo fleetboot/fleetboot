@@ -99,6 +99,12 @@ actions:
       # than the default gzip — and live-boot's initrd unpacking is
       # also quicker on cold-boot of slow hardware.
       - zstd
+      # systemd-resolved was split out of the `systemd` package in
+      # trixie — installing it explicitly is what gives us
+      # /run/systemd/resolve/stub-resolv.conf + the resolvectl tool.
+      # Without it, our /etc/resolv.conf symlink is dangling and DNS
+      # resolution stops working entirely.
+      - systemd-resolved
       # No desktop, display manager, audio stack, or graphics drivers
       # in the base image. The default profile inherits this thin Debian
       # and adds nothing; desktop profiles (xfce-desktop, gnome-desktop,
