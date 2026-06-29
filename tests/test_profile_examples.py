@@ -18,7 +18,7 @@ PROFILES_DIR = REPO_ROOT / "image" / "profiles"
 DESKTOP_PROFILES = (
     "xfce-desktop", "gnome-desktop", "kde-desktop", "cinnamon-desktop",
 )
-GRAPHICS_PROFILES = ("amd-graphics", "nvidia-graphics")
+GRAPHICS_PROFILES = ("amd-graphics", "intel-graphics", "nvidia-graphics")
 
 
 @pytest.mark.parametrize(
@@ -95,6 +95,36 @@ def test_graphics_profile_is_a_mixin_no_parent(name: str):
     """Graphics profiles are designed to stack with a desktop, not to
     stand alone — they shouldn't declare a parent themselves."""
     assert not (PROFILES_DIR / name / "parent").exists()
+
+
+@pytest.mark.parametrize("name", DESKTOP_PROFILES)
+def test_desktop_profile_inherits_from_both_graphics_mixins(name: str):
+    """A desktop image admins ship without knowing what GPU is in the
+    target hardware. Each desktop must inherit from both intel-graphics
+    and amd-graphics so a mixed-fleet image runs on whichever silicon
+    boots first. The resolver dedupes shared ancestors, so unioning
+    the two doesn't bloat the package list."""
+    parent_file = PROFILES_DIR / name / "parent"
+    assert parent_file.is_file(), f"{name} must declare graphics parents"
+    parents = [
+        line.strip() for line in parent_file.read_text().splitlines()
+        if line.strip() and not line.startswith("#")
+    ]
+    assert "intel-graphics" in parents, f"{name} missing intel-graphics"
+    assert "amd-graphics" in parents, f"{name} missing amd-graphics"
+
+
+def test_intel_graphics_installs_intel_driver_and_mesa():
+    packages = (
+        PROFILES_DIR / "intel-graphics" / "extra-packages.list"
+    ).read_text()
+    # The DDX driver for older Intel chipsets — important for OptiPlex
+    # 780-era hardware.
+    assert "xserver-xorg-video-intel" in packages
+    # Mesa userspace.
+    assert "mesa-vulkan-drivers" in packages
+    # Microcode + firmware blob.
+    assert "intel-microcode" in packages
 
 
 def test_base_recipe_no_longer_installs_xfce_in_base_packages():

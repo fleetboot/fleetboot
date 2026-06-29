@@ -1,0 +1,28 @@
+#!/bin/sh
+# NetworkManager dispatcher script — sister to the dhclient exit-hook.
+#
+# Why we need both: NM defaults to its `internal` DHCP backend
+# (not dhclient), so /etc/dhcp/dhclient-exit-hooks.d/* never fires on
+# NM-managed systems. NM exposes the DHCP options to dispatcher
+# scripts via DHCP4_* environment variables. This script picks up
+# option 12 (hostname) and pushes it into hostnamectl so the dashboard
+# sees a real per-machine name.
+#
+# Lives at /etc/NetworkManager/dispatcher.d/95-fleetboot-hostname-nm.
+# NM invokes it with $1=interface, $2=event.
+
+interface="${1:-}"
+event="${2:-}"
+
+case "$event" in
+    up|dhcp4-change)
+        if [ -n "${DHCP4_HOST_NAME:-}" ]; then
+            hostnamectl set-hostname --static "$DHCP4_HOST_NAME" 2>/dev/null \
+                || hostname "$DHCP4_HOST_NAME"
+            ip="${DHCP4_IP_ADDRESS:-}"
+            if [ -n "$ip" ] && ! grep -q "[[:space:]]$DHCP4_HOST_NAME\([[:space:]]\|$\)" /etc/hosts; then
+                printf '%s\t%s\n' "$ip" "$DHCP4_HOST_NAME" >> /etc/hosts
+            fi
+        fi
+        ;;
+esac

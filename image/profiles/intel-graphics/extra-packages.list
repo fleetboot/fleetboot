@@ -1,0 +1,23 @@
+# Intel GPU support — covers ~everything from Eaglelake (G41, GMA X4500)
+# through current Iris Xe. The `i915` kernel module is in `linux-image`
+# by default; this profile fills in userspace + firmware so the GPU is
+# fully functional, not just framebuffer-only.
+#
+# `xserver-xorg-video-intel` is the legacy DDX driver — many users have
+# moved to the kernel `modesetting` driver in xserver-xorg-core, but for
+# older chipsets (G41, GMA X4500, Ironlake) the intel DDX still gives
+# better behaviour than modesetting.
+xserver-xorg-video-intel
+# Pre-modern Intel chipsets benefit from VESA/fbdev fallbacks too —
+# cheap to ship, useful when modesetting flakes.
+xserver-xorg-video-vesa
+xserver-xorg-video-fbdev
+# Mesa userspace — GL + Vulkan + DRI. Same packages as amd-graphics,
+# but unioning is harmless because the resolver dedupes.
+mesa-vulkan-drivers
+mesa-utils
+libgl1-mesa-dri
+# CPU microcode updates and the catch-all firmware blob. Both Debian
+# main + non-free-firmware (which trixie enables by default).
+intel-microcode
+firmware-misc-nonfree

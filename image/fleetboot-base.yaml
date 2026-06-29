@@ -129,8 +129,13 @@ actions:
 
   - action: overlay
     description: "Install Fleetboot dhclient exit-hook for DHCP hostname"
-    source: ./networking
+    source: ./networking/dhclient
     destination: /etc/dhcp/dhclient-exit-hooks.d
+
+  - action: overlay
+    description: "Install Fleetboot NetworkManager dispatcher for DHCP hostname"
+    source: ./networking/nm-dispatcher
+    destination: /etc/NetworkManager/dispatcher.d
 
   - action: run
     description: "Mark Fleetboot runtime helpers executable"
@@ -139,6 +144,7 @@ actions:
       chmod 0755 /usr/local/lib/fleetboot/fleetboot-heartbeat.sh
       chmod 0755 /usr/local/lib/fleetboot/fleetboot-scratch-setup.sh
       chmod 0755 /etc/dhcp/dhclient-exit-hooks.d/95-fleetboot-hostname
+      chmod 0755 /etc/NetworkManager/dispatcher.d/95-fleetboot-hostname
 
   - action: overlay
     description: "Install Fleetboot PAM session hook"
