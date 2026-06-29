@@ -401,6 +401,7 @@ def create_app(
     def resolve_machine(
         mac: str,
         source_ip: Optional[str] = None,
+        platform: Optional[str] = None,
         authorization: str | None = Header(default=None),
     ) -> MachineRecord:
         """Read-only registry lookup, authenticated with the mint secret.
@@ -430,11 +431,21 @@ def create_app(
         if machine is None:
             rule = registry.find_matching_rule(mac, source_ip=source_ip)
             if rule is not None:
+                # URL platform wins over the rule's platform when both
+                # are present — the URL is observed truth (the client's
+                # firmware reported it), while the rule's platform is an
+                # admin default that may not fit a mixed-firmware subnet.
+                # Architecture stays from the rule: BIOS GRUB reports
+                # `i386` even on x86_64 machines, so we can't infer the
+                # real CPU arch from the URL.
+                effective_platform = (
+                    platform if platform in {"pc", "efi"} else rule.platform
+                )
                 machine = registry.enroll(
                     mac=mac,
                     profile_name=rule.profile_name,
                     architecture=rule.architecture,
-                    platform=rule.platform,
+                    platform=effective_platform,
                     serial_console=rule.serial_console,
                     enrolled_by=f"rule:{rule.name}",
                 )
