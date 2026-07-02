@@ -1,11 +1,18 @@
 # fleetboot
 
-A netboot fleet control plane for schools. Boots heterogeneous
-(x86_64 / arm64, UEFI / BIOS) machines into a locked-down, immutable
-Debian desktop over PXE, tracks their lifecycle from GRUB to
-login-screen, and gives an admin a small web dashboard to enrol
-machines, roll out new images, and reboot / recover misbehaving
-hardware.
+A netboot fleet control plane. Boots heterogeneous (x86_64 / arm64,
+UEFI / BIOS) machines into an immutable Debian image over PXE,
+tracks their lifecycle from GRUB to login-screen, and gives an admin
+a small web dashboard to enrol machines, roll out new images, and
+reboot / recover misbehaving hardware.
+
+The image the fleet boots is entirely defined by composable profiles,
+so the same control plane can drive very different deployments:
+locked-down desktop labs, headless compute nodes, dev VM farms, CI
+runners, kiosks, whatever your profile chain assembles. A worked
+example of the "school desktop" case lives under
+`image/profiles/school/` — treat it as one recipe among many, not
+the intended use.
 
 ## Architecture
 
@@ -18,9 +25,11 @@ Four layers, kept as separable as they can be:
    impersonate its neighbour.
 2. **Image build** — `debos` recipe under `image/` produces a
    `.squashfs` root + kernel + initrd. Layered "profiles" compose
-   with inheritance (a `logo` profile ships a wallpaper for the
-   greeter, an `intel-graphics` profile ships Mesa drivers, a
-   `cinnamon-desktop` profile ships the DE, etc.).
+   with inheritance so a target image is just the union of its
+   ancestors: an `intel-graphics` profile ships Mesa drivers, a
+   `cinnamon-desktop` profile ships the DE, a `logo` profile ships
+   a greeter wallpaper, a hypothetical `compute-node` profile
+   might ship only ssh + a CUDA runtime. Bring your own profiles.
 3. **Control plane** — a FastAPI server (`fleetboot/server/`) that
    holds the machine registry, mints per-boot session tokens for
    tftpjail, receives lifecycle reports from the booted machines,
@@ -42,13 +51,13 @@ Requires `debos`, `fakemachine`, `python3`, and a checkout of
 [`tftpjail`](https://github.com/fleetboot/tftpjail) next to this repo.
 
 ```
-# Build a desktop image
-make image PROFILE=cinnamon-desktop ARCH=amd64
+# Build an image (any profile you have defined works here)
+make image PROFILE=default ARCH=amd64
 
 # Run the control plane + tftpjail (single process, dev mode)
 make run-server
 
-# Point a VM at DHCP + browse http://localhost:8080/dashboard
+# Point a machine or VM at DHCP + browse http://localhost:8080/dashboard
 ```
 
 The dashboard walks you through enrolling a machine, defining
@@ -82,8 +91,9 @@ per-profile conventions.
 
 ## Development
 
-`make test` runs the whole suite. `make image` builds a full
-desktop image (10–15 minutes). `make run-server` brings up the
+`make test` runs the whole suite. `make image` builds a full image
+(size depends on the profile chain — a headless base takes a couple
+of minutes, a full desktop 10–15). `make run-server` brings up the
 control plane against `build/dev/machines.sqlite` for interactive
 testing. The dashboard is bound to `0.0.0.0:8080` and gated by a
 per-install admin secret (see `build/dev/secrets.env`).
