@@ -43,6 +43,52 @@
   <a href="/dashboard/profiles" style="margin-left: 12px;">back</a>
 </form>
 
+<h2 style="margin-top: 32px;">Overlay files</h2>
+<p class="muted">
+  Files under <code>image/profiles/{{ name }}/overlay/</code> land in
+  the image at the same relative path. Text files are editable
+  in-place; binaries can only be viewed / deleted / replaced by
+  re-upload.
+</p>
+{% if overlay_files %}
+<table>
+  <thead>
+    <tr><th>Path</th><th>Size</th><th>Type</th><th></th></tr>
+  </thead>
+  <tbody>
+  {% for f in overlay_files %}
+  <tr>
+    <td><code>{{ f.path }}</code></td>
+    <td>{{ f.size }} B</td>
+    <td>{{ "text" if f.is_text else "binary" }}</td>
+    <td class="row-actions">
+      <a href="/dashboard/profiles/{{ name }}/overlay/{{ f.path }}">{% if f.is_text %}edit{% else %}view{% endif %}</a>
+      <form method="post"
+            action="/dashboard/profiles/{{ name }}/overlay/{{ f.path }}/delete"
+            onsubmit="return confirm('Delete overlay file {{ f.path }}?');">
+        <button type="submit" class="danger">delete</button>
+      </form>
+    </td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="muted">No overlay files.</p>
+{% endif %}
+
+<h3 style="margin-top: 20px;">Add a new overlay file</h3>
+<form method="post" action="/dashboard/profiles/{{ name }}/overlay">
+  <label>Path (relative to <code>overlay/</code>, e.g. <code>etc/motd</code>)
+    <input type="text" name="relpath" required style="width: 400px"
+           placeholder="etc/systemd/system/my-unit.service">
+  </label>
+  <label>Contents (leave empty for a zero-byte placeholder)
+    <textarea name="content" rows="8"></textarea>
+  </label>
+  <button type="submit">create</button>
+</form>
+
 <form method="post" action="/dashboard/builds" style="margin-top: 28px;">
   <input type="hidden" name="profile" value="{{ name }}">
   <label>Architecture

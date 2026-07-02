@@ -267,7 +267,112 @@ def build_dashboard_router(
                 "available_parents": [
                     p for p in _list_profile_names(profiles_root) if p != name
                 ],
+                # Every file that lands in the image via the overlay
+                # tree. Each entry has {"path", "size", "is_text"} —
+                # is_text drives whether the file gets an editable
+                # textarea or a "binary, download only" link.
+                "overlay_files": _list_overlay_files(profile_dir),
             },
+        )
+
+    @router.get(
+        "/dashboard/profiles/{name}/overlay/{relpath:path}",
+        response_class=HTMLResponse,
+        dependencies=[Depends(require_admin)],
+    )
+    def edit_overlay_file(
+        request: Request, name: str, relpath: str,
+    ) -> HTMLResponse:
+        profile_dir = _safe_profile_dir(profiles_root, name)
+        file_path = _safe_overlay_path(profile_dir, relpath)
+        if not file_path.is_file():
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="overlay file not found",
+            )
+        try:
+            content = file_path.read_text()
+            is_text = True
+        except UnicodeDecodeError:
+            content = ""
+            is_text = False
+        return templates.TemplateResponse(
+            request,
+            "profile_overlay_edit.html",
+            {
+                "profile_name": name,
+                "relpath": relpath,
+                "content": content,
+                "is_text": is_text,
+                "size": file_path.stat().st_size,
+            },
+        )
+
+    # NB: the delete route must be declared BEFORE the generic
+    # save route so FastAPI's greedy `{relpath:path}` matcher on save
+    # doesn't grab `/delete` as part of the relpath.
+    @router.post(
+        "/dashboard/profiles/{name}/overlay/{relpath:path}/delete",
+        response_class=HTMLResponse,
+        dependencies=[Depends(require_admin)],
+    )
+    def delete_overlay_file(name: str, relpath: str) -> RedirectResponse:
+        profile_dir = _safe_profile_dir(profiles_root, name)
+        file_path = _safe_overlay_path(profile_dir, relpath)
+        if file_path.is_file():
+            file_path.unlink()
+            # Clean up empty parent dirs up to overlay/ root.
+            overlay_root = (profile_dir / "overlay").resolve()
+            parent = file_path.parent
+            while parent != overlay_root and not any(parent.iterdir()):
+                parent.rmdir()
+                parent = parent.parent
+        return RedirectResponse(
+            url=f"/dashboard/profiles/{name}",
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+
+    @router.post(
+        "/dashboard/profiles/{name}/overlay",
+        response_class=HTMLResponse,
+        dependencies=[Depends(require_admin)],
+    )
+    def create_overlay_file(
+        name: str, relpath: str = Form(...), content: str = Form(""),
+    ) -> RedirectResponse:
+        profile_dir = _safe_profile_dir(profiles_root, name)
+        # Don't strip a leading slash — pass the value as-is to
+        # _safe_overlay_path so that path traversal (`/etc/passwd`)
+        # is caught there and rejected with 400.
+        cleaned = relpath.strip()
+        if not cleaned:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="relpath is required",
+            )
+        file_path = _safe_overlay_path(profile_dir, cleaned)
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        file_path.write_text(content)
+        return RedirectResponse(
+            url=f"/dashboard/profiles/{name}",
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+
+    @router.post(
+        "/dashboard/profiles/{name}/overlay/{relpath:path}",
+        response_class=HTMLResponse,
+        dependencies=[Depends(require_admin)],
+    )
+    def save_overlay_file(
+        name: str, relpath: str, content: str = Form(""),
+    ) -> RedirectResponse:
+        profile_dir = _safe_profile_dir(profiles_root, name)
+        file_path = _safe_overlay_path(profile_dir, relpath)
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        file_path.write_text(content)
+        return RedirectResponse(
+            url=f"/dashboard/profiles/{name}",
+            status_code=status.HTTP_303_SEE_OTHER,
         )
 
     @router.post(
@@ -725,6 +830,67 @@ def build_dashboard_router(
 
 
 # ---- Helpers -------------------------------------------------------------
+
+
+def _safe_overlay_path(profile_dir: Path, relpath: str) -> Path:
+    """Resolve `relpath` under `profile_dir/overlay/` and refuse anything
+    outside that root. Guards against `..`-based traversal AND
+    absolute paths smuggled in via the URL segment. `relpath` may be
+    multi-segment (`etc/systemd/system/foo.service`).
+    """
+    # Reject up-front:
+    #   - absolute paths (which `Path(...) / '/etc/passwd'` would happily
+    #     collapse to just '/etc/passwd', escaping our overlay root)
+    #   - any segment that is `..`, `.`, or empty (double-slash tricks)
+    if not relpath or relpath.startswith("/"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="invalid overlay path",
+        )
+    for part in Path(relpath).parts:
+        if part in ("..", "", ".", "/"):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="invalid overlay path",
+            )
+    overlay_root = (profile_dir / "overlay").resolve()
+    candidate = (overlay_root / relpath).resolve()
+    try:
+        candidate.relative_to(overlay_root)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="invalid overlay path",
+        )
+    return candidate
+
+
+def _list_overlay_files(profile_dir: Path) -> list[dict]:
+    """List every file under profile_dir/overlay/ with metadata for
+    the profile-edit template. Returns entries sorted by relative
+    path so the UI is stable across saves."""
+    overlay_root = profile_dir / "overlay"
+    if not overlay_root.is_dir():
+        return []
+    entries: list[dict] = []
+    for path in sorted(overlay_root.rglob("*")):
+        if not path.is_file():
+            continue
+        rel = path.relative_to(overlay_root).as_posix()
+        # Rough heuristic: try to decode a bit as UTF-8. If it works
+        # we treat it as editable text; otherwise the UI shows it as
+        # a binary blob with delete-only affordance.
+        try:
+            with path.open("rb") as f:
+                head = f.read(4096)
+            head.decode("utf-8")
+            is_text = True
+        except UnicodeDecodeError:
+            is_text = False
+        entries.append({
+            "path": rel, "size": path.stat().st_size, "is_text": is_text,
+        })
+    return entries
 
 
 def _pdudaemon_reboot_command(*, pdu_host: str, alias: str) -> str:
