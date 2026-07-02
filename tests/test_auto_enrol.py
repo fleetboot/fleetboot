@@ -28,7 +28,7 @@ def registry(tmp_path: Path) -> MachineRegistry:
 def test_add_and_list_mac_prefix_rule(registry: MachineRegistry):
     rule = registry.add_auto_enrol_rule(
         name="vbox", match_kind="mac_prefix", match_value="08:00:27",
-        profile_name="school",
+        profile_name="cinnamon-desktop",
     )
     assert isinstance(rule, AutoEnrolRule)
     assert rule.name == "vbox"
@@ -42,7 +42,7 @@ def test_mac_prefix_match_normalises_input(registry: MachineRegistry):
     """`08-00-27` should match the same MACs as `08:00:27`."""
     registry.add_auto_enrol_rule(
         name="vbox", match_kind="mac_prefix",
-        match_value="08-00-27", profile_name="school",
+        match_value="08-00-27", profile_name="cinnamon-desktop",
     )
     match = registry.find_matching_rule("08:00:27:aa:bb:cc")
     assert match is not None
@@ -62,7 +62,7 @@ def test_empty_mac_prefix_catches_all_unknown_macs(registry: MachineRegistry):
 def test_ip_cidr_rule_matches_within_subnet(registry: MachineRegistry):
     registry.add_auto_enrol_rule(
         name="student-lan", match_kind="ip_cidr",
-        match_value="192.168.99.0/24", profile_name="school",
+        match_value="192.168.99.0/24", profile_name="cinnamon-desktop",
     )
     assert registry.find_matching_rule(
         "aa:bb:cc:dd:ee:ff", source_ip="192.168.99.10",
@@ -85,7 +85,7 @@ def test_first_matching_rule_wins(registry: MachineRegistry):
     )
     registry.add_auto_enrol_rule(
         name="second", match_kind="mac_prefix",
-        match_value="08", profile_name="school",
+        match_value="08", profile_name="cinnamon-desktop",
     )
     match = registry.find_matching_rule("08:00:27:aa:bb:cc")
     assert match is not None
@@ -162,7 +162,7 @@ def test_rule_platform_specific_skipped_when_url_omits_platform(
 def test_remove_auto_enrol_rule(registry: MachineRegistry):
     rule = registry.add_auto_enrol_rule(
         name="vbox", match_kind="mac_prefix",
-        match_value="08:00:27", profile_name="school",
+        match_value="08:00:27", profile_name="cinnamon-desktop",
     )
     assert registry.remove_auto_enrol_rule(rule.id) is True
     assert registry.remove_auto_enrol_rule(rule.id) is False  # idempotent-ish
@@ -186,7 +186,7 @@ def test_resolve_auto_enrols_on_first_hit(registry: MachineRegistry):
     """An unknown MAC that matches a rule is enrolled by /resolve."""
     registry.add_auto_enrol_rule(
         name="vbox", match_kind="mac_prefix",
-        match_value="08:00:27", profile_name="school",
+        match_value="08:00:27", profile_name="cinnamon-desktop",
     )
     client = _resolve_client(registry)
     response = client.get(
@@ -196,7 +196,7 @@ def test_resolve_auto_enrols_on_first_hit(registry: MachineRegistry):
     assert response.status_code == 200
     body = response.json()
     assert body["mac"] == "08:00:27:aa:bb:cc"
-    assert body["profile_name"] == "school"
+    assert body["profile_name"] == "cinnamon-desktop"
     assert body["enrolled_by"] == "rule:vbox"
     # And the row is now in the registry — a follow-up lookup hits the
     # cached row, not the rule again.
@@ -216,7 +216,7 @@ def test_resolve_returns_404_when_no_rule_matches(registry: MachineRegistry):
 def test_resolve_passes_source_ip_to_rule_matching(registry: MachineRegistry):
     registry.add_auto_enrol_rule(
         name="student-lan", match_kind="ip_cidr",
-        match_value="192.168.99.0/24", profile_name="school",
+        match_value="192.168.99.0/24", profile_name="cinnamon-desktop",
     )
     client = _resolve_client(registry)
     # Without source_ip, IP rule never fires.
@@ -264,7 +264,7 @@ def test_auto_enrol_rules_create_list_delete(registry: MachineRegistry):
             "name": "vbox",
             "match_kind": "mac_prefix",
             "match_value": "08:00:27",
-            "profile_name": "school",
+            "profile_name": "cinnamon-desktop",
         },
         headers=auth,
     )

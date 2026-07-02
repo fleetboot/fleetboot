@@ -4,7 +4,7 @@ and tick through boot states as it comes up.
 
   python3 -m tests.dev.boot_dev_vm                       # random MAC
   python3 -m tests.dev.boot_dev_vm --mac 52:54:00:de:00:01
-  python3 -m tests.dev.boot_dev_vm --profile school
+  python3 -m tests.dev.boot_dev_vm --profile cinnamon-desktop
 
 Expects:
   - `make run-server` is already running in another shell.
@@ -152,7 +152,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--mac", default=None,
                         help="MAC for the VM (default: auto-generated)")
-    parser.add_argument("--profile", default="school")
+    parser.add_argument("--profile", default="cinnamon-desktop")
     parser.add_argument("--architecture", default="x86_64")
     parser.add_argument(
         "--fleetboot-url", default=DEFAULT_FLEETBOOT_URL,

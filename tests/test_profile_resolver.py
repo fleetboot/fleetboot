@@ -202,19 +202,19 @@ def test_setup_chroots_concatenated_in_order(resolver):
 # ---- real-profile integration ---------------------------------------------
 
 
-def test_real_school_profile_resolves_with_desktop_parent(tmp_path):
-    """The shipped `school` profile must successfully resolve and
-    include some desktop ancestor's packages. The specific desktop
-    varies — school currently inherits cinnamon-desktop — so we
-    assert structure, not exact wording."""
+def test_real_cinnamon_desktop_profile_resolves_with_ancestors(tmp_path):
+    """The shipped `cinnamon-desktop` example profile must resolve
+    and pull in some of its ancestor's packages (a display manager
+    from the desktop layer, mesa userspace from the graphics
+    layer, etc.). This is the "does profile inheritance work
+    end-to-end against a real, shipped profile" test — the specific
+    ancestors can change without breaking it."""
     module = _load_resolver()
-    out = module.resolve("school", tmp_path)
+    out = module.resolve("cinnamon-desktop", tmp_path)
     chain = (out / "resolved-from").read_text().strip()
-    assert "-desktop -> school" in chain
+    assert "cinnamon-desktop" in chain
     packages = (out / "extra-packages.list").read_text()
-    # School's own contribution.
-    assert "extrepo" in packages
-    # Some display-manager ancestor's contribution.
+    # A display-manager ancestor (via the desktop layer).
     assert "lightdm" in packages
 
 

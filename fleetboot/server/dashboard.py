@@ -4,7 +4,7 @@ Tiny FastAPI + Jinja2 HTML UI for an administrator to see registered
 machines, edit profiles, and trigger image builds.
 
 Auth: HTTP Basic — the admin secret is the password, any username works.
-This is intended for use inside a school's admin network; for public
+This is intended for use inside a trusted admin network; for public
 exposure put it behind a reverse proxy + your own SSO.
 """
 
@@ -731,9 +731,9 @@ def _pdudaemon_reboot_command(*, pdu_host: str, alias: str) -> str:
     """Build the curl line that asks pdudaemon to reboot a given alias.
 
     The hostname is URL-quoted because aliases can legitimately include
-    characters that need escaping (a school's host naming scheme might
-    use dots or dashes). pdu_host is taken verbatim — the admin set it
-    so they can include port, scheme, etc.
+    characters that need escaping (host naming schemes often use dots or
+    dashes). pdu_host is taken verbatim — the admin set it so they can
+    include port, scheme, etc.
     """
     from urllib.parse import quote
     safe_alias = quote(alias, safe="")

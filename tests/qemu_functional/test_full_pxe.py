@@ -69,7 +69,7 @@ REQUIRED_ARTIFACTS = (
     BUILD_DIR / "fleetboot-x64-uefi",
     BUILD_DIR / "vmlinuz",
     BUILD_DIR / "initrd.img",
-    BUILD_DIR / "fleetboot-school-amd64.squashfs",
+    BUILD_DIR / "fleetboot-cinnamon-desktop-amd64.squashfs",
 )
 
 
@@ -259,13 +259,13 @@ def test_qemu_uefi_pxe_boots_kernel_and_reporter_calls_home(tmp_path: Path):
     )
 
     with httpx.Client(timeout=5.0) as http:
-        # Enrol the VM with the `school` profile so the rendered grub.cfg
-        # asks for `fleetboot-school-amd64.squashfs` — proves the profile
+        # Enrol the VM with the `cinnamon-desktop` example profile so the rendered grub.cfg
+        # asks for `fleetboot-cinnamon-desktop-amd64.squashfs` — proves the profile
         # mechanism all the way from registry to live-boot.
         response = http.post(
             f"{fleetboot.base_url}/machines",
             json={
-                "mac": VM_MAC, "profile_name": "school",
+                "mac": VM_MAC, "profile_name": "cinnamon-desktop",
                 "architecture": "x86_64", "platform": "efi",
                 "serial_console": True,
             },

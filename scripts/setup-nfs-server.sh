@@ -18,8 +18,8 @@
 #   - You have a Kerberos admin ticket (run `kinit admin` first).
 #
 # Usage:
-#   sudo ./scripts/setup-nfs-server.sh --realm SCHOOL.EXAMPLE \
-#                                      --domain school.example
+#   sudo ./scripts/setup-nfs-server.sh --realm FLEET.EXAMPLE \
+#                                      --domain fleet.example
 
 set -eu
 

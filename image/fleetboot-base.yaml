@@ -107,11 +107,11 @@ actions:
       - systemd-resolved
       # No desktop, display manager, audio stack, or graphics drivers
       # in the base image. The default profile inherits this thin Debian
-      # and adds nothing; desktop profiles (xfce-desktop, gnome-desktop,
-      # kde-desktop, cinnamon-desktop) add the GUI; graphics profiles
-      # (amd-graphics, nvidia-graphics) add vendor-specific stacks.
-      # Real-world profiles like `school` chain a desktop into the mix:
-      # `school` declares `parent: xfce-desktop` and adds LibreWolf on top.
+      # and adds nothing; example desktop profiles (xfce-desktop,
+      # gnome-desktop, kde-desktop, cinnamon-desktop) add the GUI;
+      # example graphics profiles (amd-graphics, nvidia-graphics) add
+      # vendor-specific stacks. Compose your own profile that inherits
+      # any subset of these.
 
   # ---------- admin customisation: pre-build hook ----------
 

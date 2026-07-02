@@ -13,19 +13,13 @@ image/profiles/lab-amd/parent
     amd-graphics
 ```
 
-That gives you "XFCE desktop on machines that have AMD GPUs". Combine
-with `school` instead for a LibreWolf-bundled student image:
+That gives you "XFCE desktop on machines that have AMD GPUs".
 
-```
-image/profiles/school-amd/parent
-    school
-    amd-graphics
-```
-
-The resolver de-duplicates the chain, so `school -> xfce-desktop` plus
-`amd-graphics` ends up as `xfce-desktop -> amd-graphics -> school -> ...`
-without `xfce-desktop` showing up twice.
+The resolver de-duplicates shared ancestors, so if `xfce-desktop`
+already inherits `amd-graphics` in its own parent chain, the
+`amd-graphics` line above is redundant but harmless — the resolver
+notices and includes it exactly once.
 
 ```sh
-make image PROFILE=school-amd
+make image PROFILE=lab-amd
 ```
