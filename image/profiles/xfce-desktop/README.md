@@ -11,8 +11,8 @@ Profile content:
 - `setup-chroot`: flips the systemd default to `graphical.target` so
   the image boots into LightDM.
 
-Combine with `school` (which declares `parent: xfce-desktop`) to get a
-locked-down student-facing image.
+Stack it as a parent under your own profile to add deployment-
+specific applications and overlays on top.
 
 ## Build
 
@@ -24,8 +24,8 @@ Produces `build/fleetboot-xfce-desktop-amd64.squashfs`.
 
 ## Why XFCE specifically
 
-XFCE is the lightest of the four "full desktop" choices we ship
-examples for — small RAM footprint, fast on older hardware,
-straightforward to lock down for a classroom. The other choices
-(`gnome-desktop`, `kde-desktop`, `cinnamon-desktop`) follow the same
-shape if you'd prefer one of them as the starting point.
+XFCE is the lightest of the four "full desktop" example choices —
+small RAM footprint, fast on older hardware, straightforward to
+lock down. The other examples (`gnome-desktop`, `kde-desktop`,
+`cinnamon-desktop`) follow the same shape if you'd prefer one of
+them as the starting point.

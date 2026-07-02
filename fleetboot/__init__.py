@@ -1,1 +1,1 @@
-"""Fleetboot — control plane and image-side reporter for the school fleet."""
+"""Fleetboot — control plane and image-side reporter for a netboot fleet."""

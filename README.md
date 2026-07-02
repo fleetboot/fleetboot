@@ -9,10 +9,18 @@ reboot / recover misbehaving hardware.
 The image the fleet boots is entirely defined by composable profiles,
 so the same control plane can drive very different deployments:
 locked-down desktop labs, headless compute nodes, dev VM farms, CI
-runners, kiosks, whatever your profile chain assembles. A worked
-example of the "school desktop" case lives under
-`image/profiles/school/` — treat it as one recipe among many, not
-the intended use.
+runners, kiosks, whatever your profile chain assembles. Only two
+kinds of profile ship upstream:
+
+- `default` — a very thin Debian base with the fleetboot reporter,
+  no desktop, no GUI, no graphics drivers. Every other profile
+  should ultimately be rooted here.
+- A handful of desktop / graphics / helper examples
+  (`cinnamon-desktop`, `xfce-desktop`, `gnome-desktop`,
+  `kde-desktop`, `intel-graphics`, `amd-graphics`,
+  `nvidia-graphics`, `ssh-debug`, `logo`) to show how to compose
+  a real image. Fork them, ignore them, or replace them entirely —
+  the resolver treats every profile the same.
 
 ## Architecture
 

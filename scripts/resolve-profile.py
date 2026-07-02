@@ -3,9 +3,9 @@
 
 Profiles can declare one or more parents via a `parent` file:
 
-  image/profiles/student/parent
+  image/profiles/my-fleet/parent
   ----------------------------------------------
-  school
+  cinnamon-desktop
   amd-graphics
   ----------------------------------------------
 

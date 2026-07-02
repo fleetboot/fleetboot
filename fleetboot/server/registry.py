@@ -3,8 +3,8 @@
 The registry is the source of truth tftpjail consults via the
 ``/machines/{mac}`` API. We back it with SQLite because it keeps deployment
 trivial (one file) while giving us atomic writes, an indexed lookup, and a
-schema we can evolve. Throughput is not a concern at our scale — a school is
-hundreds of machines, lookups happen at boot.
+schema we can evolve. Throughput is not a concern at our target scale —
+typical fleets are hundreds of machines and lookups happen at boot.
 
 Concurrency: SQLite's WAL mode plus our short-lived connections gives us
 safe concurrent reads with one writer at a time, which is the access pattern

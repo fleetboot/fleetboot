@@ -23,7 +23,7 @@ GRAPHICS_PROFILES = ("amd-graphics", "intel-graphics", "nvidia-graphics")
 
 @pytest.mark.parametrize(
     "name",
-    DESKTOP_PROFILES + GRAPHICS_PROFILES + ("default", "school"),
+    DESKTOP_PROFILES + GRAPHICS_PROFILES + ("default",),
 )
 def test_profile_dir_and_readme_exist(name: str):
     p = PROFILES_DIR / name
@@ -90,27 +90,6 @@ def test_default_profile_does_not_install_a_desktop():
         assert token not in packages, (
             f"`default` should be GUI-less but ships {token}"
         )
-
-
-def test_school_profile_declares_a_desktop_parent():
-    """school/ must inherit from some *-desktop profile. Which one
-    is the default is a choice that can change (cinnamon today,
-    xfce in the past); the contract here is just 'declares a desktop
-    ancestor'."""
-    parent_file = PROFILES_DIR / "school" / "parent"
-    assert parent_file.is_file(), "school/ must declare a parent now"
-    parents = parent_file.read_text()
-    assert any(
-        line.strip().endswith("-desktop")
-        for line in parents.splitlines()
-    ), f"expected a *-desktop parent in:\n{parents}"
-
-
-def test_school_profile_still_installs_extrepo():
-    """LibreWolf comes via extrepo; the change to inherit from
-    xfce-desktop must not drop the school-specific contribution."""
-    packages = (PROFILES_DIR / "school" / "extra-packages.list").read_text()
-    assert "extrepo" in packages
 
 
 @pytest.mark.parametrize("name", GRAPHICS_PROFILES)

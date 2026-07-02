@@ -24,8 +24,8 @@ def test_squashfs_filename_for_known_arches_with_default_profile():
 
 def test_squashfs_filename_includes_profile():
     assert (
-        squashfs_filename_for("x86_64", profile="school")
-        == "fleetboot-school-amd64.squashfs"
+        squashfs_filename_for("x86_64", profile="example-profile")
+        == "fleetboot-example-profile-amd64.squashfs"
     )
 
 
