@@ -1,0 +1,42 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      # fleetboot's tests import from tftpjail (via pyproject's
+      # `pythonpath = ["..", "../tftpjail"]`). Both repos need to be
+      # checked out as siblings for the suite to import cleanly.
+      - name: Check out fleetboot
+        uses: actions/checkout@v4
+        with:
+          path: fleetboot
+
+      - name: Check out tftpjail
+        uses: actions/checkout@v4
+        with:
+          repository: fleetboot/tftpjail
+          path: tftpjail
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          # Minimal set — fleetboot uses stdlib + a handful of runtime
+          # libs. Full runtime install isn't needed for the unit tests;
+          # httpx / pydantic / fastapi are the ones the tests touch.
+          pip install pytest pytest-cov httpx pydantic 'fastapi[standard]' jinja2
+
+      - name: Run tests
+        working-directory: fleetboot
+        run: make test

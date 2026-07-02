@@ -1,0 +1,35 @@
+#!/bin/sh
+# Install actions/runner binary + create the runner user + drop the
+# runtime script and its systemd unit at their final paths.
+
+set -eu
+
+# Version pin. Bump when GitHub releases a new stable runner.
+RUNNER_VERSION="2.319.1"
+RUNNER_ARCH="linux-x64"
+RUNNER_TARBALL="actions-runner-${RUNNER_ARCH}-${RUNNER_VERSION}.tar.gz"
+RUNNER_URL="https://github.com/actions/runner/releases/download/v${RUNNER_VERSION}/${RUNNER_TARBALL}"
+
+# Where the runner binaries live in the image.
+install -d -m 0755 -o root -g root /opt/actions-runner
+
+# Download + extract. `curl -fL` fails loud on any HTTP error.
+curl -fLo "/tmp/${RUNNER_TARBALL}" "${RUNNER_URL}"
+tar xzf "/tmp/${RUNNER_TARBALL}" -C /opt/actions-runner
+rm -f "/tmp/${RUNNER_TARBALL}"
+
+# Non-privileged local user. No shell login, no home outside
+# /opt/actions-runner, no password. Groups: none by default.
+if ! id -u runner >/dev/null 2>&1; then
+    useradd \
+        --system \
+        --home-dir /opt/actions-runner \
+        --shell /usr/sbin/nologin \
+        --comment 'GitHub Actions self-hosted runner' \
+        runner
+fi
+chown -R runner:runner /opt/actions-runner
+
+# The runner needs to enable its systemd unit unconditionally — the
+# base recipe doesn't know this profile is in the chain.
+systemctl enable fleetboot-github-runner.service
