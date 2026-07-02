@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %}fleetboot — profile {{ profile_name }} · overlay/{{ relpath }}{% endblock %}
+{% block content %}
+<h1>
+  <a href="/dashboard/profiles/{{ profile_name }}">Profile: {{ profile_name }}</a>
+  <span class="muted">/ overlay / {{ relpath }}</span>
+</h1>
+
+<p class="muted">
+  This file lands in the image at
+  <code>/{{ relpath }}</code> (via the profile's overlay tree).
+  Size: {{ size }} B.
+</p>
+
+{% if is_text %}
+<form method="post" action="/dashboard/profiles/{{ profile_name }}/overlay/{{ relpath }}">
+  <label>Contents
+    <textarea name="content" rows="24">{{ content }}</textarea>
+  </label>
+  <button type="submit">save</button>
+  <a href="/dashboard/profiles/{{ profile_name }}"
+     style="margin-left: 12px;">back</a>
+</form>
+{% else %}
+<p>
+  This file is binary — the dashboard doesn't try to edit it. Delete
+  it and re-add via <code>image/profiles/{{ profile_name }}/overlay/</code>
+  on disk, or replace using a build-time hook.
+</p>
+<form method="post"
+      action="/dashboard/profiles/{{ profile_name }}/overlay/{{ relpath }}/delete"
+      onsubmit="return confirm('Delete overlay file {{ relpath }}?');">
+  <button type="submit" class="danger">delete this file</button>
+  <a href="/dashboard/profiles/{{ profile_name }}"
+     style="margin-left: 12px;">back</a>
+</form>
+{% endif %}
+{% endblock %}

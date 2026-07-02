@@ -657,6 +657,132 @@ def test_dashboard_disabled_when_admin_secret_unset(dashboard_root: Path):
     assert response.status_code == 404
 
 
+# ---- Profile overlay-file editing ---------------------------------------
+
+
+def test_profile_edit_page_lists_overlay_files(dashboard_root: Path):
+    """The profile-edit page must surface files under overlay/ so the
+    admin can see everything the profile will drop into the image."""
+    client = _client(dashboard_root)
+    overlay = (
+        dashboard_root / "image" / "profiles" / "school" / "overlay"
+    )
+    overlay.mkdir(parents=True, exist_ok=True)
+    (overlay / "etc").mkdir()
+    (overlay / "etc" / "motd").write_text("welcome to the fleet\n")
+    (overlay / "root").mkdir()
+    (overlay / "root" / "opaque.bin").write_bytes(b"\x00\x01\x02\xff")
+
+    response = client.get(
+        "/dashboard/profiles/school", headers=_auth_header(),
+    )
+    assert response.status_code == 200
+    body = response.text
+    assert "etc/motd" in body
+    assert "root/opaque.bin" in body
+    # Text files get an edit affordance; binaries a view affordance.
+    assert ">edit</a>" in body
+    assert ">view</a>" in body
+
+
+def test_overlay_file_edit_get_shows_content_for_text(
+    dashboard_root: Path,
+):
+    client = _client(dashboard_root)
+    overlay = (
+        dashboard_root / "image" / "profiles" / "school" / "overlay"
+    )
+    overlay.mkdir(parents=True, exist_ok=True)
+    (overlay / "etc").mkdir()
+    (overlay / "etc" / "motd").write_text("hello from tests\n")
+    response = client.get(
+        "/dashboard/profiles/school/overlay/etc/motd",
+        headers=_auth_header(),
+    )
+    assert response.status_code == 200
+    assert "hello from tests" in response.text
+    assert "<textarea" in response.text
+
+
+def test_overlay_file_edit_post_writes_content(dashboard_root: Path):
+    client = _client(dashboard_root)
+    overlay = (
+        dashboard_root / "image" / "profiles" / "school" / "overlay"
+    )
+    overlay.mkdir(parents=True, exist_ok=True)
+    (overlay / "etc").mkdir()
+    target = overlay / "etc" / "motd"
+    target.write_text("stale\n")
+    response = client.post(
+        "/dashboard/profiles/school/overlay/etc/motd",
+        data={"content": "fresh contents from POST\n"},
+        headers=_auth_header(),
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+    assert target.read_text() == "fresh contents from POST\n"
+
+
+def test_overlay_file_delete_removes_and_prunes_empty_dirs(
+    dashboard_root: Path,
+):
+    client = _client(dashboard_root)
+    overlay = (
+        dashboard_root / "image" / "profiles" / "school" / "overlay"
+    )
+    overlay.mkdir(parents=True, exist_ok=True)
+    (overlay / "etc" / "systemd" / "system").mkdir(parents=True)
+    target = overlay / "etc" / "systemd" / "system" / "unit.service"
+    target.write_text("[Unit]\n")
+    response = client.post(
+        "/dashboard/profiles/school/overlay/etc/systemd/system/unit.service/delete",
+        headers=_auth_header(),
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+    assert not target.exists()
+    # Empty parents up to overlay/ get cleaned so the tree doesn't
+    # accumulate dead dirs.
+    assert not (overlay / "etc").exists()
+
+
+def test_overlay_file_create_writes_new_file(dashboard_root: Path):
+    client = _client(dashboard_root)
+    (dashboard_root / "image" / "profiles" / "school").mkdir(
+        parents=True, exist_ok=True,
+    )
+    response = client.post(
+        "/dashboard/profiles/school/overlay",
+        data={"relpath": "etc/motd", "content": "brand new\n"},
+        headers=_auth_header(),
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+    landed = (
+        dashboard_root / "image" / "profiles" / "school"
+        / "overlay" / "etc" / "motd"
+    )
+    assert landed.read_text() == "brand new\n"
+
+
+def test_overlay_traversal_attempts_are_rejected(dashboard_root: Path):
+    """`..` and absolute paths must never escape overlay/."""
+    client = _client(dashboard_root)
+    (dashboard_root / "image" / "profiles" / "school" / "overlay").mkdir(
+        parents=True, exist_ok=True,
+    )
+    for evil in ("../../etc/passwd", "/etc/passwd", "foo/../../bar"):
+        response = client.post(
+            "/dashboard/profiles/school/overlay",
+            data={"relpath": evil, "content": "pwned"},
+            headers=_auth_header(),
+            follow_redirects=False,
+        )
+        assert response.status_code == 400, (
+            f"{evil!r} should have been rejected"
+        )
+
+
 # ---- Machines ------------------------------------------------------------
 
 
