@@ -1,0 +1,15 @@
+# Runtime dependencies for GitHub's actions/runner:
+#   - libicu76: .NET globalization support the runner links against.
+#   - dotnet-runtime-8.0: not needed here — the runner ships as a
+#     self-contained tarball. Only libicu is strictly required.
+libicu76
+# Tools the on-boot registration script uses.
+curl
+jq
+# Standard runner-workflow dependencies. GitHub's own runner image
+# has hundreds; we keep this thin and let workflows install what
+# they need. Add packages here or in image/custom/ per-deployment.
+git
+ca-certificates
+unzip
+tar

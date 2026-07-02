@@ -1,0 +1,24 @@
+[Unit]
+Description=GitHub Actions self-hosted runner (ephemeral, one job per boot)
+# The runner needs the network AND the reporter's network_up state
+# (which proves DNS + gateway are reachable — otherwise the runner's
+# first HTTPS call to github.com would fail with a confusing error).
+After=network-online.target fleetboot-network-up.service
+Wants=network-online.target
+# Only bother trying if the cmdline actually has a boot token — the
+# runtime script needs it to fetch a registration token from fleetboot.
+ConditionKernelCommandLine=fleetboot.boot_token
+
+[Service]
+Type=simple
+User=runner
+Group=runner
+WorkingDirectory=/opt/actions-runner
+ExecStart=/usr/local/lib/fleetboot/register-github-runner.sh
+# `--ephemeral` runners exit after one job. We don't restart on
+# success — the machine will typically reboot to pick up the next
+# job as a fresh runner.
+Restart=no
+
+[Install]
+WantedBy=multi-user.target
