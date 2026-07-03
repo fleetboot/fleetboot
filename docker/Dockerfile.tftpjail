@@ -1,0 +1,36 @@
+# tftpjail service container.
+#
+# Runs the jailed TFTP server. Talks to the fleetboot control plane
+# purely over HTTP (see fleetboot.tftp_glue.http_intercept), so no
+# shared state or shared filesystem is required.
+#
+# Build context: workspace parent (so both fleetboot/ and tftpjail/
+# are visible). docker-compose.yml sets `context: ..` for that
+# reason.
+FROM python:3.13-slim AS runtime
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+RUN pip install --no-cache-dir httpx
+
+# The generic tftpjail Python package.
+COPY tftpjail/tftpjail /app/tftpjail
+
+# Fleetboot's tftp_glue package — the fleetboot-specific bits that
+# know how to render grub.cfg and forward grub-event RRQs to
+# fleetboot's HTTP API. tftpjail itself stays generic; the glue
+# lives here.
+COPY fleetboot/fleetboot/__init__.py /app/fleetboot/__init__.py
+COPY fleetboot/fleetboot/tftp_glue /app/fleetboot/tftp_glue
+
+ENV PYTHONPATH=/app
+ENV PUBLIC_ASSETS_DIR=/build
+ENV TFTP_PORT=69
+
+EXPOSE 69/udp
+
+CMD ["python", "-m", "fleetboot.tftp_glue"]

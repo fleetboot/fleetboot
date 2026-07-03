@@ -1,0 +1,47 @@
+# Fleetboot control plane container.
+#
+# Runs the FastAPI dashboard + boot-session mint + registry.
+# Registry SQLite lives in /data (volume-mounted). Boot artefacts
+# (kernels, initrds, squashfs) live in /build (volume-mounted).
+FROM python:3.13-slim AS runtime
+
+# `make` is here so the BuildJobManager (which invokes `make image
+# PROFILE=... ARCH=...` from inside the container) has something
+# to shell into. Actual image builds still need debos + fakemachine
+# on the host — the container ONLY covers the control-plane bits.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends make ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Runtime deps only. Test deps (pytest etc.) are not needed in
+# production.
+RUN pip install --no-cache-dir \
+    'fastapi[standard]' \
+    'uvicorn[standard]' \
+    httpx \
+    pydantic \
+    jinja2 \
+    python-multipart
+
+# fleetboot's tftp_glue imports tftpjail types (ClientIdentity).
+# We install the sibling tftpjail package so the import surface
+# resolves even in the control-plane container that never actually
+# starts a TFTP server.
+COPY tftpjail/tftpjail /app/tftpjail
+
+COPY fleetboot/fleetboot /app/fleetboot
+COPY fleetboot/image /app/image
+COPY fleetboot/scripts /app/scripts
+COPY fleetboot/Makefile /app/Makefile
+COPY fleetboot/pyproject.toml /app/
+
+ENV PYTHONPATH=/app
+ENV FLEETBOOT_DB=/data/machines.sqlite
+ENV FLEETBOOT_BOOT_DIR=/build
+ENV FLEETBOOT_REPO_ROOT=/app
+
+EXPOSE 8080
+
+CMD ["python", "-m", "fleetboot.server"]

@@ -46,11 +46,30 @@ vbox-functional-test:
 qemu-functional-test:
 	$(PYTHON) -m pytest tests/qemu_functional -v -o addopts=
 
-# Long-running dev server: fleetboot + tftpjail with the dashboard, talking
-# to a persistent registry at build/dev/machines.sqlite. Listens on
-# 0.0.0.0:8080. Browser: http://localhost:8080/dashboard.
+# Bring up fleetboot + tftpjail via docker compose. This is the
+# same command a fresh user runs — production and local dev share
+# one path (see docker-compose.yml + .env.example). Volumes bind
+# `build/` and `image/profiles/` into both containers so make image
+# on the host, and profile edits from the dashboard, are picked up
+# without a container restart.
+#
+#   cp .env.example .env  # first time only
+#   make run-server
+#
+# Foreground with logs. Ctrl-C to stop; `make down` to tear down.
 .PHONY: run-server
 run-server:
+	docker compose up --build
+
+.PHONY: down
+down:
+	docker compose down
+
+# Legacy: single-process dev harness that predates the docker-compose
+# path. Kept for the vbox / qemu functional tests that already know
+# how to talk to it. Prefer `make run-server` for interactive dev.
+.PHONY: run-server-inprocess
+run-server-inprocess:
 	$(PYTHON) -m tests.dev.run_server
 
 # Boot a transient QEMU UEFI VM that registers against the running dev

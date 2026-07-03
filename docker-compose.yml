@@ -1,0 +1,84 @@
+# Local dev + production deployment for fleetboot.
+#
+# `docker compose up --build` in this directory brings up both the
+# fleetboot control plane and the tftpjail service, mounting the
+# repo's build/ dir into both containers so image artefacts are
+# shared. The dev harness (tests/dev/run_server.py) is a legacy
+# single-process shortcut; this compose file is the supported path.
+#
+# Assumes `tftpjail/` is checked out as a sibling of `fleetboot/`
+# — the tftpjail service build context is `..` for that reason.
+#
+# Secrets: set FLEETBOOT_ADMIN_SECRET and FLEETBOOT_MINT_SECRET
+# via a `.env` file in this directory (see .env.example).
+
+services:
+  fleetboot:
+    build:
+      # Context is the workspace parent so the Dockerfile can COPY
+      # tftpjail alongside fleetboot for the (empty) type imports.
+      context: ..
+      dockerfile: fleetboot/docker/Dockerfile.fleetboot
+    image: fleetboot:local
+    container_name: fleetboot
+    ports:
+      # Dashboard + client HTTP API. Any port works — DHCP-boot
+      # clients hit fleetboot at whatever URL the renderer stamps
+      # into grub.cfg (see CLIENT_BASE_URL below).
+      - "${FLEETBOOT_PORT:-8080}:8080"
+    environment:
+      FLEETBOOT_ADMIN_SECRET: ${FLEETBOOT_ADMIN_SECRET:?set FLEETBOOT_ADMIN_SECRET in .env}
+      FLEETBOOT_MINT_SECRET: ${FLEETBOOT_MINT_SECRET:?set FLEETBOOT_MINT_SECRET in .env}
+      FLEETBOOT_LOG_LEVEL: ${FLEETBOOT_LOG_LEVEL:-info}
+    volumes:
+      # SQLite registry lives here; survives container rebuilds.
+      - fleetboot-data:/data
+      # Boot artefacts (kernels, initrds, squashfs, version sidecars,
+      # per-profile signed grub binaries). Shared read-write with the
+      # host so `make image` on the host lands new artefacts that
+      # both containers immediately see.
+      - ../fleetboot/build:/build:rw
+      # Profile tree is read-write so the dashboard's profile-edit
+      # page can persist changes back to source-of-truth.
+      - ../fleetboot/image/profiles:/app/image/profiles:rw
+      # Admin overlays / customisations.
+      - ../fleetboot/image/custom:/app/image/custom:rw
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "python -c 'import urllib.request; urllib.request.urlopen(\"http://localhost:8080/\", timeout=2)'"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  tftpjail:
+    build:
+      context: ..
+      dockerfile: fleetboot/docker/Dockerfile.tftpjail
+    image: tftpjail:local
+    container_name: tftpjail
+    # host networking is the cleanest way to serve TFTP: the UDP-69
+    # dance across a NAT boundary is famously miserable, and every
+    # client on the LAN needs to reach this UDP port directly.
+    # Override to `port: 69:69/udp` if you truly need it in a bridge.
+    network_mode: host
+    depends_on:
+      fleetboot:
+        condition: service_started
+    environment:
+      # Container-internal URL for fleetboot: the tftpjail process
+      # calls fleetboot's HTTP API to mint sessions and forward
+      # grub-events. On host networking this is localhost:PORT.
+      FLEETBOOT_URL: http://127.0.0.1:${FLEETBOOT_PORT:-8080}
+      # The URL BOOTED MACHINES use to reach fleetboot. Set this to
+      # the LAN IP + port of the host running compose so grub.cfg
+      # bakes in something clients can actually resolve.
+      CLIENT_BASE_URL: ${CLIENT_BASE_URL:?set CLIENT_BASE_URL in .env to your LAN URL, e.g. http://192.168.25.13:8080}
+      FLEETBOOT_MINT_SECRET: ${FLEETBOOT_MINT_SECRET:?set FLEETBOOT_MINT_SECRET in .env}
+      TFTP_PORT: ${TFTP_PORT:-69}
+      TFTPJAIL_LOG_LEVEL: ${TFTPJAIL_LOG_LEVEL:-info}
+    volumes:
+      - ../fleetboot/build:/build:ro
+    restart: unless-stopped
+
+volumes:
+  fleetboot-data:

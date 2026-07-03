@@ -1,0 +1,16 @@
+# Keep the build context lean — the fleetboot dashboard container
+# ships without our local build artefacts, dev harness leftovers,
+# or IDE files.
+build/
+image/profiles_resolved/
+image/fleetboot_pkg/
+image/openschool_pkg/
+**/__pycache__/
+**/*.pyc
+.git/
+.github/
+.vscode/
+.idea/
+tests/
+docs/
+.env

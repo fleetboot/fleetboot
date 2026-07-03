@@ -55,18 +55,40 @@ PXE chain unfolding in real time.
 
 ## Getting started
 
-Requires `debos`, `fakemachine`, `python3`, and a checkout of
-[`tftpjail`](https://github.com/fleetboot/tftpjail) next to this repo.
+Local dev and production share one deployment path: **docker
+compose**. Check out this repo and its sibling
+[`tftpjail`](https://github.com/fleetboot/tftpjail):
 
 ```
-# Build an image (any profile you have defined works here)
-make image PROFILE=default ARCH=amd64
+git clone https://github.com/fleetboot/fleetboot.git
+git clone https://github.com/fleetboot/tftpjail.git
+cd fleetboot
+```
 
-# Run the control plane + tftpjail (single process, dev mode)
+Configure a `.env` file with your secrets and the LAN URL clients
+will use to reach the control plane, then bring the stack up:
+
+```
+cp .env.example .env
+# edit .env: set FLEETBOOT_ADMIN_SECRET, FLEETBOOT_MINT_SECRET,
+#   and CLIENT_BASE_URL (e.g. http://192.168.1.50:8080)
 make run-server
-
-# Point a machine or VM at DHCP + browse http://localhost:8080/dashboard
 ```
+
+That brings up two containers — `fleetboot` (control plane +
+dashboard on port 8080) and `tftpjail` (jailed TFTP server on UDP
+port 69, host-networked). Point a booted machine at the LAN via DHCP
+and browse to `http://localhost:8080/dashboard`.
+
+Image builds still run on the host (they need `debos` + `fakemachine`
+with kernel access, which containers don't get):
+
+```
+make image PROFILE=default ARCH=amd64
+```
+
+Artefacts land in `build/` which is bind-mounted into both containers,
+so a new build is immediately picked up without a restart.
 
 The dashboard walks you through enrolling a machine, defining
 auto-enrol rules (by MAC prefix or IP CIDR), and triggering builds.
