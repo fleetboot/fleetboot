@@ -73,6 +73,13 @@
         {% else %}
           <span class="muted">—</span>
         {% endif %}
+        {# Soft-reboot signal: when armed, /status replies tell the
+           machine to systemctl reboot on its next heartbeat. Cleared
+           implicitly when the machine PXE-mints a fresh session. #}
+        {% if m.pending_reboot %}
+        <br><span class="version-stale"
+                 title="Soft-reboot armed — the machine will systemctl reboot on its next heartbeat">↻ reboot armed</span>
+        {% endif %}
       </td>
       <td>
         {% set seen = last_seen.get(m.mac) %}
