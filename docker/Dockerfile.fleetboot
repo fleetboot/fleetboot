@@ -5,13 +5,47 @@
 # (kernels, initrds, squashfs) live in /build (volume-mounted).
 FROM python:3.13-slim AS runtime
 
-# `make` is here so the BuildJobManager (which invokes `make image
-# PROFILE=... ARCH=...` from inside the container) has something
-# to shell into. Actual image builds still need debos + fakemachine
-# on the host — the container ONLY covers the control-plane bits.
+# The fleetboot container is both the control plane AND the image
+# builder. `make image` shells out to debos, which uses fakemachine
+# to spin up a KVM guest for the actual mmdebstrap + mksquashfs
+# work. That means the container needs:
+#   - make (Makefile driver)
+#   - debos + fakemachine (VM-orchestrated build)
+#   - squashfs-tools, mmdebstrap (called from inside the fakemachine
+#     guest, but present so debos can validate before launching)
+#   - qemu-utils (fakemachine's KVM path)
+#   - curl + ca-certificates (network fetches during setup-chroot)
+#   - jq (helper commonly used in profile setup scripts)
+# The host must pass /dev/kvm through — see docker-compose.yml.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends make ca-certificates \
+    && apt-get install -y --no-install-recommends \
+         make \
+         ca-certificates \
+         curl \
+         jq \
+         debos \
+         fakemachine \
+         squashfs-tools \
+         mmdebstrap \
+         qemu-utils \
+         qemu-system-x86 \
+         e2fsprogs \
+         parted \
+         dosfstools \
+         kpartx \
+         xz-utils \
+         zstd \
+         gzip \
+         busybox-static \
+         kmod \
     && rm -rf /var/lib/apt/lists/*
+
+# Pre-create the `kvm` group inside the container so
+# `group_add: - kvm` in docker-compose resolves. The build-time
+# GID isn't required to match the host's — the container process
+# runs as root and can open /dev/kvm regardless — but the group
+# entry must exist by name for Docker to accept the group_add.
+RUN groupadd -r kvm || true
 
 WORKDIR /app
 
@@ -39,7 +73,7 @@ COPY fleetboot/pyproject.toml /app/
 
 ENV PYTHONPATH=/app
 ENV FLEETBOOT_DB=/data/machines.sqlite
-ENV FLEETBOOT_BOOT_DIR=/build
+ENV FLEETBOOT_BOOT_DIR=/app/build
 ENV FLEETBOOT_REPO_ROOT=/app
 
 EXPOSE 8080
