@@ -9,8 +9,8 @@
     <code>{{ machine.mac }}</code>
     <span class="muted">(no hostname reported)</span>
   {% endif %}
-  {% if auto_refresh %}
-    <span class="muted">— live ({{ auto_refresh }}s)</span>
+  {% if polling_seconds %}
+    <span class="muted">— live (polling every {{ polling_seconds }}s)</span>
     &nbsp;<a class="muted" href="?">[stop]</a>
   {% else %}
     &nbsp;<a class="muted" href="?refresh=5">[live view]</a>
@@ -23,7 +23,7 @@
 <table>
   <tbody>
     <tr><th>MAC</th><td><code>{{ machine.mac }}</code></td></tr>
-    <tr><th>IP address</th><td>
+    <tr><th>IP address</th><td data-role="ip">
       {% if machine.last_ip %}
         <code>{{ machine.last_ip }}</code>
         <span class="muted">— observed {{ machine.last_ip_at }}</span>
@@ -67,14 +67,14 @@
         <span class="muted">—</span>
       {% endif %}
     </td></tr>
-    <tr><th>Latest state</th><td>
+    <tr><th>Latest state</th><td data-role="current-state">
       {% if current_state %}
         <span class="state-{{ current_state }}">{{ current_state }}</span>
       {% else %}
         <span class="muted">—</span>
       {% endif %}
     </td></tr>
-    <tr><th>Pending reboot</th><td>
+    <tr><th>Pending reboot</th><td data-role="pending-reboot">
       {% if machine.pending_reboot %}
         <span class="version-stale"
               title="Soft-reboot signal is armed. The next /status heartbeat from this machine will carry pending_reboot=true, and the in-image reporter will systemctl reboot when it sees that. Cleared implicitly when the machine mints a fresh boot session (i.e. re-PXEs).">
@@ -84,7 +84,7 @@
         <span class="muted">not armed</span>
       {% endif %}
     </td></tr>
-    <tr><th>Last seen</th><td>
+    <tr><th>Last seen</th><td data-role="last-seen">
       {% if last_seen %}
         {% if last_seen.stale %}
           <span class="version-stale">{{ last_seen.label }}</span>
@@ -237,4 +237,47 @@
       style="display:inline">
   <button type="submit" class="danger">delete only</button>
 </form>
+{% endblock %}
+
+{% block live_view %}
+{% if polling_seconds %}
+<script>
+(function() {
+  const mac = {{ machine.mac | tojson }};
+  function renderState(state) {
+    if (!state) return '<span class="muted">&mdash;</span>';
+    return '<span class="state-' + escapeHtml(state) + '">' + escapeHtml(state) + '</span>';
+  }
+  function renderPending(armed) {
+    return armed
+      ? '<span class="version-stale" title="Soft-reboot signal is armed. The next /status heartbeat from this machine will carry pending_reboot=true, and the in-image reporter will systemctl reboot when it sees that.">↻ armed — machine will reboot on its next heartbeat</span>'
+      : '<span class="muted">not armed</span>';
+  }
+  function renderLastSeen(ls) {
+    if (!ls) return '<span class="muted">&mdash;</span>';
+    if (ls.stale) {
+      return '<span class="version-stale">' + escapeHtml(ls.label) + '</span> ' +
+             '<span class="muted">— machine may be offline</span>';
+    }
+    return escapeHtml(ls.label);
+  }
+  function renderIp(m) {
+    if (!m.last_ip) return '<span class="muted">&mdash;</span>';
+    return '<code>' + escapeHtml(m.last_ip) + '</code>';
+  }
+  function apply(m) {
+    const set = function(role, html) {
+      const el = document.querySelector('[data-role="' + role + '"]');
+      if (el) el.innerHTML = html;
+    };
+    set('current-state', renderState(m.current_state));
+    set('pending-reboot', renderPending(m.pending_reboot));
+    set('last-seen', renderLastSeen(m.last_seen));
+    set('ip', renderIp(m));
+  }
+  startLiveView('/dashboard/api/machine-snapshot/' + encodeURIComponent(mac),
+                apply, {{ polling_seconds }} * 1000);
+})();
+</script>
+{% endif %}
 {% endblock %}

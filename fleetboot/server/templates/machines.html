@@ -161,112 +161,66 @@
   <button type="submit">enrol</button>
 </form>
 
+{% endblock %}
+
+{% block live_view %}
 {% if polling_seconds %}
 <script>
-// Live view: poll /dashboard/api/machines-snapshot every N seconds and
-// patch specific cells in place. No full-page reload, no meta-refresh.
-// Falls back to a full reload if the polling loop fails badly (auth
-// expired, network gone). Anything the JSON snapshot doesn't cover
-// (profile, arch, source, actions) is static per-row and doesn't
-// change without an admin action, so we don't touch those cells.
+// Live view for the machines list. Uses the shared startLiveView
+// helper from base.html to poll for a JSON snapshot every N seconds
+// and patch changing cells in place.
 (function() {
-  const intervalMs = {{ polling_seconds }} * 1000;
-  let inFlight = false;
-  let failureStreak = 0;
-
-  function escapeHtml(s) {
-    return String(s == null ? "" : s)
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;");
-  }
-
   function renderState(m) {
     const parts = [];
     if (m.state) {
-      parts.push(`<span class="state-${escapeHtml(m.state)}">${escapeHtml(m.state)}</span>`);
+      parts.push('<span class="state-' + escapeHtml(m.state) + '">' + escapeHtml(m.state) + '</span>');
     } else {
       parts.push('<span class="muted">&mdash;</span>');
     }
     if (m.pending_reboot) {
-      parts.push(
-        '<br><span class="version-stale" ' +
-        'title="Soft-reboot armed — the machine will systemctl reboot on its next heartbeat">' +
-        '↻ reboot armed</span>'
-      );
+      parts.push('<br><span class="version-stale" title="Soft-reboot armed — the machine will systemctl reboot on its next heartbeat">↻ reboot armed</span>');
     }
     return parts.join("");
   }
-
   function renderBootVersion(m) {
     if (!m.boot_version) return '<span class="muted">&mdash;</span>';
     const bv = escapeHtml(m.boot_version);
     if (m.latest_version && m.boot_version === m.latest_version) {
-      return `<span class="version-current" title="Up to date with ${escapeHtml(m.latest_version)}">${bv}</span>`;
+      return '<span class="version-current" title="Up to date with ' + escapeHtml(m.latest_version) + '">' + bv + '</span>';
     }
     if (m.latest_version) {
-      return `<span class="version-stale" title="Latest is ${escapeHtml(m.latest_version)} — reboot to update">${bv}</span>`;
+      return '<span class="version-stale" title="Latest is ' + escapeHtml(m.latest_version) + ' — reboot to update">' + bv + '</span>';
     }
-    return `<span class="muted" title="No sidecar version found in build/">${bv}</span>`;
+    return '<span class="muted" title="No sidecar version found in build/">' + bv + '</span>';
   }
-
   function renderLastSeen(m) {
     if (!m.last_seen) return '<span class="muted">&mdash;</span>';
     const label = escapeHtml(m.last_seen.label);
     if (m.last_seen.stale) {
-      return `<span class="version-stale" title="No heartbeat for over 6 min — machine may be offline">${label}</span>`;
+      return '<span class="version-stale" title="No heartbeat for over 6 min — machine may be offline">' + label + '</span>';
     }
-    return `<span class="muted">${label}</span>`;
+    return '<span class="muted">' + label + '</span>';
   }
-
-  function applySnapshot(data) {
+  function apply(data) {
     for (const m of data.machines) {
-      const row = document.querySelector(`tr[data-mac="${m.mac}"]`);
-      if (!row) continue;  // machine added since last full page load
-      const state = row.querySelector('[data-role="state"]');
-      const bv = row.querySelector('[data-role="boot-version"]');
-      const ls = row.querySelector('[data-role="last-seen"]');
-      const ip = row.querySelector('[data-role="last-ip"]');
-      if (state) state.innerHTML = renderState(m);
-      if (bv) bv.innerHTML = renderBootVersion(m);
-      if (ls) ls.innerHTML = renderLastSeen(m);
-      if (ip) {
-        if (m.last_ip) {
-          ip.hidden = false;
-          ip.textContent = m.last_ip;
-        } else {
-          ip.hidden = true;
-          ip.textContent = "";
-        }
+      const row = document.querySelector('tr[data-mac="' + m.mac + '"]');
+      if (!row) continue;
+      const cells = {
+        state: row.querySelector('[data-role="state"]'),
+        boot: row.querySelector('[data-role="boot-version"]'),
+        seen: row.querySelector('[data-role="last-seen"]'),
+        ip: row.querySelector('[data-role="last-ip"]'),
+      };
+      if (cells.state) cells.state.innerHTML = renderState(m);
+      if (cells.boot) cells.boot.innerHTML = renderBootVersion(m);
+      if (cells.seen) cells.seen.innerHTML = renderLastSeen(m);
+      if (cells.ip) {
+        if (m.last_ip) { cells.ip.hidden = false; cells.ip.textContent = m.last_ip; }
+        else { cells.ip.hidden = true; cells.ip.textContent = ""; }
       }
     }
   }
-
-  async function poll() {
-    if (inFlight) return;
-    inFlight = true;
-    try {
-      const r = await fetch('/dashboard/api/machines-snapshot', {
-        credentials: 'same-origin',
-        headers: { 'Accept': 'application/json' },
-      });
-      if (!r.ok) throw new Error('HTTP ' + r.status);
-      applySnapshot(await r.json());
-      failureStreak = 0;
-    } catch (e) {
-      failureStreak++;
-      // If we've been failing for a while (network gone, auth expired),
-      // full-reload the page — the meta status is at least honest that
-      // way (basic-auth prompt will re-appear if that's the issue).
-      if (failureStreak >= 5) window.location.reload();
-    } finally {
-      inFlight = false;
-    }
-  }
-
-  poll();
-  setInterval(poll, intervalMs);
+  startLiveView('/dashboard/api/machines-snapshot', apply, {{ polling_seconds }} * 1000);
 })();
 </script>
 {% endif %}

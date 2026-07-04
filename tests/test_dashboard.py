@@ -121,13 +121,17 @@ def test_dashboard_no_refresh_meta_when_unset(dashboard_root: Path):
     assert "http-equiv=\"refresh\"" not in response.text
 
 
-def test_events_page_supports_refresh(dashboard_root: Path):
+def test_events_page_live_view_uses_js_polling(dashboard_root: Path):
+    """`?refresh=5` on the events page switches on JS polling of
+    /dashboard/api/events-snapshot — no meta-refresh, no full reload."""
     client = _client(dashboard_root)
     response = client.get(
         "/dashboard/events?refresh=5", headers=_auth_header()
     )
     assert response.status_code == 200
-    assert '<meta http-equiv="refresh" content="5">' in response.text
+    assert 'polling every 5s' in response.text
+    assert '/dashboard/api/events-snapshot' in response.text
+    assert '<meta http-equiv="refresh"' not in response.text
 
 
 def test_machines_page_colours_version_current_and_stale(
@@ -592,7 +596,9 @@ def test_machine_detail_supports_refresh_query_param(dashboard_root: Path):
         headers=_auth_header(),
     )
     assert response.status_code == 200
-    assert '<meta http-equiv="refresh" content="5">' in response.text
+    assert 'polling every 5s' in response.text
+    assert '/dashboard/api/machine-snapshot/' in response.text
+    assert '<meta http-equiv="refresh"' not in response.text
 
 
 def test_machines_page_shows_last_seen_and_stale_indicator(

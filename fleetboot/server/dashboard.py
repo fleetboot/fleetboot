@@ -102,6 +102,104 @@ def build_dashboard_router(
         )
 
     @router.get(
+        "/dashboard/api/events-snapshot",
+        dependencies=[Depends(require_admin)],
+    )
+    def events_snapshot(
+        mac: Optional[str] = None, limit: int = 200,
+    ) -> dict:
+        """JSON snapshot for the /dashboard/events live view."""
+        limit = max(1, min(int(limit), 1000))
+        events = registry.recent_boot_events(limit=limit, mac=mac)
+        return {
+            "events": [
+                {
+                    "occurred_at": e.occurred_at,
+                    "mac": e.mac,
+                    "state": e.state,
+                    "detail": e.detail or "",
+                }
+                for e in events
+            ],
+            "limit": limit,
+            "mac_filter": mac,
+        }
+
+    @router.get(
+        "/dashboard/api/builds-snapshot",
+        dependencies=[Depends(require_admin)],
+    )
+    def builds_snapshot() -> dict:
+        """JSON snapshot for the /dashboard/builds live view.
+
+        Live-view viewers care about: which builds are still running,
+        their state and elapsed time, and the artifact metadata once
+        they complete."""
+        jobs = builds.list_jobs()
+        return {
+            "running": builds.is_running(),
+            "jobs": [
+                {
+                    "job_id": j.job_id,
+                    "profile": j.profile,
+                    "architecture": j.architecture,
+                    "state": j.state.value,
+                    "exit_code": j.exit_code,
+                    "started_at": j.started_at,
+                    "finished_at": j.finished_at,
+                    "artifact": (
+                        _artifact_for(boot_dir, j.profile, j.architecture)
+                        if j.state.value == "succeeded" else None
+                    ),
+                }
+                for j in jobs
+            ],
+        }
+
+    @router.get(
+        "/dashboard/api/machine-snapshot/{mac}",
+        dependencies=[Depends(require_admin)],
+    )
+    def machine_snapshot(mac: str) -> dict:
+        """JSON snapshot for the /dashboard/machines/{mac} live view."""
+        machine = registry.lookup(mac)
+        if machine is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="machine not found",
+            )
+        states_by_mac = _states_by_mac(sessions)
+        last_seen = _format_last_seen(sessions.last_seen_by_mac())
+        events = registry.recent_boot_events(limit=30, mac=mac)
+        hardware = None
+        if machine.last_hardware:
+            import json as _json
+            try:
+                hardware = _json.loads(machine.last_hardware)
+            except _json.JSONDecodeError:
+                hardware = None
+        return {
+            "hostname": machine.hostname,
+            "last_ip": machine.last_ip,
+            "boot_version": machine.boot_version,
+            "boot_version_seen_at": machine.boot_version_seen_at,
+            "pending_reboot": bool(machine.pending_reboot),
+            "current_state": states_by_mac.get(machine.mac),
+            "last_seen": last_seen.get(machine.mac),
+            "last_diagnostics": machine.last_diagnostics,
+            "last_diagnostics_at": machine.last_diagnostics_at,
+            "events": [
+                {
+                    "occurred_at": e.occurred_at,
+                    "state": e.state,
+                    "detail": e.detail or "",
+                }
+                for e in events
+            ],
+            "hardware": hardware,
+        }
+
+    @router.get(
         "/dashboard/api/machines-snapshot",
         dependencies=[Depends(require_admin)],
     )
@@ -752,7 +850,11 @@ def build_dashboard_router(
                 "current_state": states_by_mac.get(machine.mac),
                 "latest_versions": latest_versions,
                 "last_seen": last_seen.get(machine.mac),
-                "auto_refresh": _clamp_refresh(refresh),
+                # Client-side JS polling (see machine_detail.html).
+                # No meta-refresh; `_clamp_refresh` still constrains
+                # the value so a junk query can't drive the polling
+                # loop into a hot spin.
+                "polling_seconds": _clamp_refresh(refresh),
                 "hardware": hardware,
             },
         )
@@ -778,7 +880,7 @@ def build_dashboard_router(
                 "events": events,
                 "mac_filter": mac,
                 "limit": limit,
-                "auto_refresh": _clamp_refresh(refresh),
+                "polling_seconds": _clamp_refresh(refresh),
             },
         )
 
@@ -788,7 +890,9 @@ def build_dashboard_router(
         dependencies=[Depends(require_admin)],
     )
     def list_builds(
-        request: Request, error: Optional[str] = None,
+        request: Request,
+        error: Optional[str] = None,
+        refresh: Optional[int] = None,
     ) -> HTMLResponse:
         jobs = builds.list_jobs()
         # Successful builds: surface the artifact filename + size on
@@ -808,6 +912,7 @@ def build_dashboard_router(
                 "profile_names": _list_profile_names(profiles_root),
                 "artifacts": artifacts,
                 "error": error,
+                "polling_seconds": _clamp_refresh(refresh),
             },
         )
 

@@ -5,14 +5,19 @@
   {% if mac_filter %}
     <span class="muted">— {{ mac_filter }}</span>
   {% endif %}
+  {% if polling_seconds %}
+    <span class="muted">— live (polling every {{ polling_seconds }}s)</span>
+    &nbsp;<a class="muted" href="/dashboard/events{% if mac_filter %}?mac={{ mac_filter }}{% endif %}">[stop]</a>
+  {% else %}
+    &nbsp;<a class="muted" href="/dashboard/events?refresh=5{% if mac_filter %}&mac={{ mac_filter }}{% endif %}">[live view]</a>
+  {% endif %}
 </h1>
 
 {% if mac_filter %}
 <p><a href="/dashboard/events">show all machines</a></p>
 {% endif %}
 
-{% if events %}
-<table>
+<table data-role="events-table">
   <thead>
     <tr>
       <th>When</th>
@@ -21,7 +26,7 @@
       <th>Detail</th>
     </tr>
   </thead>
-  <tbody>
+  <tbody data-role="events-body">
     {% for e in events %}
     <tr>
       <td><span class="muted">{{ e.occurred_at }}</span></td>
@@ -37,8 +42,47 @@
     {% endfor %}
   </tbody>
 </table>
-<p class="muted">Showing up to {{ limit }} events, newest first.</p>
+<p class="muted" data-role="events-status">
+{% if events %}
+Showing up to {{ limit }} events, newest first.
 {% else %}
-<p class="muted">No boot events recorded yet.</p>
+No boot events recorded yet.
+{% endif %}
+</p>
+{% endblock %}
+
+{% block live_view %}
+{% if polling_seconds %}
+<script>
+(function() {
+  const macFilter = {{ (mac_filter or '') | tojson }};
+  const limit = {{ limit }};
+  function apply(data) {
+    const body = document.querySelector('[data-role="events-body"]');
+    const status = document.querySelector('[data-role="events-status"]');
+    if (!body) return;
+    const rows = data.events.map(function(e) {
+      const filterLink = macFilter ? '' :
+        '&nbsp;<a class="muted" href="/dashboard/events?mac=' + escapeHtml(e.mac) + '">[only this]</a>';
+      return '<tr>' +
+        '<td><span class="muted">' + escapeHtml(e.occurred_at) + '</span></td>' +
+        '<td><code>' + escapeHtml(e.mac) + '</code>' + filterLink + '</td>' +
+        '<td><span class="state-' + escapeHtml(e.state) + '">' + escapeHtml(e.state) + '</span></td>' +
+        '<td>' + escapeHtml(e.detail) + '</td>' +
+        '</tr>';
+    }).join('');
+    body.innerHTML = rows;
+    if (status) {
+      status.textContent = data.events.length === 0
+        ? 'No boot events recorded yet.'
+        : 'Showing up to ' + data.limit + ' events, newest first.';
+    }
+  }
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (macFilter) params.set('mac', macFilter);
+  startLiveView('/dashboard/api/events-snapshot?' + params.toString(), apply,
+                {{ polling_seconds }} * 1000);
+})();
+</script>
 {% endif %}
 {% endblock %}
