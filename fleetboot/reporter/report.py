@@ -354,6 +354,7 @@ def report_state(
     settings: ReporterSettings | None = None,
     client: httpx.Client | None = None,
     timeout: float = DEFAULT_TIMEOUT_SECONDS,
+    handle_pending_reboot: bool = True,
 ) -> None:
     """Send one report. Raises on transport or HTTP errors.
 
@@ -362,6 +363,12 @@ def report_state(
 
     `settings` and `client` are injectable so tests can drive this end-to-end
     against the FastAPI app without hitting a real network.
+
+    `handle_pending_reboot` controls the soft-reboot signal path. The CLI
+    entry point leaves it True; the internal acknowledgement call turns
+    it False so we don't recurse — the ack POST would see the same
+    pending_reboot=true in the reply otherwise (it's not cleared until
+    the machine re-PXEs and mints a fresh session).
     """
     effective_settings = settings if settings is not None else read_settings()
     payload: dict[str, str] = {"state": _state_to_string(state)}
@@ -418,7 +425,28 @@ def report_state(
         body = response.json() or {}
     except Exception:
         body = {}
-    if body.get("pending_reboot"):
+    if handle_pending_reboot and body.get("pending_reboot"):
+        # Best-effort ack: report a `rebooting` custom state BEFORE
+        # firing systemctl so the dashboard shows the machine picked
+        # up the signal. Reusing report_state with
+        # handle_pending_reboot=False prevents infinite recursion —
+        # the ack's own /status reply will still carry pending_reboot=true
+        # (the flag only clears when the machine mints a new session
+        # after PXE), and we don't want to loop.
+        try:
+            report_state(
+                "rebooting",
+                detail="soft-reboot signal acknowledged",
+                settings=effective_settings,
+                client=client,
+                timeout=timeout,
+                handle_pending_reboot=False,
+            )
+        except (ReportFailedError, httpx.HTTPError):
+            # If the ack fails the reboot still proceeds — losing
+            # the ack state is a minor UX regression but not worth
+            # blocking the reboot for.
+            pass
         try:
             import subprocess
             subprocess.Popen(
