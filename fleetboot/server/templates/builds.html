@@ -1,7 +1,14 @@
 {% extends "base.html" %}
 {% block title %}fleetboot — builds{% endblock %}
 {% block content %}
-<h1>Builds</h1>
+<h1>Builds
+  {% if polling_seconds %}
+    <span class="muted">— live (polling every {{ polling_seconds }}s)</span>
+    &nbsp;<a class="muted" href="/dashboard/builds">[stop]</a>
+  {% else %}
+    &nbsp;<a class="muted" href="/dashboard/builds?refresh=5">[live view]</a>
+  {% endif %}
+</h1>
 
 {% if error == "already-running" %}
 <p class="state-failed">A build is already running — wait for it to finish before starting another.</p>
@@ -44,21 +51,21 @@
   <tbody>
     {% for j in jobs %}
     {% set art = artifacts.get(j.job_id) %}
-    <tr>
+    <tr data-job-id="{{ j.job_id }}">
       <td><code>{{ j.job_id }}</code></td>
       <td>{{ j.profile }}</td>
       <td>{{ j.architecture }}</td>
-      <td><span class="state-{{ j.state.value }}">{{ j.state.value }}</span></td>
-      <td>{{ j.exit_code if j.exit_code is not none else "—" }}</td>
+      <td data-role="state"><span class="state-{{ j.state.value }}">{{ j.state.value }}</span></td>
+      <td data-role="exit">{{ j.exit_code if j.exit_code is not none else "—" }}</td>
       <td><span class="muted">{{ j.started_at | int }}</span></td>
-      <td>
+      <td data-role="duration">
         {% if j.finished_at %}
           {{ (j.finished_at - j.started_at) | round(1) }}s
         {% else %}
           <span class="muted">…</span>
         {% endif %}
       </td>
-      <td>
+      <td data-role="artifact">
         {% if art %}
           <code>{{ art.name }}</code>
           <br><span class="muted">{{ art.size_mb }} MB · {{ art.mtime }}</span>
@@ -73,5 +80,55 @@
 </table>
 {% else %}
 <p class="muted">No builds yet.</p>
+{% endif %}
+{% endblock %}
+
+{% block live_view %}
+{% if polling_seconds %}
+<script>
+(function() {
+  function renderState(j) {
+    return '<span class="state-' + escapeHtml(j.state) + '">' + escapeHtml(j.state) + '</span>';
+  }
+  function renderDuration(j) {
+    if (j.finished_at) {
+      const secs = Math.round((j.finished_at - j.started_at) * 10) / 10;
+      return secs + 's';
+    }
+    return '<span class="muted">…</span>';
+  }
+  function renderArtifact(j) {
+    if (!j.artifact) return '<span class="muted">&mdash;</span>';
+    return '<code>' + escapeHtml(j.artifact.name) + '</code>' +
+      '<br><span class="muted">' + j.artifact.size_mb + ' MB · ' +
+      escapeHtml(j.artifact.mtime) + '</span>';
+  }
+  function apply(data) {
+    for (const j of data.jobs) {
+      const row = document.querySelector('tr[data-job-id="' + j.job_id + '"]');
+      if (!row) continue;
+      const state = row.querySelector('[data-role="state"]');
+      const exit = row.querySelector('[data-role="exit"]');
+      const duration = row.querySelector('[data-role="duration"]');
+      const artifact = row.querySelector('[data-role="artifact"]');
+      if (state) state.innerHTML = renderState(j);
+      if (exit) exit.textContent = j.exit_code == null ? '—' : String(j.exit_code);
+      if (duration) duration.innerHTML = renderDuration(j);
+      if (artifact) artifact.innerHTML = renderArtifact(j);
+    }
+    // If a job appears that isn't in the current DOM, a full reload
+    // brings it in — polling can't sensibly grow the table itself
+    // because the row shape includes URL segments we'd have to
+    // template client-side.
+    const knownIds = new Set(Array.from(
+      document.querySelectorAll('tr[data-job-id]')
+    ).map(r => r.dataset.jobId));
+    const newOnes = data.jobs.filter(j => !knownIds.has(j.job_id));
+    if (newOnes.length > 0) window.location.reload();
+  }
+  startLiveView('/dashboard/api/builds-snapshot', apply,
+                {{ polling_seconds }} * 1000);
+})();
+</script>
 {% endif %}
 {% endblock %}

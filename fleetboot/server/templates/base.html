@@ -2,9 +2,6 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  {% if auto_refresh %}
-  <meta http-equiv="refresh" content="{{ auto_refresh }}">
-  {% endif %}
   <title>{% block title %}fleetboot{% endblock %}</title>
   <style>
     :root { --fg: #222; --muted: #666; --bg: #fafafa; --accent: #1f78b4;
@@ -69,5 +66,45 @@
   <main>
     {% block content %}{% endblock %}
   </main>
+  <script>
+  // Shared live-view helper. Pages that want to refresh in place set
+  // `polling_seconds` in their template context and register a
+  // page-specific apply function via startLiveView(url, applyFn).
+  window.startLiveView = function(url, applyFn, intervalMs) {
+    let inFlight = false;
+    let failureStreak = 0;
+    async function poll() {
+      if (inFlight) return;
+      inFlight = true;
+      try {
+        const r = await fetch(url, {
+          credentials: 'same-origin',
+          headers: { 'Accept': 'application/json' },
+        });
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        applyFn(await r.json());
+        failureStreak = 0;
+      } catch (e) {
+        failureStreak++;
+        // Prolonged failure = probably auth expired / network gone;
+        // fall back to a full reload so the basic-auth prompt or a
+        // clearer error page reappears.
+        if (failureStreak >= 5) window.location.reload();
+      } finally {
+        inFlight = false;
+      }
+    }
+    poll();
+    setInterval(poll, intervalMs);
+  };
+  window.escapeHtml = function(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  };
+  </script>
+  {% block live_view %}{% endblock %}
 </body>
 </html>
