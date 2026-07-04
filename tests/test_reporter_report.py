@@ -102,3 +102,69 @@ def test_main_cli_usage_error_with_no_args(capsys):
     assert exit_code == 2
     err = capsys.readouterr().err
     assert "usage" in err
+
+
+def test_reporter_acks_soft_reboot_with_rebooting_state(monkeypatch, tmp_path):
+    """When /status replies with pending_reboot=true the reporter must
+    (a) POST a `rebooting` custom state so the dashboard shows the
+    signal was acknowledged, and (b) invoke systemctl reboot. The
+    ack POST must NOT recurse (its own reply also carries
+    pending_reboot=true until the machine PXE-mints)."""
+    from pathlib import Path
+    from fleetboot.server.registry import MachineRegistry
+
+    store = BootSessionStore()
+    registry = MachineRegistry(Path(tmp_path) / "machines.sqlite")
+    registry.enroll(
+        mac="aa:bb:cc:dd:ee:ff", profile_name="default",
+        architecture="x86_64", platform="efi",
+    )
+    registry.set_pending_reboot("aa:bb:cc:dd:ee:ff", True)
+    session = store.mint("aa:bb:cc:dd:ee:ff")
+    settings = ReporterSettings(
+        server_url="http://testserver/", boot_token=session.token,
+    )
+    reboot_calls = []
+
+    # Substitute subprocess.Popen ONLY for the systemctl-reboot call
+    # in report.py — other Popen callers in the reporter (e.g.
+    # subprocess.run inside diagnostics collection) still need real
+    # subprocesses to succeed.
+    import subprocess as _subprocess
+    real_popen = _subprocess.Popen
+
+    class _FakeProc:
+        returncode = 0
+        def __enter__(self): return self
+        def __exit__(self, *_): return False
+        def wait(self, timeout=None): return 0
+        def communicate(self, *_a, **_kw): return (b"", b"")
+
+    def fake_popen(argv, *a, **kw):
+        # ONLY intercept the exact reboot invocations from report.py.
+        # The reporter also shells out to `systemctl list-units` etc.
+        # for diagnostics via subprocess.run (which internally calls
+        # Popen); those must reach the real Popen unmodified.
+        if argv == ["systemctl", "reboot"] or argv == ["reboot"]:
+            reboot_calls.append(argv)
+            return _FakeProc()
+        return real_popen(argv, *a, **kw)
+
+    monkeypatch.setattr(_subprocess, "Popen", fake_popen)
+    # Suppress the "current-state" file write which needs /run/fleetboot.
+    monkeypatch.setattr(
+        "fleetboot.reporter.report._remember_current_state",
+        lambda _s: None,
+    )
+    app = create_app(sessions=store, registry=registry)
+    with TestClient(app) as client:
+        report_state(
+            BootState.NETWORK_UP, settings=settings, client=client,
+        )
+    # systemctl reboot fired.
+    assert reboot_calls == [["systemctl", "reboot"]]
+    # `rebooting` state landed as a boot event on the machine row.
+    events = registry.recent_boot_events(mac="aa:bb:cc:dd:ee:ff")
+    assert any(e.state == "rebooting" for e in events), (
+        f"expected `rebooting` in {[e.state for e in events]}"
+    )
