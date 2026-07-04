@@ -19,16 +19,30 @@ tar xzf "/tmp/${RUNNER_TARBALL}" -C /opt/actions-runner
 rm -f "/tmp/${RUNNER_TARBALL}"
 
 # Non-privileged local user. No shell login, no home outside
-# /opt/actions-runner, no password. Groups: none by default.
+# /opt/actions-runner, no password. Groups:
+#   - tty      : write to /dev/tty1 (mirror runner output to the
+#                local console — see console-tee logic in the
+#                register-github-runner.sh script).
+#   - dialout  : write to /dev/ttyS0 when serial console is enabled.
 if ! id -u runner >/dev/null 2>&1; then
     useradd \
         --system \
         --home-dir /opt/actions-runner \
         --shell /usr/sbin/nologin \
+        --groups tty,dialout \
         --comment 'GitHub Actions self-hosted runner' \
         runner
 fi
 chown -R runner:runner /opt/actions-runner
+
+# The runner profile is headless: no login prompt on any console.
+# The registration script pipes the runner's stdout+stderr to
+# /dev/tty1 (and /dev/ttyS0 when serial is enabled) so an admin
+# with a monitor or serial cable watches job progress instead of
+# staring at a getty prompt they can't actually use (no local
+# accounts — see also the ssh-debug profile).
+systemctl mask getty@tty1.service
+systemctl mask serial-getty@ttyS0.service
 
 # The runner needs to enable its systemd unit unconditionally — the
 # base recipe doesn't know this profile is in the chain.
