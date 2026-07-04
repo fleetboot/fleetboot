@@ -1,17 +1,17 @@
 #!/bin/sh
-# Configure + start a GitHub Actions self-hosted runner, ephemeral,
-# one job per boot. Called by fleetboot-github-runner.service.
+# Configure + start a GitHub Actions self-hosted runner as a
+# persistent worker (registered once per boot, then serves job
+# after job). Called by fleetboot-github-runner.service.
 #
 # All GitHub-specific settings come from /etc/fleetboot-runner.conf,
 # which the admin provides via image/custom/overlay/ or their own
 # overlay. Fleetboot itself knows nothing about GitHub.
 #
-# Everything this script prints — including the actions/runner's
-# `./run.sh` output — is teed to /dev/tty1, and to /dev/ttyS0 when
-# the machine was booted with serial console enabled. That way a
-# plugged-in monitor or serial cable becomes the runner's
-# live-status display; there's no login prompt to compete with it
-# (getty units are masked by the profile's setup-chroot).
+# The whole script mirrors its stdout+stderr to /dev/tty1, and to
+# /dev/ttyS0 when the machine was booted with serial console
+# enabled. Admins with a monitor or serial cable watch job progress
+# live; there's no login prompt to compete with it (getty units are
+# masked by the profile's setup-chroot).
 
 set -eu
 
@@ -21,10 +21,10 @@ if grep -qE 'console=ttyS[0-9]' /proc/cmdline 2>/dev/null; then
     consoles="$consoles /dev/ttyS0"
 fi
 
-# Everything from here down runs in a subshell whose stdout+stderr
-# are piped through `tee` to the console(s). `tee`'s own stdout
-# still flows to systemd's journal so `journalctl -u
-# fleetboot-github-runner.service` also has the full log.
+# Wrap the entire script's output through tee to the console(s).
+# The service runs as root so tty1 / ttyS0 permissions are trivial.
+# tee's own stdout still flows to systemd, so
+# `journalctl -u fleetboot-github-runner.service` also has the log.
 {
 
 CONF=/etc/fleetboot-runner.conf
@@ -67,20 +67,29 @@ fi
 # already ensures every machine has a unique deterministic hostname).
 RUNNER_NAME="$(hostname)"
 
-cd /opt/actions-runner
+# Ownership: the runner binaries and state live under
+# /opt/actions-runner, owned by `runner`. config.sh will write into
+# .credentials there. We run config + run as that non-root user via
+# `runuser` — everything after this point drops privileges.
+chown -R runner:runner /opt/actions-runner
 
-# config.sh writes state into /opt/actions-runner. The tmpfs overlay
-# means all of it vanishes at power-off — exactly what --ephemeral
-# expects.
-./config.sh \
+runuser -u runner -- /opt/actions-runner/config.sh \
     --unattended \
-    --ephemeral \
     --url "$RUNNER_URL" \
     --token "$REG_TOKEN" \
     --name "$RUNNER_NAME" \
     --labels "${RUNNER_LABELS:-self-hosted,linux,x64,fleetboot}" \
     --replace
 
-exec ./run.sh
+# Tell fleetboot the runner is up. This is a *custom* state — the
+# server's BootState enum doesn't know about it, so it's recorded
+# purely as a boot event on the machine's timeline (no ranking).
+# Admin sees "runner_started" appear in the events stream just
+# before the runner starts polling for jobs.
+/usr/bin/python3 -m fleetboot.reporter.report runner_started \
+    || echo "register-github-runner: state report failed (non-fatal)" >&2
+
+echo "register-github-runner: config complete, starting run.sh"
+exec runuser -u runner -- /opt/actions-runner/run.sh
 
 } 2>&1 | tee $consoles

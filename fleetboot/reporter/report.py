@@ -309,13 +309,25 @@ def _collect_diagnostics() -> Optional[str]:
 CURRENT_STATE_PATH = "/run/fleetboot/current-state"
 
 
-def _remember_current_state(state: BootState) -> None:
-    """Persist the latest reported state for the heartbeat to find."""
+def _state_to_string(state: "BootState | str") -> str:
+    """Coerce a well-known BootState or a raw custom state to its wire
+    representation. Everything downstream — the JSON payload, the
+    heartbeat state file, and the boot_events table — deals in
+    strings so custom states from profile-specific hooks don't have
+    to be added to the BootState enum first."""
+    return state.value if isinstance(state, BootState) else state
+
+
+def _remember_current_state(state: "BootState | str") -> None:
+    """Persist the latest reported state for the heartbeat to find.
+
+    Accepts either a BootState (well-known) or a plain string (custom).
+    """
     try:
         import os
         os.makedirs("/run/fleetboot", exist_ok=True)
         with open(CURRENT_STATE_PATH, "w", encoding="utf-8") as handle:
-            handle.write(state.value + "\n")
+            handle.write(_state_to_string(state) + "\n")
     except OSError:
         pass
 
@@ -336,7 +348,7 @@ def _read_boot_version() -> Optional[str]:
 
 
 def report_state(
-    state: BootState,
+    state: "BootState | str",
     detail: Optional[str] = None,
     *,
     settings: ReporterSettings | None = None,
@@ -345,11 +357,14 @@ def report_state(
 ) -> None:
     """Send one report. Raises on transport or HTTP errors.
 
+    `state` may be a `BootState` (well-known lifecycle stage) or an
+    arbitrary short string (profile-specific custom state).
+
     `settings` and `client` are injectable so tests can drive this end-to-end
     against the FastAPI app without hitting a real network.
     """
     effective_settings = settings if settings is not None else read_settings()
-    payload: dict[str, str] = {"state": state.value}
+    payload: dict[str, str] = {"state": _state_to_string(state)}
     if detail is not None:
         payload["detail"] = detail
     # Include the kernel-visible hostname so the dashboard can show a
@@ -423,18 +438,32 @@ def report_state(
 
 
 def main(argv: list[str]) -> int:
-    """CLI entry point used by systemd units and the PAM hook."""
+    """CLI entry point used by systemd units and custom-state hooks.
+
+    The state argument may be a well-known BootState (grub_running,
+    network_up, login_console, ...) or any profile-specific custom
+    string (e.g. github-runner sends `runner_started`). The server
+    ranks known states for `latest_state` and treats unknowns as
+    log-only boot events.
+    """
     if not argv or len(argv) > 2:
         print(
             "usage: python3 -m fleetboot.reporter.report <state> [detail]",
             file=sys.stderr,
         )
         return 2
-    try:
-        state = BootState(argv[0])
-    except ValueError:
-        print(f"unknown state: {argv[0]!r}", file=sys.stderr)
+    raw_state = argv[0].strip()
+    if not raw_state or len(raw_state) > 64 or " " in raw_state:
+        print(
+            f"reporter: state must be a short single-word identifier, got "
+            f"{argv[0]!r}",
+            file=sys.stderr,
+        )
         return 2
+    try:
+        state: BootState | str = BootState(raw_state)
+    except ValueError:
+        state = raw_state
     detail = argv[1] if len(argv) == 2 else None
     try:
         report_state(state, detail)

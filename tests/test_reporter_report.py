@@ -70,11 +70,31 @@ def test_reporter_raises_on_unknown_token():
             )
 
 
-def test_main_cli_rejects_unknown_state(capsys):
-    exit_code = main(["rooted_the_box"])
-    assert exit_code == 2
-    err = capsys.readouterr().err
-    assert "unknown state" in err
+def test_main_cli_accepts_custom_state_string(capsys, monkeypatch):
+    """Any short identifier-shaped state is accepted — custom states
+    used by profile hooks (e.g. github-runner's `runner_started`)
+    aren't in the BootState enum but must still reach the server."""
+    # Substitute a report_state that succeeds without hitting the
+    # network so we can assert the CLI accepts the value.
+    seen = {}
+
+    def fake_report_state(state, detail=None):
+        seen["state"] = state
+        seen["detail"] = detail
+
+    monkeypatch.setattr(
+        "fleetboot.reporter.report.report_state", fake_report_state,
+    )
+    assert main(["runner_started"]) == 0
+    assert seen["state"] == "runner_started"
+
+
+def test_main_cli_rejects_malformed_state(capsys):
+    """Empty, whitespace-only, or absurdly long state strings are
+    still rejected — a malformed value can't be a meaningful state."""
+    for evil in ("", "   ", "has spaces", "a" * 65):
+        exit_code = main([evil])
+        assert exit_code == 2, f"{evil!r} should have been rejected"
 
 
 def test_main_cli_usage_error_with_no_args(capsys):

@@ -76,9 +76,20 @@ ALLOWED_BOOT_FILES = _STATIC_BOOT_FILES
 class StatusReport(BaseModel):
     """The payload a machine sends to /status."""
 
-    state: BootState = Field(
+    state: str = Field(
         ...,
-        description="The lifecycle state the machine has just entered.",
+        min_length=1,
+        max_length=64,
+        description=(
+            "The lifecycle state the machine has just entered. Well-known "
+            "states (see fleetboot.boot_states.BootState) carry ordering "
+            "semantics — reaching a later one advances `latest_state`. "
+            "Anything else is a *custom* state: it's logged as a boot event "
+            "and shown in the dashboard, but does not affect the highest-"
+            "reached state. Profiles can freely emit custom states so an "
+            "admin sees profile-specific milestones (e.g. github-runner "
+            "sends `runner_started` just before ./run.sh)."
+        ),
     )
     # Optional details — the user_logged_in trigger passes the username here.
     # We never trust this for authorisation, only display.
@@ -125,7 +136,9 @@ class StatusAcknowledgement(BaseModel):
 
     ok: bool = True
     mac: str
-    state: BootState
+    # Echoes back whatever state string the client sent — may be a
+    # BootState value or a profile-specific custom state.
+    state: str
     # Soft-reboot signal. When true, the in-image reporter should
     # `systemctl reboot` — used as a fallback after a failed PDU
     # power-cycle.
@@ -309,8 +322,25 @@ def create_app(
         store: BootSessionStore = Depends(get_store),
     ) -> StatusAcknowledgement:
         token = _extract_bearer_token(authorization)
+        # Try to parse the state as one of the well-known BootState
+        # values. If it decodes, treat it as a ranked lifecycle state
+        # (advances `latest_state` when it's higher-index than the
+        # previous). Otherwise it's a profile-specific custom state
+        # — still recorded as a boot event, but doesn't participate
+        # in the ranking.
         try:
-            session = store.record_state(token, report.state)
+            parsed_state: BootState | None = BootState(report.state)
+        except ValueError:
+            parsed_state = None
+        try:
+            if parsed_state is not None:
+                session = store.record_state(token, parsed_state)
+            else:
+                # Custom state: still need a valid session, but no
+                # rank change.
+                session = store.lookup(token)
+                if session is None:
+                    raise UnknownTokenError(token)
         except UnknownTokenError:
             # Uniform 401: do not distinguish "unknown token" from "missing".
             raise HTTPException(
@@ -327,7 +357,7 @@ def create_app(
         # restarts and what the dashboard's history view reads.
         if registry is not None:
             registry.log_boot_event(
-                mac=session.mac, state=report.state.value, detail=report.detail,
+                mac=session.mac, state=report.state, detail=report.detail,
             )
             # Server-side observed IP — more trustworthy than anything
             # the client could claim. /status arrives via a TCP socket;
