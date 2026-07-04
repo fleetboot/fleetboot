@@ -74,6 +74,16 @@
         <span class="muted">—</span>
       {% endif %}
     </td></tr>
+    <tr><th>Pending reboot</th><td>
+      {% if machine.pending_reboot %}
+        <span class="version-stale"
+              title="Soft-reboot signal is armed. The next /status heartbeat from this machine will carry pending_reboot=true, and the in-image reporter will systemctl reboot when it sees that. Cleared implicitly when the machine mints a fresh boot session (i.e. re-PXEs).">
+          ↻ armed — machine will reboot on its next heartbeat
+        </span>
+      {% else %}
+        <span class="muted">not armed</span>
+      {% endif %}
+    </td></tr>
     <tr><th>Last seen</th><td>
       {% if last_seen %}
         {% if last_seen.stale %}
