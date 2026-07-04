@@ -26,6 +26,15 @@ services:
       # clients hit fleetboot at whatever URL the renderer stamps
       # into grub.cfg (see CLIENT_BASE_URL below).
       - "${FLEETBOOT_PORT:-8080}:8080"
+    # The dashboard's build button shells out to `make image`, which
+    # uses debos + fakemachine to spin up a KVM guest for the actual
+    # build. That needs /dev/kvm passed in from the host AND the
+    # container process joined to the host's kvm group so it can
+    # actually open the device.
+    devices:
+      - /dev/kvm
+    group_add:
+      - kvm
     environment:
       FLEETBOOT_ADMIN_SECRET: ${FLEETBOOT_ADMIN_SECRET:?set FLEETBOOT_ADMIN_SECRET in .env}
       FLEETBOOT_MINT_SECRET: ${FLEETBOOT_MINT_SECRET:?set FLEETBOOT_MINT_SECRET in .env}
@@ -37,12 +46,22 @@ services:
       # per-profile signed grub binaries). Shared read-write with the
       # host so `make image` on the host lands new artefacts that
       # both containers immediately see.
-      - ../fleetboot/build:/build:rw
+      - ../fleetboot/build:/app/build:rw
       # Profile tree is read-write so the dashboard's profile-edit
       # page can persist changes back to source-of-truth.
       - ../fleetboot/image/profiles:/app/image/profiles:rw
       # Admin overlays / customisations.
       - ../fleetboot/image/custom:/app/image/custom:rw
+      # fakemachine (used by debos) boots a KVM guest for the actual
+      # image build. That guest needs kernel modules matching the
+      # RUNNING kernel — which the container inherits from the host,
+      # so bind-mount /lib/modules read-only. Missing this makes
+      # fakemachine bail immediately with "open /lib/modules: no
+      # such file or directory".
+      - /lib/modules:/lib/modules:ro
+      # fakemachine also needs the host kernel image (vmlinuz + the
+      # matching initrd) to boot its VM. /boot on the host has both.
+      - /boot:/boot:ro
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "python -c 'import urllib.request; urllib.request.urlopen(\"http://localhost:8080/\", timeout=2)'"]
