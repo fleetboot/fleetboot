@@ -5,8 +5,27 @@
 # All GitHub-specific settings come from /etc/fleetboot-runner.conf,
 # which the admin provides via image/custom/overlay/ or their own
 # overlay. Fleetboot itself knows nothing about GitHub.
+#
+# Everything this script prints — including the actions/runner's
+# `./run.sh` output — is teed to /dev/tty1, and to /dev/ttyS0 when
+# the machine was booted with serial console enabled. That way a
+# plugged-in monitor or serial cable becomes the runner's
+# live-status display; there's no login prompt to compete with it
+# (getty units are masked by the profile's setup-chroot).
 
 set -eu
+
+# Build the list of console devices we mirror output to.
+consoles="/dev/tty1"
+if grep -qE 'console=ttyS[0-9]' /proc/cmdline 2>/dev/null; then
+    consoles="$consoles /dev/ttyS0"
+fi
+
+# Everything from here down runs in a subshell whose stdout+stderr
+# are piped through `tee` to the console(s). `tee`'s own stdout
+# still flows to systemd's journal so `journalctl -u
+# fleetboot-github-runner.service` also has the full log.
+{
 
 CONF=/etc/fleetboot-runner.conf
 
@@ -63,3 +82,5 @@ cd /opt/actions-runner
     --replace
 
 exec ./run.sh
+
+} 2>&1 | tee $consoles
