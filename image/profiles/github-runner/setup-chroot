@@ -19,17 +19,15 @@ tar xzf "/tmp/${RUNNER_TARBALL}" -C /opt/actions-runner
 rm -f "/tmp/${RUNNER_TARBALL}"
 
 # Non-privileged local user. No shell login, no home outside
-# /opt/actions-runner, no password. Groups:
-#   - tty      : write to /dev/tty1 (mirror runner output to the
-#                local console — see console-tee logic in the
-#                register-github-runner.sh script).
-#   - dialout  : write to /dev/ttyS0 when serial console is enabled.
+# /opt/actions-runner, no password. The service wrapper runs as
+# root (so tty1 / ttyS0 output works without group gymnastics) and
+# drops privileges to `runner` via runuser for the actual
+# config.sh + run.sh invocations. The runner never runs as root.
 if ! id -u runner >/dev/null 2>&1; then
     useradd \
         --system \
         --home-dir /opt/actions-runner \
         --shell /usr/sbin/nologin \
-        --groups tty,dialout \
         --comment 'GitHub Actions self-hosted runner' \
         runner
 fi

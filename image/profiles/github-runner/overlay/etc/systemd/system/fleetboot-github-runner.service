@@ -11,14 +11,20 @@ ConditionKernelCommandLine=fleetboot.boot_token
 
 [Service]
 Type=simple
-User=runner
-Group=runner
+# Root here — the wrapper opens /dev/tty1 (and /dev/ttyS0 when
+# serial console is enabled) so admins with a monitor or cable see
+# every step live. The wrapper drops privileges to the `runner`
+# user with `runuser` before invoking config.sh / run.sh, so the
+# actions/runner itself never runs as root.
+User=root
 WorkingDirectory=/opt/actions-runner
 ExecStart=/usr/local/lib/fleetboot/register-github-runner.sh
-# `--ephemeral` runners exit after one job. We don't restart on
-# success — the machine will typically reboot to pick up the next
-# job as a fresh runner.
-Restart=no
+# Persistent runner: config once, run forever. If run.sh dies (job
+# error, GitHub disconnect, config expiry) we restart the whole
+# script so it re-registers with a fresh token. --ephemeral runners
+# are a mode for the workflow to opt into, not something we bake in.
+Restart=on-failure
+RestartSec=15s
 
 [Install]
 WantedBy=multi-user.target

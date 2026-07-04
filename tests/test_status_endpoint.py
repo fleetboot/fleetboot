@@ -246,12 +246,46 @@ def test_lower_index_state_after_higher_is_accepted():
     assert refreshed.latest_state == BootState.LOGIN_CONSOLE
 
 
-def test_unknown_state_string_returns_422():
+def test_custom_state_string_is_accepted_and_recorded():
+    """A state name that's not in BootState (e.g. a profile-specific
+    milestone like `runner_started`) is treated as a custom event:
+    accepted with 200, echoed back, and logged as a boot event —
+    but doesn't advance the ranked latest_state."""
     client, store = _client_and_store()
     session = store.mint("aa:bb:cc:dd:ee:ff")
-    response = client.post(
+    # Advance to a real ranked state first so we can prove the
+    # custom one doesn't override it.
+    client.post(
         "/status",
-        json={"state": "rooted_the_box"},
+        json={"state": "network_up"},
         headers={"Authorization": f"Bearer {session.token}"},
     )
-    assert response.status_code == 422
+    response = client.post(
+        "/status",
+        json={"state": "runner_started"},
+        headers={"Authorization": f"Bearer {session.token}"},
+    )
+    assert response.status_code == 200
+    assert response.json()["state"] == "runner_started"
+    refreshed = store.lookup(session.token)
+    assert refreshed is not None
+    # Ranked latest_state kept at network_up — the custom state is
+    # not part of the ordering.
+    assert refreshed.latest_state == BootState.NETWORK_UP
+
+
+def test_malformed_state_string_returns_422():
+    """Absurdly long or empty state strings are still rejected —
+    pydantic min_length=1 / max_length=64 catches this before the
+    handler."""
+    client, store = _client_and_store()
+    session = store.mint("aa:bb:cc:dd:ee:ff")
+    for evil in ("", "a" * 65):
+        response = client.post(
+            "/status",
+            json={"state": evil},
+            headers={"Authorization": f"Bearer {session.token}"},
+        )
+        assert response.status_code == 422, (
+            f"{evil!r} should have been rejected"
+        )
