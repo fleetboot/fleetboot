@@ -21,3 +21,6 @@ image/custom/hooks/*
 !image/custom/hooks/.gitkeep
 fake-scratch.img.*
 image/profiles_resolved/
+
+# Local deployment config — never commit secrets.
+.env
