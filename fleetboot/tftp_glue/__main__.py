@@ -46,12 +46,29 @@ def _require_env(name: str) -> str:
     return value
 
 
-def _no_neighbour(_ip: str) -> str | None:
-    """Placeholder ARP lookup — the container namespace won't have the
-    host's neighbour table anyway. Container deployments should trust
-    the RRQ's asserted MAC; sniff-the-wire attackers are stopped at the
-    fleetboot registry check, not here.
+def _ip_neigh_lookup(ip: str) -> str | None:
+    """Resolve IP → MAC via the host's neighbour table.
+
+    tftpjail is deployed on Docker host networking so `ip neigh show`
+    reads the host's real ARP entries. Returning the actual observed
+    MAC lets the policy layer's cross-check (`asserted_mac == arp_mac`)
+    do its defence-in-depth job. Returning None triggers a
+    MAC_MISSING deny, which is the safe default for a client the
+    host hasn't seen on the wire yet.
     """
+    import subprocess
+    try:
+        result = subprocess.run(
+            ["ip", "neigh", "show", ip],
+            capture_output=True, text=True, timeout=2,
+        )
+    except (subprocess.SubprocessError, FileNotFoundError):
+        return None
+    for line in result.stdout.splitlines():
+        parts = line.split()
+        for index, part in enumerate(parts):
+            if part == "lladdr" and index + 1 < len(parts):
+                return parts[index + 1]
     return None
 
 
@@ -92,7 +109,7 @@ def main() -> None:
         host=os.environ.get("TFTP_HOST", "0.0.0.0"),
         port=int(os.environ.get("TFTP_PORT", "69")),
         policy=policy,
-        neighbour_lookup=_no_neighbour,
+        neighbour_lookup=_ip_neigh_lookup,
         public_assets_dir=public_assets_dir,
         rrq_intercept=make_http_grub_event_intercept(
             fleetboot_base_url=internal_url,

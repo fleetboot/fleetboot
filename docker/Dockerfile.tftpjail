@@ -10,8 +10,15 @@
 FROM python:3.13-slim AS runtime
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates \
+    && apt-get install -y --no-install-recommends \
+         ca-certificates \
+         iproute2 \
     && rm -rf /var/lib/apt/lists/*
+# `iproute2` gives us `ip neigh show <src-ip>` which the neighbour
+# callback shells out to. On host networking the ARP table is the
+# host's, so this cross-checks the RRQ's asserted MAC against what
+# the kernel actually saw on the wire — same defence-in-depth as
+# the dev harness.
 
 WORKDIR /app
 
