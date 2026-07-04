@@ -102,6 +102,42 @@ def build_dashboard_router(
         )
 
     @router.get(
+        "/dashboard/api/machines-snapshot",
+        dependencies=[Depends(require_admin)],
+    )
+    def machines_snapshot() -> dict:
+        """JSON snapshot of every field the machines-list live-view
+        polls for. The template's inline JS calls this every few
+        seconds and patches individual cells — no full-page reload,
+        no meta-refresh.
+
+        Returning only what the live view needs (state, last-seen,
+        boot-version comparison, pending-reboot) keeps the payload
+        under a few KB even for a fleet of hundreds.
+        """
+        machines = registry.list_all()
+        states_by_mac = _states_by_mac(sessions)
+        latest_versions = _latest_versions_by_artefact(boot_dir)
+        last_seen = _format_last_seen(sessions.last_seen_by_mac())
+        return {
+            "machines": [
+                {
+                    "mac": m.mac,
+                    "hostname": m.hostname,
+                    "last_ip": m.last_ip,
+                    "state": states_by_mac.get(m.mac),
+                    "boot_version": m.boot_version,
+                    "latest_version": latest_versions.get(
+                        f"{m.profile_name}/{m.architecture}"
+                    ),
+                    "last_seen": last_seen.get(m.mac),
+                    "pending_reboot": bool(m.pending_reboot),
+                }
+                for m in machines
+            ],
+        }
+
+    @router.get(
         "/dashboard",
         response_class=HTMLResponse,
         dependencies=[Depends(require_admin)],
@@ -113,6 +149,11 @@ def build_dashboard_router(
         states_by_mac = _states_by_mac(sessions)
         latest_versions = _latest_versions_by_artefact(boot_dir)
         last_seen = _format_last_seen(sessions.last_seen_by_mac())
+        # `?refresh=N` on this page turns on client-side JS polling
+        # (not the legacy meta-refresh path — that still works on the
+        # events + builds pages via base.html). N is clamped to a
+        # reasonable range and reused as the JS polling interval.
+        polling_seconds = _clamp_refresh(refresh)
         return templates.TemplateResponse(
             request,
             "machines.html",
@@ -120,7 +161,9 @@ def build_dashboard_router(
                 "machines": machines,
                 "states_by_mac": states_by_mac,
                 "profile_names": _list_profile_names(profiles_root),
-                "auto_refresh": _clamp_refresh(refresh),
+                # Deliberately NOT setting auto_refresh — the JS
+                # polling in machines.html replaces the meta-refresh.
+                "polling_seconds": polling_seconds,
                 "latest_versions": latest_versions,
                 "last_seen": last_seen,
                 # Used by the per-row delete+reboot button: if set, any
