@@ -2,8 +2,8 @@
 {% block title %}fleetboot — machines{% endblock %}
 {% block content %}
 <h1>Machines
-  {% if auto_refresh %}
-    <span class="muted">— live ({{ auto_refresh }}s)</span>
+  {% if polling_seconds %}
+    <span class="muted" id="live-status">— live (polling every {{ polling_seconds }}s)</span>
     &nbsp;<a class="muted" href="/dashboard">[stop]</a>
   {% else %}
     &nbsp;<a class="muted" href="/dashboard?refresh=5">[live view]</a>
@@ -27,7 +27,7 @@
   </thead>
   <tbody>
     {% for m in machines %}
-    <tr>
+    <tr data-mac="{{ m.mac }}">
       <td>
         <a href="/dashboard/machines/{{ m.mac }}">
         {% if m.hostname %}
@@ -40,7 +40,9 @@
       <td>
         <a href="/dashboard/machines/{{ m.mac }}"><code>{{ m.mac }}</code></a>
         {% if m.last_ip %}
-        <br><span class="muted">{{ m.last_ip }}</span>
+        <br><span class="muted" data-role="last-ip">{{ m.last_ip }}</span>
+        {% else %}
+        <br><span class="muted" data-role="last-ip" hidden></span>
         {% endif %}
       </td>
       <td>{{ m.profile_name }}</td>
@@ -52,7 +54,7 @@
           <a class="state-network_up" href="/dashboard/auto-enrol-rules">{{ m.enrolled_by }}</a>
         {% endif %}
       </td>
-      <td>
+      <td data-role="boot-version">
         {% set latest = latest_versions.get(m.profile_name ~ "/" ~ m.architecture) %}
         {% if m.boot_version %}
           {% if latest and m.boot_version == latest %}
@@ -66,22 +68,19 @@
           <span class="muted">—</span>
         {% endif %}
       </td>
-      <td>
+      <td data-role="state">
         {% set state = states_by_mac.get(m.mac) %}
         {% if state %}
           <span class="state-{{ state }}">{{ state }}</span>
         {% else %}
           <span class="muted">—</span>
         {% endif %}
-        {# Soft-reboot signal: when armed, /status replies tell the
-           machine to systemctl reboot on its next heartbeat. Cleared
-           implicitly when the machine PXE-mints a fresh session. #}
         {% if m.pending_reboot %}
         <br><span class="version-stale"
                  title="Soft-reboot armed — the machine will systemctl reboot on its next heartbeat">↻ reboot armed</span>
         {% endif %}
       </td>
-      <td>
+      <td data-role="last-seen">
         {% set seen = last_seen.get(m.mac) %}
         {% if seen %}
           {% if seen.stale %}
@@ -161,4 +160,114 @@
   </label>
   <button type="submit">enrol</button>
 </form>
+
+{% if polling_seconds %}
+<script>
+// Live view: poll /dashboard/api/machines-snapshot every N seconds and
+// patch specific cells in place. No full-page reload, no meta-refresh.
+// Falls back to a full reload if the polling loop fails badly (auth
+// expired, network gone). Anything the JSON snapshot doesn't cover
+// (profile, arch, source, actions) is static per-row and doesn't
+// change without an admin action, so we don't touch those cells.
+(function() {
+  const intervalMs = {{ polling_seconds }} * 1000;
+  let inFlight = false;
+  let failureStreak = 0;
+
+  function escapeHtml(s) {
+    return String(s == null ? "" : s)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  }
+
+  function renderState(m) {
+    const parts = [];
+    if (m.state) {
+      parts.push(`<span class="state-${escapeHtml(m.state)}">${escapeHtml(m.state)}</span>`);
+    } else {
+      parts.push('<span class="muted">&mdash;</span>');
+    }
+    if (m.pending_reboot) {
+      parts.push(
+        '<br><span class="version-stale" ' +
+        'title="Soft-reboot armed — the machine will systemctl reboot on its next heartbeat">' +
+        '↻ reboot armed</span>'
+      );
+    }
+    return parts.join("");
+  }
+
+  function renderBootVersion(m) {
+    if (!m.boot_version) return '<span class="muted">&mdash;</span>';
+    const bv = escapeHtml(m.boot_version);
+    if (m.latest_version && m.boot_version === m.latest_version) {
+      return `<span class="version-current" title="Up to date with ${escapeHtml(m.latest_version)}">${bv}</span>`;
+    }
+    if (m.latest_version) {
+      return `<span class="version-stale" title="Latest is ${escapeHtml(m.latest_version)} — reboot to update">${bv}</span>`;
+    }
+    return `<span class="muted" title="No sidecar version found in build/">${bv}</span>`;
+  }
+
+  function renderLastSeen(m) {
+    if (!m.last_seen) return '<span class="muted">&mdash;</span>';
+    const label = escapeHtml(m.last_seen.label);
+    if (m.last_seen.stale) {
+      return `<span class="version-stale" title="No heartbeat for over 6 min — machine may be offline">${label}</span>`;
+    }
+    return `<span class="muted">${label}</span>`;
+  }
+
+  function applySnapshot(data) {
+    for (const m of data.machines) {
+      const row = document.querySelector(`tr[data-mac="${m.mac}"]`);
+      if (!row) continue;  // machine added since last full page load
+      const state = row.querySelector('[data-role="state"]');
+      const bv = row.querySelector('[data-role="boot-version"]');
+      const ls = row.querySelector('[data-role="last-seen"]');
+      const ip = row.querySelector('[data-role="last-ip"]');
+      if (state) state.innerHTML = renderState(m);
+      if (bv) bv.innerHTML = renderBootVersion(m);
+      if (ls) ls.innerHTML = renderLastSeen(m);
+      if (ip) {
+        if (m.last_ip) {
+          ip.hidden = false;
+          ip.textContent = m.last_ip;
+        } else {
+          ip.hidden = true;
+          ip.textContent = "";
+        }
+      }
+    }
+  }
+
+  async function poll() {
+    if (inFlight) return;
+    inFlight = true;
+    try {
+      const r = await fetch('/dashboard/api/machines-snapshot', {
+        credentials: 'same-origin',
+        headers: { 'Accept': 'application/json' },
+      });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      applySnapshot(await r.json());
+      failureStreak = 0;
+    } catch (e) {
+      failureStreak++;
+      // If we've been failing for a while (network gone, auth expired),
+      // full-reload the page — the meta status is at least honest that
+      // way (basic-auth prompt will re-appear if that's the issue).
+      if (failureStreak >= 5) window.location.reload();
+    } finally {
+      inFlight = false;
+    }
+  }
+
+  poll();
+  setInterval(poll, intervalMs);
+})();
+</script>
+{% endif %}
 {% endblock %}

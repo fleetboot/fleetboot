@@ -85,14 +85,23 @@ def test_dashboard_accepts_correct_password(dashboard_root: Path):
     assert "<h1>Machines" in response.text
 
 
-def test_dashboard_emits_meta_refresh_when_requested(dashboard_root: Path):
-    """`?refresh=5` switches the page into live-view mode."""
+def test_dashboard_live_view_uses_js_polling_not_meta_refresh(
+    dashboard_root: Path,
+):
+    """`?refresh=5` switches the machines list into live view. Under
+    the new implementation that means a JS block that polls the
+    /dashboard/api/machines-snapshot endpoint every N seconds — NOT
+    a meta refresh (which reloaded the whole page and lost scroll
+    position + open dropdowns)."""
     client = _client(dashboard_root)
     response = client.get(
         "/dashboard?refresh=5", headers=_auth_header()
     )
     assert response.status_code == 200
-    assert '<meta http-equiv="refresh" content="5">' in response.text
+    assert 'polling every 5s' in response.text
+    assert '/dashboard/api/machines-snapshot' in response.text
+    # The old behaviour is deliberately gone.
+    assert '<meta http-equiv="refresh"' not in response.text
 
 
 def test_dashboard_refresh_value_is_clamped(dashboard_root: Path):
@@ -102,7 +111,8 @@ def test_dashboard_refresh_value_is_clamped(dashboard_root: Path):
     response = client.get(
         "/dashboard?refresh=999999", headers=_auth_header()
     )
-    assert '<meta http-equiv="refresh" content="60">' in response.text
+    # 60 is the upper clamp — appears in the "live" status text.
+    assert 'polling every 60s' in response.text
 
 
 def test_dashboard_no_refresh_meta_when_unset(dashboard_root: Path):
