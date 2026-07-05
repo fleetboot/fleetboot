@@ -9,12 +9,6 @@
     <code>{{ machine.mac }}</code>
     <span class="muted">(no hostname reported)</span>
   {% endif %}
-  {% if polling_seconds %}
-    <span class="muted">— live (polling every {{ polling_seconds }}s)</span>
-    &nbsp;<a class="muted" href="?">[stop]</a>
-  {% else %}
-    &nbsp;<a class="muted" href="?refresh=5">[live view]</a>
-  {% endif %}
 </h1>
 
 <p><a href="/dashboard">&larr; back to all machines</a></p>
@@ -240,7 +234,6 @@
 {% endblock %}
 
 {% block live_view %}
-{% if polling_seconds %}
 <script>
 (function() {
   const mac = {{ machine.mac | tojson }};
@@ -279,5 +272,4 @@
                 apply, {{ polling_seconds }} * 1000);
 })();
 </script>
-{% endif %}
 {% endblock %}

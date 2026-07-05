@@ -1,14 +1,7 @@
 {% extends "base.html" %}
 {% block title %}fleetboot — machines{% endblock %}
 {% block content %}
-<h1>Machines
-  {% if polling_seconds %}
-    <span class="muted" id="live-status">— live (polling every {{ polling_seconds }}s)</span>
-    &nbsp;<a class="muted" href="/dashboard">[stop]</a>
-  {% else %}
-    &nbsp;<a class="muted" href="/dashboard?refresh=5">[live view]</a>
-  {% endif %}
-</h1>
+<h1>Machines</h1>
 
 {% if machines %}
 <table>
@@ -164,7 +157,6 @@
 {% endblock %}
 
 {% block live_view %}
-{% if polling_seconds %}
 <script>
 // Live view for the machines list. Uses the shared startLiveView
 // helper from base.html to poll for a JSON snapshot every N seconds
@@ -223,5 +215,4 @@
   startLiveView('/dashboard/api/machines-snapshot', apply, {{ polling_seconds }} * 1000);
 })();
 </script>
-{% endif %}
 {% endblock %}

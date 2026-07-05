@@ -85,51 +85,25 @@ def test_dashboard_accepts_correct_password(dashboard_root: Path):
     assert "<h1>Machines" in response.text
 
 
-def test_dashboard_live_view_uses_js_polling_not_meta_refresh(
-    dashboard_root: Path,
-):
-    """`?refresh=5` switches the machines list into live view. Under
-    the new implementation that means a JS block that polls the
-    /dashboard/api/machines-snapshot endpoint every N seconds — NOT
-    a meta refresh (which reloaded the whole page and lost scroll
-    position + open dropdowns)."""
+def test_dashboard_always_serves_live_view(dashboard_root: Path):
+    """Every dashboard page is live by default — no toggle, no
+    ?refresh= query param. The machines page JS polls the snapshot
+    endpoint on load and forever after."""
     client = _client(dashboard_root)
-    response = client.get(
-        "/dashboard?refresh=5", headers=_auth_header()
-    )
+    response = client.get("/dashboard", headers=_auth_header())
     assert response.status_code == 200
-    assert 'polling every 5s' in response.text
+    assert 'startLiveView' in response.text
     assert '/dashboard/api/machines-snapshot' in response.text
-    # The old behaviour is deliberately gone.
+    # Meta-refresh belongs to the pre-JS era.
     assert '<meta http-equiv="refresh"' not in response.text
 
 
-def test_dashboard_refresh_value_is_clamped(dashboard_root: Path):
-    """Bogus values get clamped; this protects the server from a junk
-    query param triggering 1-second hammering."""
+def test_events_page_always_serves_live_view(dashboard_root: Path):
+    """Events page polls the snapshot endpoint by default."""
     client = _client(dashboard_root)
-    response = client.get(
-        "/dashboard?refresh=999999", headers=_auth_header()
-    )
-    # 60 is the upper clamp — appears in the "live" status text.
-    assert 'polling every 60s' in response.text
-
-
-def test_dashboard_no_refresh_meta_when_unset(dashboard_root: Path):
-    client = _client(dashboard_root)
-    response = client.get("/dashboard", headers=_auth_header())
-    assert "http-equiv=\"refresh\"" not in response.text
-
-
-def test_events_page_live_view_uses_js_polling(dashboard_root: Path):
-    """`?refresh=5` on the events page switches on JS polling of
-    /dashboard/api/events-snapshot — no meta-refresh, no full reload."""
-    client = _client(dashboard_root)
-    response = client.get(
-        "/dashboard/events?refresh=5", headers=_auth_header()
-    )
+    response = client.get("/dashboard/events", headers=_auth_header())
     assert response.status_code == 200
-    assert 'polling every 5s' in response.text
+    assert 'startLiveView' in response.text
     assert '/dashboard/api/events-snapshot' in response.text
     assert '<meta http-equiv="refresh"' not in response.text
 
@@ -579,7 +553,7 @@ def test_machine_detail_404_for_unknown_mac(dashboard_root: Path):
     assert response.status_code == 404
 
 
-def test_machine_detail_supports_refresh_query_param(dashboard_root: Path):
+def test_machine_detail_always_serves_live_view(dashboard_root: Path):
     client = _client(dashboard_root)
     client.post(
         "/dashboard/machines",
@@ -592,11 +566,11 @@ def test_machine_detail_supports_refresh_query_param(dashboard_root: Path):
         headers=_auth_header(),
     )
     response = client.get(
-        "/dashboard/machines/aa:bb:cc:dd:ee:ff?refresh=5",
+        "/dashboard/machines/aa:bb:cc:dd:ee:ff",
         headers=_auth_header(),
     )
     assert response.status_code == 200
-    assert 'polling every 5s' in response.text
+    assert 'startLiveView' in response.text
     assert '/dashboard/api/machine-snapshot/' in response.text
     assert '<meta http-equiv="refresh"' not in response.text
 

@@ -1,14 +1,7 @@
 {% extends "base.html" %}
 {% block title %}fleetboot — builds{% endblock %}
 {% block content %}
-<h1>Builds
-  {% if polling_seconds %}
-    <span class="muted">— live (polling every {{ polling_seconds }}s)</span>
-    &nbsp;<a class="muted" href="/dashboard/builds">[stop]</a>
-  {% else %}
-    &nbsp;<a class="muted" href="/dashboard/builds?refresh=5">[live view]</a>
-  {% endif %}
-</h1>
+<h1>Builds</h1>
 
 {% if error == "already-running" %}
 <p class="state-failed">A build is already running — wait for it to finish before starting another.</p>
@@ -84,7 +77,6 @@
 {% endblock %}
 
 {% block live_view %}
-{% if polling_seconds %}
 <script>
 (function() {
   function renderState(j) {
@@ -130,5 +122,4 @@
                 {{ polling_seconds }} * 1000);
 })();
 </script>
-{% endif %}
 {% endblock %}
