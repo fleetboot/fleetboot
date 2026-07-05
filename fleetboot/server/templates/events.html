@@ -5,12 +5,6 @@
   {% if mac_filter %}
     <span class="muted">— {{ mac_filter }}</span>
   {% endif %}
-  {% if polling_seconds %}
-    <span class="muted">— live (polling every {{ polling_seconds }}s)</span>
-    &nbsp;<a class="muted" href="/dashboard/events{% if mac_filter %}?mac={{ mac_filter }}{% endif %}">[stop]</a>
-  {% else %}
-    &nbsp;<a class="muted" href="/dashboard/events?refresh=5{% if mac_filter %}&mac={{ mac_filter }}{% endif %}">[live view]</a>
-  {% endif %}
 </h1>
 
 {% if mac_filter %}
@@ -52,7 +46,6 @@ No boot events recorded yet.
 {% endblock %}
 
 {% block live_view %}
-{% if polling_seconds %}
 <script>
 (function() {
   const macFilter = {{ (mac_filter or '') | tojson }};
@@ -84,5 +77,4 @@ No boot events recorded yet.
                 {{ polling_seconds }} * 1000);
 })();
 </script>
-{% endif %}
 {% endblock %}

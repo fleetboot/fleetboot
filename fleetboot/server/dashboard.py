@@ -240,18 +240,11 @@ def build_dashboard_router(
         response_class=HTMLResponse,
         dependencies=[Depends(require_admin)],
     )
-    def dashboard_home(
-        request: Request, refresh: Optional[int] = None,
-    ) -> HTMLResponse:
+    def dashboard_home(request: Request) -> HTMLResponse:
         machines = registry.list_all()
         states_by_mac = _states_by_mac(sessions)
         latest_versions = _latest_versions_by_artefact(boot_dir)
         last_seen = _format_last_seen(sessions.last_seen_by_mac())
-        # `?refresh=N` on this page turns on client-side JS polling
-        # (not the legacy meta-refresh path — that still works on the
-        # events + builds pages via base.html). N is clamped to a
-        # reasonable range and reused as the JS polling interval.
-        polling_seconds = _clamp_refresh(refresh)
         return templates.TemplateResponse(
             request,
             "machines.html",
@@ -259,9 +252,9 @@ def build_dashboard_router(
                 "machines": machines,
                 "states_by_mac": states_by_mac,
                 "profile_names": _list_profile_names(profiles_root),
-                # Deliberately NOT setting auto_refresh — the JS
-                # polling in machines.html replaces the meta-refresh.
-                "polling_seconds": polling_seconds,
+                # Every dashboard page polls a JSON snapshot at this
+                # cadence — see startLiveView in base.html.
+                "polling_seconds": LIVE_POLL_SECONDS,
                 "latest_versions": latest_versions,
                 "last_seen": last_seen,
                 # Used by the per-row delete+reboot button: if set, any
@@ -822,7 +815,6 @@ def build_dashboard_router(
     def machine_detail(
         request: Request,
         mac: str,
-        refresh: Optional[int] = None,
     ) -> HTMLResponse:
         machine = registry.lookup(mac)
         if machine is None:
@@ -850,11 +842,7 @@ def build_dashboard_router(
                 "current_state": states_by_mac.get(machine.mac),
                 "latest_versions": latest_versions,
                 "last_seen": last_seen.get(machine.mac),
-                # Client-side JS polling (see machine_detail.html).
-                # No meta-refresh; `_clamp_refresh` still constrains
-                # the value so a junk query can't drive the polling
-                # loop into a hot spin.
-                "polling_seconds": _clamp_refresh(refresh),
+                "polling_seconds": LIVE_POLL_SECONDS,
                 "hardware": hardware,
             },
         )
@@ -868,7 +856,6 @@ def build_dashboard_router(
         request: Request,
         mac: Optional[str] = None,
         limit: int = 200,
-        refresh: Optional[int] = None,
     ) -> HTMLResponse:
         # Clamp `limit` so a bogus query string can't trigger a huge fetch.
         limit = max(1, min(int(limit), 1000))
@@ -880,7 +867,7 @@ def build_dashboard_router(
                 "events": events,
                 "mac_filter": mac,
                 "limit": limit,
-                "polling_seconds": _clamp_refresh(refresh),
+                "polling_seconds": LIVE_POLL_SECONDS,
             },
         )
 
@@ -892,7 +879,6 @@ def build_dashboard_router(
     def list_builds(
         request: Request,
         error: Optional[str] = None,
-        refresh: Optional[int] = None,
     ) -> HTMLResponse:
         jobs = builds.list_jobs()
         # Successful builds: surface the artifact filename + size on
@@ -912,7 +898,7 @@ def build_dashboard_router(
                 "profile_names": _list_profile_names(profiles_root),
                 "artifacts": artifacts,
                 "error": error,
-                "polling_seconds": _clamp_refresh(refresh),
+                "polling_seconds": LIVE_POLL_SECONDS,
             },
         )
 
@@ -1207,19 +1193,13 @@ def _format_mtime(epoch: float) -> str:
     ).strftime("%Y-%m-%d %H:%M UTC")
 
 
-def _clamp_refresh(value: Optional[int]) -> Optional[int]:
-    """Constrain the ?refresh= query param to a sensible range.
-
-    Returns None if the query param wasn't present (no meta tag emitted),
-    otherwise an integer in [2, 60] — fast enough to feel live, slow
-    enough not to hammer the server.
-    """
-    if value is None:
-        return None
-    try:
-        return max(2, min(int(value), 60))
-    except (TypeError, ValueError):
-        return None
+# Every live-view page polls its snapshot endpoint at this cadence.
+# 5s is fast enough to feel live for lifecycle-state changes and
+# heartbeats, slow enough that fleet size stays comfortable server-
+# side. Not a per-page setting: an admin who wants a different
+# cadence overrides at browser level (open dev tools, adjust the
+# interval) rather than us adding UI for it.
+LIVE_POLL_SECONDS = 5
 
 
 def _read_or_empty(path: Path) -> str:
