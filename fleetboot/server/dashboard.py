@@ -336,6 +336,31 @@ def build_dashboard_router(
             status_code=status.HTTP_303_SEE_OTHER,
         )
 
+    # ---- MCP docs -------------------------------------------------------
+
+    @router.get(
+        "/dashboard/mcp",
+        response_class=HTMLResponse,
+        dependencies=[Depends(require_admin)],
+    )
+    def mcp_docs(request: Request) -> HTMLResponse:
+        """Docs page describing the MCP endpoint. Pulls the tool
+        catalogue live so the docs never drift from the server."""
+        from fleetboot.server.mcp import (
+            PROTOCOL_VERSION, SERVER_INSTRUCTIONS, _tool_catalogue,
+        )
+        base = str(request.base_url).rstrip("/")
+        return templates.TemplateResponse(
+            request,
+            "mcp.html",
+            {
+                "mcp_url": f"{base}/mcp",
+                "protocol_version": PROTOCOL_VERSION,
+                "instructions": SERVER_INSTRUCTIONS,
+                "tools": _tool_catalogue(),
+            },
+        )
+
     # ---- Profiles -------------------------------------------------------
 
     @router.get(
