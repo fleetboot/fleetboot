@@ -742,70 +742,7 @@ def build_dashboard_router(
         )
 
     def _reboot_machine(mac: str, *, then_delete: bool) -> None:
-        """Shared reboot path used by /reboot and /delete-and-reboot.
-
-        Two PDU paths in priority order:
-          1. Explicit per-machine `reboot_command` (free-text shell run
-             with shell=True on the fleetboot host — admin owns the
-             contents).
-          2. Fleet-wide pdudaemon fallback when `pdudaemon_host` is set
-             AND the machine has a known hostname: builds
-             `curl --fail "<pdudaemon>/...?alias=<hostname>"`.
-
-        Behaviour split by `then_delete`:
-
-          then_delete=True (the "del + reboot" button):
-            Always delete the row. Try PDU. The soft-reboot signal is
-            NOT armed here because /status can't deliver
-            `pending_reboot: true` for a deleted row — the boot
-            session lookup would find the token but the machine row
-            would be gone, so machine.pending_reboot can't be read.
-            If PDU fails, the row is gone but the machine keeps
-            running until its next manual reboot. That's the
-            trade-off the admin opts into by hitting "delete".
-
-          then_delete=False (the standalone "reboot" button):
-            Never delete. Try PDU. If PDU fails or isn't configured,
-            arm the soft-reboot signal so the machine reboots itself
-            on its next heartbeat. The row stays so /status can ride
-            the signal out.
-        """
-        import subprocess
-
-        machine = registry.lookup(mac)
-        command: Optional[str] = None
-        if machine is not None:
-            if machine.reboot_command:
-                command = machine.reboot_command
-            else:
-                pdu_host = registry.get_setting("pdudaemon_host")
-                if pdu_host and machine.hostname:
-                    command = _pdudaemon_reboot_command(
-                        pdu_host=pdu_host, alias=machine.hostname,
-                    )
-
-        pdu_succeeded = False
-        if command:
-            try:
-                # 10-second timeout keeps the dashboard responsive
-                # when the PDU host is unreachable. shell=True is
-                # intentional — admin owns the command string.
-                result = subprocess.run(
-                    command, shell=True, timeout=10,
-                    stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT,
-                )
-                pdu_succeeded = result.returncode == 0
-            except subprocess.TimeoutExpired:
-                pdu_succeeded = False
-
-        if then_delete:
-            # Admin asked for the row to go; honour that even if PDU
-            # failed. (See docstring for why we can't soft-reboot a
-            # deleted row.)
-            registry.remove(mac)
-        elif not pdu_succeeded:
-            # /reboot button, PDU failed/unset — arm the soft signal.
-            registry.set_pending_reboot(mac, True)
+        reboot_machine(registry, mac, then_delete=then_delete)
 
     @router.get(
         "/dashboard/machines/{mac}",
@@ -1025,6 +962,57 @@ def _list_overlay_files(profile_dir: Path) -> list[dict]:
             "path": rel, "size": path.stat().st_size, "is_text": is_text,
         })
     return entries
+
+
+def reboot_machine(
+    registry: MachineRegistry, mac: str, *, then_delete: bool,
+) -> None:
+    """Reboot `mac`, optionally deleting its registry row.
+
+    Called by the dashboard's /reboot + /delete-and-reboot buttons and by
+    the MCP `reboot_machine` tool. Two PDU paths in priority order:
+
+      1. Per-machine `reboot_command` — free-text shell (shell=True on
+         the fleetboot host). Admin owns the string.
+      2. Fleet-wide pdudaemon fallback when `pdudaemon_host` is set AND
+         the machine has a hostname: builds
+         `curl --fail "<pdudaemon>/power/control/reboot?alias=<host>"`.
+
+    `then_delete=True` always removes the row (soft-reboot signal can't
+    be delivered to a deleted row — /status wouldn't find the machine).
+    `then_delete=False` arms the soft-reboot signal when PDU fails or
+    isn't configured, so the machine reboots itself on its next
+    heartbeat.
+    """
+    import subprocess
+
+    machine = registry.lookup(mac)
+    command: Optional[str] = None
+    if machine is not None:
+        if machine.reboot_command:
+            command = machine.reboot_command
+        else:
+            pdu_host = registry.get_setting("pdudaemon_host")
+            if pdu_host and machine.hostname:
+                command = _pdudaemon_reboot_command(
+                    pdu_host=pdu_host, alias=machine.hostname,
+                )
+
+    pdu_succeeded = False
+    if command:
+        try:
+            result = subprocess.run(
+                command, shell=True, timeout=10,
+                stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT,
+            )
+            pdu_succeeded = result.returncode == 0
+        except subprocess.TimeoutExpired:
+            pdu_succeeded = False
+
+    if then_delete:
+        registry.remove(mac)
+    elif not pdu_succeeded:
+        registry.set_pending_reboot(mac, True)
 
 
 def _pdudaemon_reboot_command(*, pdu_host: str, alias: str) -> str:
