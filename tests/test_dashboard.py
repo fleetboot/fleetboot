@@ -98,6 +98,22 @@ def test_dashboard_always_serves_live_view(dashboard_root: Path):
     assert '<meta http-equiv="refresh"' not in response.text
 
 
+def test_mcp_docs_page_lists_endpoint_and_tools(dashboard_root: Path):
+    """The MCP docs page must show the endpoint URL, auth flow, and
+    the live tool catalogue — not a hand-maintained copy that would
+    drift when tools are added."""
+    client = _client(dashboard_root)
+    response = client.get("/dashboard/mcp", headers=_auth_header())
+    assert response.status_code == 200
+    assert "/mcp" in response.text
+    assert "Bearer" in response.text
+    # A couple of representative tool names pulled from the live
+    # catalogue — enough to prove the render loop ran.
+    assert "list_machines" in response.text
+    assert "start_build" in response.text
+    assert "reboot_machine" in response.text
+
+
 def test_events_page_always_serves_live_view(dashboard_root: Path):
     """Events page polls the snapshot endpoint by default."""
     client = _client(dashboard_root)

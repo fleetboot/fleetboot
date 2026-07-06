@@ -1,0 +1,115 @@
+{% extends "base.html" %}
+{% block title %}fleetboot — MCP{% endblock %}
+{% block content %}
+<h1>MCP endpoint</h1>
+
+<p>fleetboot speaks the <a href="https://modelcontextprotocol.io">Model
+Context Protocol</a> so an LLM agent (Claude Desktop, Claude Code, any
+MCP client) can drive the fleet directly — enrol machines, author
+profiles, kick off builds, reboot hosts, tail events.</p>
+
+<h2>Connection</h2>
+<table>
+  <tbody>
+    <tr><th>Endpoint</th><td><code>{{ mcp_url }}</code></td></tr>
+    <tr><th>Method</th><td>POST (JSON-RPC 2.0)</td></tr>
+    <tr><th>Transport</th><td>Streamable HTTP — a single JSON body per
+      request; no SSE stream (server never initiates messages).</td></tr>
+    <tr><th>Auth</th><td><code>Authorization: Bearer &lt;admin&nbsp;secret&gt;</code>
+      &nbsp;— the same password you used to sign in here.</td></tr>
+    <tr><th>Protocol version</th><td><code>{{ protocol_version }}</code></td></tr>
+  </tbody>
+</table>
+
+<h2>Wire it up in a client</h2>
+
+<p><strong>Claude Code</strong> — from your terminal:</p>
+<pre>claude mcp add --transport http fleetboot {{ mcp_url }} \
+    --header "Authorization: Bearer &lt;admin secret&gt;"</pre>
+
+<p><strong>Claude Desktop / other MCP clients</strong> — add this to
+your MCP config JSON:</p>
+<pre>{
+  "mcpServers": {
+    "fleetboot": {
+      "url": "{{ mcp_url }}",
+      "transport": "http",
+      "headers": {
+        "Authorization": "Bearer &lt;admin secret&gt;"
+      }
+    }
+  }
+}</pre>
+
+<h2>Try it with curl</h2>
+<pre>curl -s -X POST {{ mcp_url }} \
+    -H "Authorization: Bearer &lt;admin secret&gt;" \
+    -H "Content-Type: application/json" \
+    -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'</pre>
+
+<h2>Server instructions</h2>
+<p class="muted">Sent to the model at <code>initialize</code> time —
+the "here's what fleetboot is and how to use these tools together"
+briefing.</p>
+<pre>{{ instructions }}</pre>
+
+<h2>Tools ({{ tools|length }})</h2>
+<p class="muted">Every tool's JSON Schema is delivered live via
+<code>tools/list</code>; this table is the same catalogue rendered for
+humans.</p>
+
+{% for tool in tools %}
+<h3><code>{{ tool.name }}</code></h3>
+<p>{{ tool.description }}</p>
+{% set props = tool.inputSchema.properties or {} %}
+{% if props %}
+<table>
+  <thead>
+    <tr>
+      <th>Argument</th>
+      <th>Type</th>
+      <th>Required</th>
+      <th>Default</th>
+      <th>Description</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for arg_name, arg_schema in props.items() %}
+    <tr>
+      <td><code>{{ arg_name }}</code></td>
+      <td>
+        {{ arg_schema.type }}{% if arg_schema.enum %}
+          <br><span class="muted">one of: {{ arg_schema.enum|join(", ") }}</span>
+        {% endif %}
+      </td>
+      <td>
+        {% if arg_name in (tool.inputSchema.required or []) %}
+          yes
+        {% else %}
+          <span class="muted">no</span>
+        {% endif %}
+      </td>
+      <td>
+        {% if arg_schema.default is defined %}
+          <code>{{ arg_schema.default }}</code>
+        {% else %}
+          <span class="muted">—</span>
+        {% endif %}
+      </td>
+      <td>
+        {% if arg_schema.description %}
+          {{ arg_schema.description }}
+        {% else %}
+          <span class="muted">—</span>
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="muted">No arguments.</p>
+{% endif %}
+{% endfor %}
+
+{% endblock %}
