@@ -813,17 +813,27 @@ def create_app(
     ):
         from fleetboot.server.build_jobs import BuildJobManager
         from fleetboot.server.dashboard import build_dashboard_router
+        from fleetboot.server.mcp import build_mcp_router
 
         builds = BuildJobManager(repo_root=dashboard_repo_root)
+        profiles_root = dashboard_repo_root / "image" / "profiles"
         dashboard_router = build_dashboard_router(
             registry=registry,
             sessions=store,
-            profiles_root=dashboard_repo_root / "image" / "profiles",
+            profiles_root=profiles_root,
             admin_secret=admin_secret,
             builds=builds,
             boot_dir=boot_dir,
         )
         app.include_router(dashboard_router)
+        app.include_router(
+            build_mcp_router(
+                registry=registry,
+                profiles_root=profiles_root,
+                builds=builds,
+                admin_secret=admin_secret,
+            )
+        )
         app.state.builds = builds
 
     return app
