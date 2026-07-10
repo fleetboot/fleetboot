@@ -58,9 +58,12 @@ Typical workflows an agent can drive here:
   Create or tweak a profile, then deploy it
     1. `save_profile` (creates or updates the directory).
     2. `write_profile_overlay` for any files that ship inside the image.
-    3. `start_build` — returns a job_id.
-    4. Poll `get_build` until state is "succeeded".
-    5. `reboot_machine` on the affected MACs so they PXE the new image.
+    3. `start_build` with `auto_reboot=true` — on success the manager
+       arms the soft-reboot signal on every machine running the same
+       profile+arch, so they PXE the new image on their next
+       heartbeat with no per-machine calls from you.
+    4. Poll `get_build` until state is "succeeded"; `auto_reboot_armed`
+       reports how many machines were swept.
 
   Reboot a machine
     - `reboot_machine` tries the per-machine reboot_command, then the
@@ -456,7 +459,11 @@ def _tool_catalogue() -> list[dict]:
             "name": "start_build",
             "description": (
                 "Kick off `make image` for a profile/arch pair. Returns "
-                "the new job_id; poll with get_build to watch state."
+                "the new job_id; poll with get_build to watch state. "
+                "Pass `auto_reboot=true` to arm the soft-reboot signal "
+                "on every machine running the same profile+arch when "
+                "the build succeeds — they PXE the new image on their "
+                "next heartbeat."
             ),
             "inputSchema": {
                 "type": "object",
@@ -464,6 +471,9 @@ def _tool_catalogue() -> list[dict]:
                     "profile": {"type": "string"},
                     "architecture": {
                         "type": "string", "default": "amd64",
+                    },
+                    "auto_reboot": {
+                        "type": "boolean", "default": False,
                     },
                 },
                 "required": ["profile"],
@@ -719,11 +729,16 @@ def _build_tool_impls(
     def start_build(args: dict) -> dict:
         profile = _require(args, "profile", str)
         architecture = args.get("architecture", "amd64")
+        auto_reboot = bool(args.get("auto_reboot", False))
         pdir = _profile_dir(profile)
         if not pdir.is_dir():
             raise _ToolError(f"profile not found: {profile}")
         try:
-            job = builds.start(profile=profile, architecture=architecture)
+            job = builds.start(
+                profile=profile,
+                architecture=architecture,
+                auto_reboot=auto_reboot,
+            )
         except BuildAlreadyRunningError as err:
             raise _ToolError(str(err) or "a build is already running")
         return _tool_text_result({
@@ -732,6 +747,7 @@ def _build_tool_impls(
             "architecture": job.architecture,
             "state": job.state.value,
             "started_at": job.started_at,
+            "auto_reboot": job.auto_reboot,
         })
 
     def _job_dict(j) -> dict:
@@ -743,6 +759,8 @@ def _build_tool_impls(
             "exit_code": j.exit_code,
             "started_at": j.started_at,
             "finished_at": j.finished_at,
+            "auto_reboot": j.auto_reboot,
+            "auto_reboot_armed": j.auto_reboot_armed,
         }
 
     def list_builds(_: dict) -> dict:

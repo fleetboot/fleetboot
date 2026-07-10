@@ -289,6 +289,93 @@ def test_start_build_registers_job(mcp_root: Path):
     assert got["state"] in ("succeeded", "failed")
 
 
+def test_start_build_with_auto_reboot_arms_matching_machines(mcp_root: Path):
+    """Fleet-wide reboot: a successful build with auto_reboot=true
+    arms `pending_reboot` on every machine running the same
+    profile+arch. Uses soft-reboot (not PDU) because a herd of curl
+    commands against one PDU is a bad time."""
+    import time
+
+    client = _client(mcp_root)
+    # Two machines on the target profile, one on a different profile —
+    # only the matching pair should get armed.
+    _call_tool(client, "enrol_machine", {
+        "mac": "aa:bb:cc:dd:ee:10", "profile_name": "default",
+        "architecture": "x86_64",
+    })
+    _call_tool(client, "enrol_machine", {
+        "mac": "aa:bb:cc:dd:ee:11", "profile_name": "default",
+        "architecture": "x86_64",
+    })
+    # This one should NOT be armed: different profile.
+    _call_tool(client, "enrol_machine", {
+        "mac": "aa:bb:cc:dd:ee:12", "profile_name": "default",
+        "architecture": "arm64",
+    })
+    # Create a second profile so the third machine is truly on a
+    # different profile than the one we're building.
+    (mcp_root / "image" / "profiles" / "kiosk").mkdir()
+    (mcp_root / "image" / "profiles" / "kiosk" / "extra-packages.list"
+     ).write_text("")
+    _call_tool(client, "enrol_machine", {
+        "mac": "aa:bb:cc:dd:ee:13", "profile_name": "kiosk",
+        "architecture": "x86_64",
+    })
+
+    started = _call_tool(client, "start_build", {
+        "profile": "default", "architecture": "amd64",
+        "auto_reboot": True,
+    })
+    assert started["auto_reboot"] is True
+    job_id = started["job_id"]
+
+    for _ in range(50):
+        got = _call_tool(client, "get_build", {"job_id": job_id})
+        if got["state"] in ("succeeded", "failed"):
+            break
+        time.sleep(0.1)
+    assert got["state"] == "succeeded"
+    # The sweep count reported on the job matches only the two matching
+    # machines. The arm64 default machine and the kiosk machine
+    # deliberately stayed cold.
+    assert got["auto_reboot_armed"] == 2
+
+    def _pending(mac: str) -> bool:
+        return _call_tool(
+            client, "get_machine", {"mac": mac},
+        )["pending_reboot"]
+
+    assert _pending("aa:bb:cc:dd:ee:10") is True
+    assert _pending("aa:bb:cc:dd:ee:11") is True
+    assert _pending("aa:bb:cc:dd:ee:12") is False
+    assert _pending("aa:bb:cc:dd:ee:13") is False
+
+
+def test_start_build_without_auto_reboot_leaves_machines_untouched(
+    mcp_root: Path,
+):
+    """Opt-in: a build without auto_reboot must not touch any
+    machine's pending_reboot flag."""
+    import time
+
+    client = _client(mcp_root)
+    _call_tool(client, "enrol_machine", {
+        "mac": "aa:bb:cc:dd:ee:20", "profile_name": "default",
+        "architecture": "x86_64",
+    })
+    started = _call_tool(client, "start_build", {"profile": "default"})
+    job_id = started["job_id"]
+    for _ in range(50):
+        got = _call_tool(client, "get_build", {"job_id": job_id})
+        if got["state"] in ("succeeded", "failed"):
+            break
+        time.sleep(0.1)
+    assert got["auto_reboot"] is False
+    assert got["auto_reboot_armed"] is None
+    m = _call_tool(client, "get_machine", {"mac": "aa:bb:cc:dd:ee:20"})
+    assert m["pending_reboot"] is False
+
+
 def test_start_build_rejects_unknown_profile(mcp_root: Path):
     client = _client(mcp_root)
     resp = _rpc(client, "tools/call", {

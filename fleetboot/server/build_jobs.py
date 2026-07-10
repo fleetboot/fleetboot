@@ -26,7 +26,7 @@ from collections import deque
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
 
 class JobState(str, Enum):
@@ -49,6 +49,14 @@ class BuildJob:
     finished_at: Optional[float] = None
     exit_code: Optional[int] = None
     log_path: Optional[str] = None
+    # When true, the manager's on_success callback is expected to sweep
+    # the fleet and arm the soft-reboot signal on every machine running
+    # this profile+arch. Stored on the job (not the manager) so it's
+    # per-invocation and shows up in the log/history.
+    auto_reboot: bool = False
+    # Set by the manager once the on_success sweep runs — count of
+    # machines that had the soft-reboot signal armed. Purely for UI.
+    auto_reboot_armed: Optional[int] = None
     # Bounded in-memory ring of recent lines, for the dashboard's live tail.
     # The full log lives at ``log_path``.
     recent_lines: deque[str] = field(
@@ -69,6 +77,7 @@ class BuildJobManager:
         repo_root: Path,
         log_dir: Optional[Path] = None,
         make_path: str = "make",
+        on_success: Optional[Callable[["BuildJob"], None]] = None,
     ) -> None:
         if not (repo_root / "Makefile").is_file():
             raise RuntimeError(
@@ -82,6 +91,10 @@ class BuildJobManager:
         self._jobs: dict[str, BuildJob] = {}
         self._jobs_lock = threading.Lock()
         self._running_lock = threading.Lock()
+        # Called with the BuildJob when it transitions to SUCCEEDED.
+        # The dashboard wire-up uses this to fan-out a fleet-wide reboot
+        # when the job was started with auto_reboot=True.
+        self._on_success = on_success
 
     # ---- public API -----------------------------------------------------
 
@@ -109,9 +122,18 @@ class BuildJobManager:
         return list(job.recent_lines)[-n:]
 
     def start(
-        self, *, profile: str, architecture: str = "amd64",
+        self,
+        *,
+        profile: str,
+        architecture: str = "amd64",
+        auto_reboot: bool = False,
     ) -> BuildJob:
-        """Spawn a build. Raises if one is already running."""
+        """Spawn a build. Raises if one is already running.
+
+        `auto_reboot` — if true, on successful build the manager's
+        on_success callback fires, which the app wires up to arm the
+        soft-reboot signal on every machine running this profile+arch.
+        """
         if not self._running_lock.acquire(blocking=False):
             raise BuildAlreadyRunningError(
                 "another build is already running"
@@ -125,6 +147,7 @@ class BuildJobManager:
             state=JobState.RUNNING,
             started_at=time.time(),
             log_path=str(log_path),
+            auto_reboot=auto_reboot,
         )
         with self._jobs_lock:
             self._jobs[job_id] = job
@@ -190,6 +213,19 @@ class BuildJobManager:
         finally:
             job.finished_at = time.time()
             self._running_lock.release()
+        # Fire the success callback OUTSIDE the running_lock so callbacks
+        # can safely start follow-up work (e.g. arm reboots, which may
+        # touch the same registry the dashboard is polling). Callback
+        # exceptions are swallowed into the job log — a fleet-wide
+        # reboot failure shouldn't retroactively "fail" a build that
+        # actually produced a valid artifact.
+        if job.state == JobState.SUCCEEDED and self._on_success is not None:
+            try:
+                self._on_success(job)
+            except Exception as exc:  # noqa: BLE001
+                job.recent_lines.append(
+                    f"on_success callback failed: {exc!r}"
+                )
 
 
 def _make_id() -> str:

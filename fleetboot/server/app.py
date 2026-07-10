@@ -811,11 +811,52 @@ def create_app(
         and registry is not None
         and admin_secret is not None
     ):
-        from fleetboot.server.build_jobs import BuildJobManager
+        from fleetboot.server.build_jobs import BuildJob, BuildJobManager
         from fleetboot.server.dashboard import build_dashboard_router
         from fleetboot.server.mcp import build_mcp_router
 
-        builds = BuildJobManager(repo_root=dashboard_repo_root)
+        # amd64/x86_64/x64 all name the same wire-format arch — Debian
+        # uses "amd64" for build artefacts, but the registry stores
+        # whatever the PXE boot loader announced (typically "x86_64"
+        # for BIOS or "x64" for EFI). Same story for arm64/aarch64.
+        _ARCH_ALIASES = {
+            "amd64": ("amd64", "x86_64", "x64"),
+            "x86_64": ("amd64", "x86_64", "x64"),
+            "x64": ("amd64", "x86_64", "x64"),
+            "arm64": ("arm64", "aarch64"),
+            "aarch64": ("arm64", "aarch64"),
+        }
+
+        def _fleet_wide_reboot_on_success(job: BuildJob) -> None:
+            """Arm the soft-reboot signal on every machine running the
+            same (profile, architecture) as this build. Soft-reboot
+            (rather than PDU) is the right hammer for a fleet-wide op:
+            no thundering-herd against a PDU, each machine reboots
+            itself on its next /status heartbeat.
+            """
+            if not job.auto_reboot:
+                return
+            aliases = _ARCH_ALIASES.get(
+                job.architecture, (job.architecture,)
+            )
+            armed = 0
+            for machine in registry.list_all():
+                if (
+                    machine.profile_name == job.profile
+                    and machine.architecture in aliases
+                ):
+                    registry.set_pending_reboot(machine.mac, True)
+                    armed += 1
+            job.auto_reboot_armed = armed
+            job.recent_lines.append(
+                f"auto-reboot: armed pending_reboot on {armed} "
+                f"machine(s) running {job.profile}/{job.architecture}"
+            )
+
+        builds = BuildJobManager(
+            repo_root=dashboard_repo_root,
+            on_success=_fleet_wide_reboot_on_success,
+        )
         profiles_root = dashboard_repo_root / "image" / "profiles"
         dashboard_router = build_dashboard_router(
             registry=registry,

@@ -21,6 +21,10 @@
       <option value="arm64">arm64</option>
     </select>
   </label>
+  <label title="On success, arm the soft-reboot signal on every machine running the same profile+arch so they pick up the new image on their next /status heartbeat.">
+    <input type="checkbox" name="auto_reboot" value="1">
+    Auto-reboot matching machines when the build succeeds
+  </label>
   <button type="submit" {% if running %}disabled{% endif %}>
     {% if running %}build already running{% else %}start build{% endif %}
   </button>
@@ -38,6 +42,7 @@
       <th>Started</th>
       <th>Duration</th>
       <th>Artifact</th>
+      <th>Auto-reboot</th>
       <th></th>
     </tr>
   </thead>
@@ -62,6 +67,19 @@
         {% if art %}
           <code>{{ art.name }}</code>
           <br><span class="muted">{{ art.size_mb }} MB · {{ art.mtime }}</span>
+        {% else %}
+          <span class="muted">—</span>
+        {% endif %}
+      </td>
+      <td data-role="auto-reboot">
+        {% if j.auto_reboot %}
+          {% if j.auto_reboot_armed is not none %}
+            <span class="state-succeeded" title="Fleet-wide reboot armed after build success">
+              armed {{ j.auto_reboot_armed }}
+            </span>
+          {% else %}
+            <span class="muted">pending</span>
+          {% endif %}
         {% else %}
           <span class="muted">—</span>
         {% endif %}
@@ -95,6 +113,14 @@
       '<br><span class="muted">' + j.artifact.size_mb + ' MB · ' +
       escapeHtml(j.artifact.mtime) + '</span>';
   }
+  function renderAutoReboot(j) {
+    if (!j.auto_reboot) return '<span class="muted">&mdash;</span>';
+    if (j.auto_reboot_armed != null) {
+      return '<span class="state-succeeded" title="Fleet-wide reboot armed after build success">' +
+        'armed ' + j.auto_reboot_armed + '</span>';
+    }
+    return '<span class="muted">pending</span>';
+  }
   function apply(data) {
     for (const j of data.jobs) {
       const row = document.querySelector('tr[data-job-id="' + j.job_id + '"]');
@@ -103,10 +129,12 @@
       const exit = row.querySelector('[data-role="exit"]');
       const duration = row.querySelector('[data-role="duration"]');
       const artifact = row.querySelector('[data-role="artifact"]');
+      const autoReboot = row.querySelector('[data-role="auto-reboot"]');
       if (state) state.innerHTML = renderState(j);
       if (exit) exit.textContent = j.exit_code == null ? '—' : String(j.exit_code);
       if (duration) duration.innerHTML = renderDuration(j);
       if (artifact) artifact.innerHTML = renderArtifact(j);
+      if (autoReboot) autoReboot.innerHTML = renderAutoReboot(j);
     }
     // If a job appears that isn't in the current DOM, a full reload
     // brings it in — polling can't sensibly grow the table itself

@@ -51,6 +51,62 @@ def test_failing_build_records_failed(tmp_path: Path):
     assert finished.exit_code != 0
 
 
+def test_on_success_callback_fires_only_when_build_succeeds(tmp_path: Path):
+    """The manager only invokes on_success for SUCCEEDED jobs — a
+    failed build cannot arm follow-up work like a fleet-wide reboot."""
+    seen: list = []
+    (tmp_path / "Makefile").write_text(".PHONY: image\nimage:\n\techo ok\n")
+    manager = BuildJobManager(
+        repo_root=tmp_path, on_success=lambda job: seen.append(job.job_id),
+    )
+    job = manager.start(profile="default", architecture="amd64")
+    _wait_finished(manager, job.job_id)
+    assert seen == [job.job_id]
+
+
+def test_on_success_callback_skipped_when_build_fails(tmp_path: Path):
+    seen: list = []
+    (tmp_path / "Makefile").write_text(".PHONY: image\nimage:\n\texit 3\n")
+    manager = BuildJobManager(
+        repo_root=tmp_path, on_success=lambda job: seen.append(job.job_id),
+    )
+    job = manager.start(profile="default", architecture="amd64")
+    _wait_finished(manager, job.job_id)
+    assert seen == []
+
+
+def test_on_success_receives_auto_reboot_flag(tmp_path: Path):
+    """`auto_reboot` is per-invocation state stored on the job so the
+    callback can decide whether to sweep the fleet."""
+    captured: list = []
+    (tmp_path / "Makefile").write_text(".PHONY: image\nimage:\n\techo ok\n")
+    manager = BuildJobManager(
+        repo_root=tmp_path,
+        on_success=lambda job: captured.append(job.auto_reboot),
+    )
+    job = manager.start(
+        profile="default", architecture="amd64", auto_reboot=True,
+    )
+    _wait_finished(manager, job.job_id)
+    assert captured == [True]
+
+
+def test_on_success_callback_errors_dont_fail_the_build(tmp_path: Path):
+    """A crash in the fleet-wide reboot sweep must not retroactively
+    downgrade a build that produced a valid artefact."""
+    (tmp_path / "Makefile").write_text(".PHONY: image\nimage:\n\techo ok\n")
+
+    def boom(_job):
+        raise RuntimeError("pretend the registry blew up")
+
+    manager = BuildJobManager(repo_root=tmp_path, on_success=boom)
+    job = manager.start(profile="default", architecture="amd64")
+    finished = _wait_finished(manager, job.job_id)
+    assert finished.state == JobState.SUCCEEDED
+    log = manager.tail_log(job.job_id)
+    assert any("on_success callback failed" in line for line in log)
+
+
 def test_only_one_build_at_a_time(tmp_path: Path):
     manager = _manager(tmp_path, "image:\n\tsleep 0.5\n")
     first = manager.start(profile="default", architecture="amd64")
