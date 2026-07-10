@@ -99,5 +99,101 @@ services:
       - ../fleetboot/build:/build:ro
     restart: unless-stopped
 
+  # ---- Optional: FreeIPA identity server -------------------------------
+  #
+  # Standalone identity + Kerberos + LDAP server, gated behind the `ipa`
+  # compose profile so it doesn't fire on a dev laptop (port surface is
+  # aggressive — Kerberos, LDAP, HTTPS all publish on the host).
+  #
+  #   docker compose --profile ipa up -d ipa
+  #
+  # Not coupled to fleetboot. Booted machines whose profile bakes in a
+  # `enroll-freeipa` step (see image/identity/) can enrol against this
+  # instance, or against any other IPA server — fleetboot doesn't care.
+  #
+  # First-boot notes:
+  #  - IPA_SERVER_IP must match a stable address the compose host
+  #    exposes on the LAN (typically the same LAN IP as CLIENT_BASE_URL).
+  #  - Install runs on first `up`; expect ~5-10 minutes before the
+  #    Kerberos KDC and 389-DS are ready.
+  #  - --no-dns is set: use your existing DNS for the IPA hostname.
+  #    Point A + PTR at IPA_SERVER_IP before starting the container.
+  #  - Backups: `docker compose exec ipa ipa-backup` (do NOT tar /data
+  #    live — 389-DS won't be consistent).
+  ipa:
+    image: freeipa/freeipa-server:almalinux-10
+    container_name: ipa
+    profiles: ["ipa"]
+    # FreeIPA runs its own systemd + D-Bus + 389-DS + krb5kdc + Apache
+    # inside one container. It insists on being addressable by FQDN,
+    # both directions (forward + reverse), so hostname MUST match
+    # IPA_SERVER_HOSTNAME.
+    # Compose interpolates env for EVERY service at parse time, before
+    # the profile filter runs — so we default IPA_SERVER_* to empty
+    # instead of the `${VAR:?err}` shape used elsewhere. Missing values
+    # only bite when you actually start the container (the install
+    # aborts loudly), never when you run compose without --profile ipa.
+    hostname: ${IPA_SERVER_HOSTNAME:-}
+    # cgroup: host lets the container's systemd see the host cgroup
+    # tree, which is what upstream expects on cgroups v2. Without this
+    # the KDC ExecStart fails at boot with a permissions error.
+    cgroup: host
+    # SIGRTMIN+3 is systemd's "clean shutdown" signal; the container's
+    # PID 1 is systemd, and TERM triggers a slow ~90s shutdown.
+    stop_signal: SIGRTMIN+3
+    # /run + /tmp on tmpfs so systemd + D-Bus can write there under a
+    # read-only rootfs setup, and so kernel keyrings don't leak across
+    # container restarts.
+    tmpfs:
+      - /run
+      - /tmp
+    # systemd inside the container wants a handful of syscalls Docker's
+    # default seccomp policy blocks — most notoriously keyctl. Simplest
+    # workable posture is to disable the profile; this container should
+    # be on a trusted admin LAN either way.
+    security_opt:
+      - seccomp:unconfined
+    environment:
+      # IPA setup consumes these on first boot. Subsequent boots ignore
+      # them — /data holds the persistent config.
+      IPA_SERVER_HOSTNAME: ${IPA_SERVER_HOSTNAME:-}
+      IPA_SERVER_IP: ${IPA_SERVER_IP:-}
+      # `--no-dns` — use existing DNS. `--no-ntp` — trust the host clock
+      # (the container inherits host time). `--unattended` + password
+      # come from env below.
+      IPA_SERVER_INSTALL_OPTS: >-
+        --realm=${IPA_REALM:-}
+        --domain=${IPA_DOMAIN:-}
+        --no-dns
+        --no-ntp
+        --no-host-dns
+        --unattended
+      # Directory Manager AND admin password on first install.
+      PASSWORD: ${IPA_ADMIN_PASSWORD:-}
+    # LDAP + Kerberos + HTTPS all need to be reachable from every
+    # classroom PC directly — no way to proxy Kerberos through fleetboot.
+    ports:
+      - "80:80"        # HTTP (redirects to HTTPS + serves CA cert)
+      - "443:443"      # HTTPS — FreeIPA web UI + JSON API
+      - "389:389"      # LDAP
+      - "636:636"      # LDAPS
+      - "88:88"        # Kerberos KDC
+      - "88:88/udp"
+      - "464:464"      # kpasswd
+      - "464:464/udp"
+    volumes:
+      # Single volume holds the whole installation: 389-DS DB, KDC
+      # database, CA, config, logs. Snapshotting this WHILE the
+      # container is up will produce a half-baked backup — use
+      # `ipa-backup` instead. Named volume so `docker compose down`
+      # doesn't nuke identity state.
+      - freeipa-data:/data
+      # systemd inside the container needs somewhere to persist its
+      # cgroup state; a bind of the host cgroup tree is the upstream
+      # recommendation for cgroups v2.
+      - /sys/fs/cgroup:/sys/fs/cgroup:ro
+    restart: unless-stopped
+
 volumes:
   fleetboot-data:
+  freeipa-data:
