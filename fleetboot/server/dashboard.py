@@ -147,6 +147,8 @@ def build_dashboard_router(
                     "exit_code": j.exit_code,
                     "started_at": j.started_at,
                     "finished_at": j.finished_at,
+                    "auto_reboot": j.auto_reboot,
+                    "auto_reboot_armed": j.auto_reboot_armed,
                     "artifact": (
                         _artifact_for(boot_dir, j.profile, j.architecture)
                         if j.state.value == "succeeded" else None
@@ -872,6 +874,7 @@ def build_dashboard_router(
     def trigger_build(
         profile: str = Form(...),
         architecture: str = Form("amd64"),
+        auto_reboot: Optional[str] = Form(None),
     ) -> RedirectResponse:
         # Validate profile name and that it actually exists.
         _safe_profile_dir(profiles_root, profile)
@@ -881,7 +884,11 @@ def build_dashboard_router(
                 detail="profile not found",
             )
         try:
-            job = builds.start(profile=profile, architecture=architecture)
+            job = builds.start(
+                profile=profile,
+                architecture=architecture,
+                auto_reboot=bool(auto_reboot),
+            )
         except BuildAlreadyRunningError:
             # Don't crash; surface as a flash on the builds page.
             return RedirectResponse(
