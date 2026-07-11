@@ -1,0 +1,14 @@
+# Poll every 5 minutes. SSSD doesn't currently expose an event stream
+# for "a user just became visible", so a polling timer is the simplest
+# reliable trigger. A per-user login can also just kick the service
+# directly via PAM's session hook if that becomes worthwhile.
+[Unit]
+Description=Periodically provision NFS home directories
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=5min
+AccuracySec=30s
+
+[Install]
+WantedBy=timers.target

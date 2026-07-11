@@ -1,0 +1,23 @@
+# Provisions NFS home dirs for every SSSD/IPA user present on this
+# host. Companion to fleetboot-provision-homes.timer.
+#
+# Install: copy both files to /etc/systemd/system/ and
+#     systemctl enable --now fleetboot-provision-homes.timer
+[Unit]
+Description=Provision NFS home directories for all SSSD users
+Requires=sssd.service
+After=sssd.service
+
+[Service]
+Type=oneshot
+# Enumerate every UID >= 1000 that SSSD/nsswitch resolves, feed them
+# to the provisioning script. The awk filter drops nobody and the
+# reserved-range accounts.
+#
+# EXPORT_HOME_ROOT should match the compose bind-mount source — by
+# default /srv/fleetboot/nfs/export/home on the docker host.
+Environment=EXPORT_HOME_ROOT=/srv/fleetboot/nfs/export/home
+ExecStart=/bin/sh -c "getent passwd | awk -F: '$3 >= 1000 && $3 < 65534 {print $1}' | xargs -r /opt/fleetboot/scripts/provision-user-home.sh"
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,11 @@
+# Drop Kerberos keytabs here.
+#
+# The NFS compose service (docker compose --profile nfs) expects
+# nfs.keytab in this directory by default — a service keytab for
+# nfs/<compose-host-fqdn>@REALM issued by FreeIPA. Get one with:
+#
+#   ipa-getkeytab -s ipa.realm.example.com \
+#                 -p nfs/nfs-host.realm.example.com \
+#                 -k /path/on/host/nfs.keytab
+#
+# Move it into place before bringing the profile up.

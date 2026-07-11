@@ -18,6 +18,13 @@ Env vars:
                                 DHCP / hostname — for docker deployments
                                 on the same LAN this is normally the host
                                 machine's LAN IP + FLEETBOOT_PORT.
+  FLEETBOOT_TLS_CERT            optional path to a PEM cert. When set
+                                (together with FLEETBOOT_TLS_KEY), uvicorn
+                                serves HTTPS instead of HTTP. Admin owns
+                                the cert source (ACME, an internal CA, a
+                                FreeIPA-issued cert, self-signed) — this
+                                process just consumes the files.
+  FLEETBOOT_TLS_KEY             optional path to the matching PEM key.
 """
 
 from __future__ import annotations
@@ -84,12 +91,35 @@ def main() -> None:
         authorized_keys_path=authorized_keys_path,
     )
 
-    uvicorn.run(
-        app,
-        host=os.environ.get("FLEETBOOT_HOST", "0.0.0.0"),
-        port=int(os.environ.get("FLEETBOOT_PORT", "8080")),
-        log_level=os.environ.get("FLEETBOOT_LOG_LEVEL", "info").lower(),
-    )
+    kwargs: dict = {
+        "host": os.environ.get("FLEETBOOT_HOST", "0.0.0.0"),
+        "port": int(os.environ.get("FLEETBOOT_PORT", "8080")),
+        "log_level": os.environ.get("FLEETBOOT_LOG_LEVEL", "info").lower(),
+    }
+    # Opt-in HTTPS. Both cert and key must be present — one without
+    # the other is almost certainly a misconfiguration, so fail
+    # loudly at startup rather than silently falling back to HTTP.
+    tls_cert = os.environ.get("FLEETBOOT_TLS_CERT")
+    tls_key = os.environ.get("FLEETBOOT_TLS_KEY")
+    if tls_cert or tls_key:
+        if not (tls_cert and tls_key):
+            print(
+                "fleetboot.server: FLEETBOOT_TLS_CERT and "
+                "FLEETBOOT_TLS_KEY must be set together",
+                file=sys.stderr,
+            )
+            sys.exit(2)
+        if not Path(tls_cert).is_file() or not Path(tls_key).is_file():
+            print(
+                "fleetboot.server: FLEETBOOT_TLS_CERT / _KEY "
+                "point at files that don't exist",
+                file=sys.stderr,
+            )
+            sys.exit(2)
+        kwargs["ssl_certfile"] = tls_cert
+        kwargs["ssl_keyfile"] = tls_key
+
+    uvicorn.run(app, **kwargs)
 
 
 if __name__ == "__main__":

@@ -39,6 +39,10 @@ services:
       FLEETBOOT_ADMIN_SECRET: ${FLEETBOOT_ADMIN_SECRET:?set FLEETBOOT_ADMIN_SECRET in .env}
       FLEETBOOT_MINT_SECRET: ${FLEETBOOT_MINT_SECRET:?set FLEETBOOT_MINT_SECRET in .env}
       FLEETBOOT_LOG_LEVEL: ${FLEETBOOT_LOG_LEVEL:-info}
+      # Optional TLS. Files are read from inside the container — mount
+      # them via the ../tls bind below. Leave both empty for plain HTTP.
+      FLEETBOOT_TLS_CERT: ${FLEETBOOT_TLS_CERT:-}
+      FLEETBOOT_TLS_KEY: ${FLEETBOOT_TLS_KEY:-}
     volumes:
       # SQLite registry lives here; survives container rebuilds.
       - fleetboot-data:/data
@@ -52,6 +56,10 @@ services:
       - ../fleetboot/image/profiles:/app/image/profiles:rw
       # Admin overlays / customisations.
       - ../fleetboot/image/custom:/app/image/custom:rw
+      # Optional: admin-supplied TLS material. Empty by default so
+      # the mount is a no-op. Point FLEETBOOT_TLS_CERT + _KEY at
+      # /tls/<file>.pem to enable HTTPS.
+      - ../fleetboot/tls:/tls:ro
       # fakemachine (used by debos) boots a KVM guest for the actual
       # image build. That guest needs kernel modules matching the
       # RUNNING kernel — which the container inherits from the host,
@@ -192,6 +200,61 @@ services:
       # cgroup state; a bind of the host cgroup tree is the upstream
       # recommendation for cgroups v2.
       - /sys/fs/cgroup:/sys/fs/cgroup:ro
+    restart: unless-stopped
+
+  # ---- Optional: Kerberised NFSv4 server -------------------------------
+  #
+  # Kernel NFSD in a container, gated behind the `nfs` compose profile.
+  # Serves /export/home and /export/shared under sec=krb5p — see
+  # nfs/exports.template. Independent of the `ipa` profile: this
+  # service consumes an IPA_DOMAIN + a pre-provisioned keytab, but
+  # doesn't care where they came from. Point it at any Kerberos realm.
+  #
+  #   docker compose --profile nfs up -d nfs
+  #
+  # Prerequisites on the host:
+  #  - modprobe nfsd (or the host boots with nfsd loaded)
+  #  - The compose host is FreeIPA-enrolled (or you've obtained a
+  #    keytab out-of-band) and you've dropped nfs/<host>@REALM at
+  #    ../fleetboot/tls-keytabs/nfs.keytab (or wherever
+  #    NFS_KEYTAB_HOST_PATH in .env points).
+  #  - The host has an /srv/fleetboot/nfs/export directory that will
+  #    hold /export/home and /export/shared.
+  #
+  # Kernel NFSD in a container needs CAP_SYS_ADMIN + host networking +
+  # /lib/modules; it's the well-trodden path but does mean this container
+  # is more privileged than fleetboot itself. Isolate it accordingly.
+  nfs:
+    build:
+      context: ..
+      dockerfile: fleetboot/docker/Dockerfile.nfs
+    image: fleetboot-nfs:local
+    container_name: fleetboot-nfs
+    profiles: ["nfs"]
+    # NFSv4 uses port 2049 + rpcbind on 111; kernel-side gss opens
+    # dynamic sunrpc ports. Host networking avoids the whole mess.
+    network_mode: host
+    # NFSD needs kernel-level operations Docker's default profile
+    # blocks. CAP_SYS_ADMIN + SYS_MODULE let it modprobe nfsd and
+    # register with the kernel rpc layer.
+    cap_add:
+      - SYS_ADMIN
+      - SYS_MODULE
+    environment:
+      # NFSv4 idmap domain — must match the FreeIPA realm's DNS
+      # domain and every client's /etc/idmapd.conf `Domain`.
+      IPA_DOMAIN: ${IPA_DOMAIN:-}
+      NFSD_THREADS: ${NFSD_THREADS:-8}
+    volumes:
+      # Kernel modules from the host — nfsd is a module, not built-in
+      # on stock Debian, so the container needs to see it.
+      - /lib/modules:/lib/modules:ro
+      # The export tree. Bind on the host so the admin can inspect
+      # /srv/fleetboot/nfs/export/home/<user> and rsync backups off.
+      - ${NFS_EXPORT_HOST_PATH:-/srv/fleetboot/nfs/export}:/export:rw
+      # Service keytab. Populate this file with `ipa-getkeytab -s
+      # <ipa-server> -p nfs/<compose-host-fqdn> -k <path>`.
+      - ${NFS_KEYTAB_HOST_PATH:-./tls-keytabs/nfs.keytab}:/etc/krb5.keytab:ro
     restart: unless-stopped
 
 volumes:
