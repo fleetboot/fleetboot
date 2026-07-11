@@ -1,0 +1,5 @@
+# Drop a PEM cert + matching key here (e.g. fleetboot.crt,
+# fleetboot.key). Point FLEETBOOT_TLS_CERT + FLEETBOOT_TLS_KEY at
+# /tls/fleetboot.crt + /tls/fleetboot.key in the container to enable
+# HTTPS on the fleetboot service. The mount at ../fleetboot/tls in
+# docker-compose.yml surfaces this directory read-only to the container.

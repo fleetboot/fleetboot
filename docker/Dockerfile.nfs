@@ -1,0 +1,37 @@
+# Kerberised NFSv4 server for fleetboot.
+#
+# Runs kernel NFSD inside the container (nfs-kernel-server + rpcbind +
+# rpc.gssd + rpc.idmapd). Needs host networking, CAP_SYS_ADMIN, and
+# the host's /lib/modules read-only so the container can find and
+# load the nfsd module — see docker-compose.yml `nfs` service.
+#
+# State lives on the host: /srv/fleetboot/nfs/export bind-mounted at
+# /export in the container. A pre-provisioned service keytab is
+# bind-mounted at /etc/krb5.keytab (see scripts/setup-nfs-server.sh
+# for how to fetch one from FreeIPA).
+FROM debian:trixie-slim
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+         nfs-kernel-server \
+         nfs-common \
+         rpcbind \
+         krb5-user \
+         keyutils \
+         gettext-base \
+    && rm -rf /var/lib/apt/lists/*
+
+# Templates live in nfs/ in the repo; the compose build context is the
+# workspace root so we can COPY them straight in.
+COPY fleetboot/nfs/exports.template     /templates/exports.template
+COPY fleetboot/nfs/idmapd.conf.template /templates/idmapd.conf.template
+
+COPY fleetboot/docker/nfs-entrypoint.sh /usr/local/bin/nfs-entrypoint.sh
+RUN chmod +x /usr/local/bin/nfs-entrypoint.sh
+
+# Kernel NFSD listens on 2049; rpcbind on 111; rpc.mountd/statd on
+# dynamic ports we pin below via /etc/default/nfs-*. Host networking
+# means "the container's ports are the host's ports" — see compose.
+EXPOSE 2049 111
+
+ENTRYPOINT ["/usr/local/bin/nfs-entrypoint.sh"]
