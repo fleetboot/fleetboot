@@ -24,3 +24,8 @@ image/profiles_resolved/
 
 # Local deployment config — never commit secrets.
 .env
+
+# Baked per-deployment secrets — provisioned out of band, never committed.
+image/profiles/*/overlay/etc/krb5.keytab
+image/profiles/*/overlay/etc/fleetboot/enrol.keytab
+image/custom/authorized_keys

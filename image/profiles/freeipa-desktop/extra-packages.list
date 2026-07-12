@@ -1,0 +1,6 @@
+# Extra packages for the freeipa-desktop deployment image (on top of what the
+# cinnamon-desktop + freeipa parents provide).
+#
+# Firefox ESR is the browser Debian ships in main (`firefox` itself is not in
+# Debian main). ~200 MB with its dependencies.
+firefox-esr

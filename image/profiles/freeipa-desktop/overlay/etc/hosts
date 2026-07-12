@@ -1,0 +1,10 @@
+127.0.0.1	localhost
+127.0.1.1	laptop.fleet.lan laptop
+# FreeIPA identity server + Kerberos NFSv4 home server (co-located on the
+# fleetboot host). On this flat LAN there is no DNS zone for the realm, so
+# clients resolve it here. Kept in step with identity.conf in this overlay.
+192.168.25.13	ipa.fleet.lan ipa nfs.fleet.lan
+
+::1		localhost ip6-localhost ip6-loopback
+ff02::1		ip6-allnodes
+ff02::2		ip6-allrouters

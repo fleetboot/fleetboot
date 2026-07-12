@@ -1,0 +1,6 @@
+# A full desktop machine with central FreeIPA login and Kerberos NFS homes.
+#   cinnamon-desktop → Cinnamon + LightDM greeter + intel/amd graphics + logo
+#   freeipa          → FreeIPA/SSSD/Kerberos/NFS/autofs identity (from fleetid,
+#                      symlinked in at image/profiles/freeipa)
+cinnamon-desktop
+freeipa
