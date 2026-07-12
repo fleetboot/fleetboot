@@ -1,0 +1,74 @@
+#!/bin/sh
+# trailcam-test profile setup - runs inside the image chroot.
+set -eu
+
+# ===== AIC8800D80 USB WiFi+BT combo driver (out-of-tree) ==============
+# The dongle (aicsemi a69c:8d80 -> a69c:8d81 once firmware loads) has NO
+# mainline driver. Build shenmintao's 'bluetooth' branch, which gives
+# WiFi (aic8800_fdrv) + BT via the stock btusb once fw uploads.
+#
+# CROSS-BUILD TRAP: `uname -r` in this chroot is the BUILD HOST kernel,
+# not the image kernel. Derive KVER from /lib/modules and pass KDIR/KVER
+# explicitly, and install the .ko ourselves rather than trusting the
+# Makefile's `make install` (which keys off uname -r).
+KVER="$(basename "$(ls -d /lib/modules/*/ | sort -V | tail -1)")"
+echo "Building AIC8800D80 driver for image kernel: $KVER"
+apt-get update || true
+apt-get install -y --no-install-recommends "linux-headers-${KVER}"
+git clone --depth 1 -b bluetooth https://github.com/shenmintao/aic8800d80 /usr/src/aic8800d80
+cd /usr/src/aic8800d80/drivers/aic8800
+make -j"$(nproc)" KVER="$KVER" KDIR="/lib/modules/${KVER}/build"
+install -d "/lib/modules/${KVER}/updates"
+find . -name '*.ko' -exec cp -v {} "/lib/modules/${KVER}/updates/" \;
+depmod -a "$KVER"
+# Firmware (WiFi + BT patch blobs) + udev/mode-switch rules.
+rm -rf /lib/firmware/aic8800* 2>/dev/null || true
+cp -r /usr/src/aic8800d80/fw/aic8800D80 /lib/firmware/
+for r in /usr/src/aic8800d80/aic.rules /usr/src/aic8800d80/*.rules; do
+    [ -f "$r" ] && cp "$r" /lib/udev/rules.d/ || true
+done
+# Autoload at boot; btusb binds the BT function once firmware is up.
+printf 'aic_load_fw\naic8800_fdrv\n' > /etc/modules-load.d/aic8800.conf
+cd /
+
+# ===== generic nonfree firmware for other radios (best-effort) =======
+if [ -f /etc/apt/sources.list.d/debian.sources ]; then
+    grep -q non-free-firmware /etc/apt/sources.list.d/debian.sources || \
+        sed -i 's/^Components: .*/& non-free-firmware/' /etc/apt/sources.list.d/debian.sources
+elif [ -f /etc/apt/sources.list ]; then
+    grep -q non-free-firmware /etc/apt/sources.list || \
+        sed -i 's/ main\( \|$\)/ main non-free-firmware\1/' /etc/apt/sources.list
+fi
+apt-get update || true
+apt-get install -y --no-install-recommends \
+    firmware-realtek firmware-atheros firmware-misc-nonfree firmware-iwlwifi \
+    || echo "WARN: some firmware packages unavailable; check lsusb/dmesg on boot"
+
+# ===== Python client deps (baked venv, works offline on the cam AP) ==
+python3 -m venv /opt/tcam/venv
+/opt/tcam/venv/bin/pip install --no-cache-dir --upgrade pip
+/opt/tcam/venv/bin/pip install --no-cache-dir bleak pycryptodome
+
+# ===== root ssh key perms; disable boot-time key fetch (would clobber) 
+install -d -m700 -o root -g root /root/.ssh
+chmod 600 /root/.ssh/authorized_keys 2>/dev/null || true
+systemctl disable fleetboot-fetch-authorized-keys.service 2>/dev/null || true
+systemctl mask    fleetboot-fetch-authorized-keys.service 2>/dev/null || true
+
+# ===== radios up at boot: bluetoothd + unblock rfkill ================
+systemctl enable bluetooth.service
+cat > /etc/systemd/system/tcam-rfkill-unblock.service <<'UNIT'
+[Unit]
+Description=Unblock all rfkill radios for trailcam testing
+After=systemd-rfkill.service
+Wants=systemd-rfkill.service
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/rfkill unblock all
+RemainAfterExit=yes
+[Install]
+WantedBy=multi-user.target
+UNIT
+systemctl enable tcam-rfkill-unblock.service
+
+chmod +x /opt/tcam/join-cam.sh 2>/dev/null || true

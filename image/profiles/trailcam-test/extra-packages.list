@@ -1,0 +1,23 @@
+bluez
+rfkill
+wpasupplicant
+iw
+wireless-regdb
+iproute2
+isc-dhcp-client
+usbutils
+pciutils
+tcpdump
+python3
+python3-venv
+ca-certificates
+iputils-ping
+# --- toolchain to build the out-of-tree AIC8800D80 driver ---
+build-essential
+libelf-dev
+bc
+kmod
+git
+# --- mass-storage -> wifi mode switch for the combo dongle ---
+usb-modeswitch
+usb-modeswitch-data
