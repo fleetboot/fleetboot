@@ -36,10 +36,11 @@ def test_bootstrap_account_is_idempotent():
 
 
 def test_bootstrap_account_home_is_outside_slash_home():
-    """autofs takes over /home for FreeIPA users (auto.home wildcard
-    match), which shadows any local /home/<name> directory at login
-    time. The bootstrap account's home MUST be outside /home so its
-    .Xauthority etc. can be created by lightdm."""
+    """When the fleetid `freeipa` profile is layered, autofs takes over
+    /home (auto.home wildcard match), which would shadow any local
+    /home/<name> directory at login time. The bootstrap account's home
+    MUST be outside /home — regardless of whether that profile is present —
+    so its .Xauthority etc. can be created by lightdm."""
     text = RECIPE.read_text()
     assert "--home-dir /var/local/fleetboot" in text
 

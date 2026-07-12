@@ -55,9 +55,11 @@ You need:
 - **A DHCP server** you control. School routers often let you set
   bootp options; if yours doesn't, set up a small dnsmasq alongside
   fleetboot.
-- **A FreeIPA installation** (planned separately — out of scope here, but
-  see "FreeIPA enrolment" below for the one-time per-machine join).
-- **An NFSv4 server** with Kerberos (`sec=krb5p`) exporting `/export/home`.
+- **Central identity + storage** — only if you want central login and
+  per-user NFS homes. This is the separate `fleetid` project (a FreeIPA
+  server + a Kerberos `sec=krb5p` NFSv4 server exporting `/export/home`),
+  which you stand up alongside fleetboot. See "Identity + storage" below.
+  A fleet that doesn't need central login skips this entirely.
 
 Hardware on the clients:
 
@@ -106,34 +108,41 @@ Both should report all tests passing.
 
 ## Building the first image
 
-The image is built once and served to every machine that boots. Two
-flavours ship out of the box:
+The image is built once and served to every machine that boots. The
+image is entirely defined by **composable profiles**; only generic
+examples ship upstream. The most important is:
 
 | Profile | What's in it |
 |---------|--------------|
-| `default` | XFCE desktop, FreeIPA-backed login, Kerberos NFS home. No browser. |
-| `school`  | Default + LibreWolf set as the system browser. |
+| `default` | A very thin Debian base with the fleetboot reporter — no desktop, no GUI, no graphics drivers, and (deliberately) no identity. Every other profile roots here. |
 
-To build the school image:
+The rest are worked examples you fork or ignore: desktops
+(`cinnamon-desktop`, `xfce-desktop`, `gnome-desktop`, `kde-desktop`),
+graphics stacks (`intel-graphics`, `amd-graphics`, `nvidia-graphics`),
+and helpers (`ssh-debug`, `logo`). Central login + Kerberos NFS homes
+come from the separate `fleetid` project's `freeipa` profile (see
+"Identity + storage" below) — the base image ships none of it.
+
+To build a desktop image:
 
 ```sh
 cd /opt/fleetboot/fleetboot
-make image PROFILE=school
+make image PROFILE=cinnamon-desktop
 make grub-binary
 ```
 
 Outputs land in `build/`:
 
 ```
-build/fleetboot-school-amd64.squashfs    # the rootfs students boot into
-build/vmlinuz                            # kernel
-build/initrd.img                         # initrd, includes live-boot
-build/fleetboot-x64-uefi                     # the chainload GRUB binary
+build/fleetboot-cinnamon-desktop-amd64.squashfs   # the rootfs machines boot into
+build/vmlinuz                                      # kernel
+build/initrd.img                                   # initrd, includes live-boot
+build/fleetboot-x64-uefi                           # the chainload GRUB binary
 ```
 
-To define your own profile — e.g. a `lab` profile with engineering tools
-— copy the `school/` directory under `image/profiles/` and edit the
-`extra-packages.list` / `setup-chroot`. See `image/profiles/README.md`
+To define your own deployment — e.g. a `classroom` profile — create a
+directory under `image/profiles/` whose `parent` file lists the fragments
+to compose (a desktop, `freeipa`, `logo`, …). See `image/profiles/README.md`
 for the contract.
 
 You can also customise on top of any profile *without* editing the
@@ -254,202 +263,63 @@ instead of `filename "fleetboot-x64-uefi";`. The signed grub looks for
 `image/signed-boot/initial-grub.cfg`) just hands control to tftpjail's
 per-MAC config exactly as the unsigned binary does.
 
-## FreeIPA — identity and authentication
+## Identity + storage: the `fleetid` project
 
-Fleetboot's image authenticates users against FreeIPA via SSSD + LightDM.
-FreeIPA owns the LDAP directory, the Kerberos KDC, and (optionally) DNS
-for the realm. Each fleetboot machine is itself a Kerberos host
-principal so it can mount Kerberos-secured NFS without per-user keytabs.
+Central login (FreeIPA) and per-user Kerberos NFSv4 home directories are
+**not part of fleetboot**. They are a separate, opt-in project,
+[`fleetid`](https://github.com/fleetboot/fleetid), cloned alongside this
+repo. fleetboot's base image is identity-agnostic; you add identity by:
 
-### Why containers
+1. **Standing up the servers.** fleetid ships a FreeIPA identity server
+   and a Kerberos NFSv4 home server, either as host scripts
+   (`fleetid/server/`) or a `docker compose` stack (`fleetid/compose/`).
+   Full walkthrough in fleetid's `README.md` and `DESIGN.md`.
 
-FreeIPA Server isn't packaged for Debian (only the client). The
-upstream FreeIPA project ships a maintained Fedora-based container image,
-which is the cleanest path on a Debian host:
+2. **Composing the `freeipa` image profile.** fleetid ships a composable
+   Fleetboot profile that adds the FreeIPA / SSSD / Kerberos / NFS packages,
+   the first-boot enrolment + keytab-fetch units, and the `krb5p` autofs
+   maps. Make it visible to the build and list it in a deployment profile's
+   parent chain:
 
-```sh
-sudo IPA_ADMIN_PASS='ChangeMe123!' IPA_DM_PASS='ChangeMeDmToo!' \
-    ./scripts/setup-ipa-server.sh
-```
+   ```sh
+   ln -s ../../../fleetid/profile/freeipa image/profiles/freeipa
+   # image/profiles/classroom/parent:
+   #   cinnamon-desktop
+   #   freeipa
+   make image PROFILE=classroom
+   ```
 
-That pulls `freeipa/freeipa-server:fedora-rawhide`, persists its state
-under `/var/lib/ipa-data`, and runs the install unattended. Takes
-5–10 minutes; watch progress with `docker logs -f freeipa-server`.
+3. **Telling the image where the realm is.** Drop a deployment-wide
+   `identity.conf` into the admin overlay
+   (`image/custom/overlay/etc/fleetboot/identity.conf`):
 
-The script pre-flight-checks that ports 53, 80, 88, 389, 443, 464,
-636, and 749 are all free on the host. If `systemd-resolved` is binding
-53, or `slapd`/`bind` is already running, the script bails before
-touching anything.
+   ```
+   IPA_REALM=SCHOOL.EXAMPLE
+   IPA_DOMAIN=school.example
+   IPA_SERVER=ipa.school.example       # optional, auto-discovered if blank
+   IPA_KEYTAB=/etc/fleetboot/enrol.keytab
+   IPA_NFS_SERVER=nfs.school.example
+   ```
 
-Defaults (override with env vars at the top of the script):
+### What fleetboot does for identity
 
-| Variable | Default |
-|---|---|
-| `IPA_REALM` | `FLEETBOOT.LAN` |
-| `IPA_DOMAIN` | `fleetboot.lan` |
-| `IPA_SERVER_FQDN` | `ipa.fleetboot.lan` |
-| `IPA_DATA_DIR` | `/var/lib/ipa-data` |
+fleetboot's only role in the identity flow is the two narrow seams fleetid
+uses — it "just happens to use fleetboot to register machines":
 
-### Resolving the IPA server from clients
+- **Registering machines.** A machine boots only if it has a row in the
+  fleetboot registry (see "Enrolling machines into the registry" below).
+  fleetid keys each machine's enrolment keytab by that same MAC.
+- **Delivering the enrolment keytab.** fleetid's
+  `fleetid/server/ipa-prepare-host.sh <mac>` mints a one-time keytab and
+  drops it in fleetboot's keytabs dir. On first boot the image's
+  `fetch-keytab` helper pulls it from fleetboot's per-boot-token
+  `/enrol/<token>/keytab` endpoint, and `ipa-client-install` consumes it.
+  Unprovisioned MACs get a 404 and skip the step silently.
 
-Both the fleetboot host and the booted images need to resolve
-`ipa.fleetboot.lan` to the IPA container's IP. Two options:
-
-- **`/etc/hosts`** entry on each client — fine for a small fleet,
-  but it's per-machine state outside fleetboot's view.
-- **DNS forwarding** — IPA's own DNS server can be the resolver for
-  the realm. On dev (libvirt), add to your libvirt network XML:
-  `<dns><forwarder addr='192.168.99.1'/></dns>` so the bridge's
-  dnsmasq forwards realm queries to IPA.
-
-### Test users for dev
-
-```sh
-sudo IPA_ADMIN_PASS='ChangeMe123!' ./scripts/ipa-add-test-users.sh
-```
-
-Creates four accounts (`alice`, `bob` in `students`; `carol` in
-`teachers`; `dave` in `headmaster`) with the shared password
-`ChangeMe123!` (FreeIPA forces a change on first login).
-
-### Per-host enrolment
-
-For each machine to enrol, mint a keytab and drop it where fleetboot's
-`/enrol/<token>/keytab` endpoint can deliver it on first boot:
-
-```sh
-sudo IPA_ADMIN_PASS='ChangeMe123!' \
-    ./scripts/ipa-prepare-host.sh aa:bb:cc:dd:ee:ff
-```
-
-That adds `fleetboot-aabbccddeeff.fleetboot.lan` to IPA, generates a
-one-shot enrolment keytab, and writes it to
-`/var/lib/fleetboot/keytabs/aa:bb:cc:dd:ee:ff.keytab` (mode 0600).
-On first boot the image's `fleetboot-keytab-fetch.service` pulls it
-via the per-boot-token-authenticated `/enrol` endpoint and
-`ipa-client-install` consumes it.
-
-### identity.conf (per-deployment)
-
-The image needs to know the realm + domain + server FQDN. Drop a
-deployment-wide identity.conf into the admin overlay
-(`image/custom/overlay/etc/fleetboot/identity.conf`):
-
-```
-IPA_REALM=FLEETBOOT.LAN
-IPA_DOMAIN=fleetboot.lan
-IPA_SERVER=ipa.fleetboot.lan
-IPA_KEYTAB=/etc/fleetboot/enrol.keytab
-IPA_NFS_SERVER=ipa.fleetboot.lan
-```
-
-Then rebuild your profile images:
-
-```sh
-make image PROFILE=school
-```
-
-The image's `enroll-freeipa` service reads this on first boot and runs
-`ipa-client-install` against it.
-
-## NFS server — homes + shared mounts
-
-Fleetboot ships the fleetboot host as the NFS server too: same machine,
-same identity-domain, Kerberos all the way down. Two trees get exported:
-
-- `/export/home/<user>` — the user's personal home. Mounted at
-  `/home/<user>` per-login via autofs, with `sec=krb5p` (encrypted),
-  authenticated by the user's Kerberos ticket. No other user can read it.
-- `/export/shared/<bucket>` — shared dirs. Mounted under `/shared/<bucket>`.
-  Still Kerberos-secured at the wire level; visibility inside each
-  bucket is enforced by **POSIX group permissions**, so you don't need
-  a separate export per group.
-
-### One-time server setup
-
-Pre-reqs on the fleetboot host: it's already FreeIPA-enrolled
-(`ipa-client-install` ran successfully), and you have an admin Kerberos
-ticket (`kinit admin`).
-
-```sh
-sudo ./scripts/setup-nfs-server.sh \
-    --realm SCHOOL.EXAMPLE \
-    --domain school.example
-```
-
-The script is idempotent. It:
-
-1. Installs `nfs-kernel-server`, `nfs-common`, `krb5-user`.
-2. Creates the IPA service principal `nfs/<host>@REALM` and writes its
-   keytab to `/etc/krb5.keytab` (mode 0600).
-3. Lays down `/etc/exports` from `nfs/exports.template` — `sec=krb5p`
-   everywhere, no `sec=sys` fallback.
-4. Renders `/etc/idmapd.conf` from `nfs/idmapd.conf.template`, substituting
-   `__IPA_DOMAIN__` so NFSv4 owner strings round-trip to real uid:gid.
-5. Creates `/export/{home,shared/all}` with sensible perms.
-6. Enables and starts `nfs-kernel-server` and `nfs-idmapd`.
-
-### Lay out shared directories
-
-The shared root exists; the per-bucket directories are an admin curation
-step. `nfs/shared-skeleton.md` recommends a starting layout:
-
-| Path                          | Owner / mode                 | Audience |
-|-------------------------------|------------------------------|----------|
-| `/export/shared/all`          | `root:root` mode `1777`      | All users, sticky. |
-| `/export/shared/teachers`     | `root:teachers` mode `2770`  | Teachers only. |
-| `/export/shared/headmaster`   | `root:headmaster` mode `2770`| Headmaster only. |
-| `/export/shared/students`     | `root:students` mode `2775`  | Students writable, others read-only. |
-| `/export/shared/coursework`   | `root:teachers` mode `2775`  | Teachers write; students read. |
-
-The setgid bit on group-owned dirs (mode prefix `2`) means new files
-inherit the parent group, which is what you want for shared workflows.
-
-```sh
-sudo install -d -o root -g teachers -m 2770 /export/shared/teachers
-sudo install -d -o root -g headmaster -m 2770 /export/shared/headmaster
-sudo install -d -o root -g students -m 2775 /export/shared/students
-sudo install -d -o root -g teachers -m 2775 /export/shared/coursework
-```
-
-### identity.conf — what the clients need to know
-
-The image's `enroll-freeipa` substitutes the NFS server's FQDN into
-`/etc/auto.home` and `/etc/auto.shared` at first boot, using
-`IPA_NFS_SERVER` from `/etc/fleetboot/identity.conf`. So the per-machine
-identity config grows one line:
-
-```
-IPA_REALM=SCHOOL.EXAMPLE
-IPA_DOMAIN=school.example
-IPA_KEYTAB=/etc/fleetboot/enrol.keytab
-IPA_NFS_SERVER=fleetboot.school.example
-```
-
-If you co-locate fleetboot with NFS (the default), `IPA_NFS_SERVER`
-is the fleetboot host's own FQDN.
-
-### Per-MAC FreeIPA enrolment keytab delivery
-
-For fleets where each machine should auto-enrol with FreeIPA on first
-boot without the admin pre-staging keytabs on every box, fleetboot can
-serve them per-MAC via a per-boot-token authenticated endpoint.
-
-On the IPA server, mint a keytab per machine:
-
-```sh
-ipa host-add fleetboot-lab-01.school.example
-ipa-getkeytab -s ipa.school.example -p host/fleetboot-lab-01.school.example \
-              -k /var/lib/fleetboot/keytabs/aa:bb:cc:dd:ee:ff.keytab
-```
-
-Copy the file to fleetboot's `keytabs_dir` (e.g. `/var/lib/fleetboot/keytabs/`)
-keyed by the machine's MAC. On first boot the image's
-`fleetboot-keytab-fetch.service` POSTs `/enrol/<token>/keytab`, writes
-the file to `/etc/fleetboot/enrol.keytab` mode 0600, and the
-`fleetboot-freeipa-enroll.service` runs `ipa-client-install --unattended`
-against it. Unprovisioned MACs get 404 from the endpoint and skip the
-fetch step silently.
+Everything else — the realm, KDC, LDAP, NFS exports, users and groups, the
+`admin` / `teacher` / `headmaster` / `student` levels, and the shared-mount
+layout — is fleetid's. See fleetid's docs for standing up test users,
+resolving the IPA server from clients, and the `sec=krb5p` export layout.
 
 ## Running fleetboot and tftpjail
 
@@ -500,24 +370,13 @@ README and `docs/integration.md` cover the wire-up.
 
 ## FreeIPA enrolment of a machine
 
-The image already contains the `freeipa-client` package and a one-shot
-systemd unit (`fleetboot-freeipa-enroll.service`) gated on the existence
-of `/etc/fleetboot/identity.conf`. To enrol a machine on first boot:
-
-1. Create a one-time enrolment principal in FreeIPA (via the web UI or
-   `ipa host-add` + `ipa-getkeytab`). You get back a keytab file.
-2. Drop it on the machine via a profile-scoped admin overlay (under
-   `image/custom/overlay/etc/fleetboot/`) OR — better — serve it from
-   fleetboot's API as a per-MAC asset (planned; see Roadmap).
-3. Drop `/etc/fleetboot/identity.conf` next to it:
-   ```
-   IPA_REALM=SCHOOL.EXAMPLE
-   IPA_DOMAIN=school.example
-   IPA_KEYTAB=/etc/fleetboot/enrol.keytab
-   ```
-4. Reboot. The enrolment oneshot runs `ipa-client-install --unattended`
-   exactly once. After that, `/etc/ipa/default.conf` exists and the unit
-   never runs again.
+When the fleetid `freeipa` profile is layered, the image carries the
+`freeipa-client` package and the `fleetboot-freeipa-enroll.service`
+oneshot, gated on `/etc/fleetboot/identity.conf`. On first boot it runs
+`ipa-client-install --unattended` exactly once (idempotent thereafter).
+The one-time keytab is delivered per-MAC via fleetid's
+`ipa-prepare-host.sh` + fleetboot's `/enrol/<token>/keytab` rail — see
+"Identity + storage: the `fleetid` project" above for the full flow.
 
 The `admin` / `teacher` / `headmaster` / `student` user *levels* are
 FreeIPA groups; map them to OS privileges with `sudo`, `polkit`, and
@@ -635,10 +494,6 @@ list:
   unsigned `fleetboot-x64-uefi`. Secure Boot must be off in firmware. Using
   Debian's signed shim chain is documented in DESIGN.md but not yet
   packaged in the build.
-- **Per-MAC enrolment keytab delivery via fleetboot's API.** Today, the
-  IPA keytab has to land on the machine via an admin overlay. A per-MAC
-  fleetboot endpoint that mints + delivers a one-time-use enrolment
-  keytab is the natural next step.
 - **VLAN segmentation for per-role network policy.** Currently
   *deferred*; intended to attach DNS blocklists and the egress firewall
   per profile. See DESIGN.md.

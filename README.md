@@ -112,6 +112,14 @@ auto-enrol rules (by MAC prefix or IP CIDR), and triggering builds.
 - [`tftpjail`](https://github.com/fleetboot/tftpjail) — the
   jailed TFTP server. Deliberately generic; fleetboot's specific
   integration lives in this repo (`fleetboot/tftp_glue/`).
+- [`fleetid`](https://github.com/fleetboot/fleetid) — optional
+  identity + storage layer: a FreeIPA identity server, a
+  Kerberos-secured NFSv4 home-directory server, and a composable
+  `freeipa` image profile. The fleetboot base image is
+  **identity-agnostic**; add central login + per-user NFS homes by
+  standing up fleetid and composing its profile into your image
+  chain. fleetid uses fleetboot only to register machines and to
+  deliver each machine's enrolment keytab over `/enrol/<token>/keytab`.
 
 ## Design details
 

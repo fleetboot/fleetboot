@@ -1,9 +1,7 @@
 [Unit]
 Description=Report login_console to the Fleetboot server
 # Fires when the display manager has come up and the greeter is visible.
-# Chain after the nfs-mounted reporter so the two messages arrive in
-# lifecycle order.
-After=display-manager.service fleetboot-nfs-mounted.service
+After=display-manager.service
 Requires=display-manager.service
 
 [Service]

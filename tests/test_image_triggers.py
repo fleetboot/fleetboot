@@ -32,11 +32,16 @@ def _load_unit(name: str) -> configparser.ConfigParser:
     return parser
 
 
+# NB: fleetboot-nfs-mounted.service moved to the fleetid `freeipa` profile
+# when the base image became identity-agnostic. The BootState.NFS_MOUNTED
+# vocabulary stays here (fleetid's unit reports it), but the unit file is
+# no longer in this repo — its structural test lives in fleetid.
+
+
 @pytest.mark.parametrize(
     "unit_name, expected_state",
     [
         ("fleetboot-network-up.service", BootState.NETWORK_UP),
-        ("fleetboot-nfs-mounted.service", BootState.NFS_MOUNTED),
         ("fleetboot-login-console.service", BootState.LOGIN_CONSOLE),
     ],
 )
@@ -53,26 +58,19 @@ def test_network_up_unit_waits_for_network_online():
     assert "network-online.target" in unit["Unit"]["Wants"]
 
 
-def test_nfs_unit_waits_for_home_mount_and_for_network_report():
-    unit = _load_unit("fleetboot-nfs-mounted.service")
-    after = unit["Unit"]["After"]
-    assert "home.mount" in after
-    assert "fleetboot-network-up.service" in after
-    assert "home.mount" in unit["Unit"]["Requires"]
-
-
-def test_login_console_unit_waits_for_display_manager_and_nfs_report():
+def test_login_console_unit_waits_for_display_manager():
+    """The base login-console unit orders after the display manager only —
+    it no longer references the identity-layer nfs-mounted unit."""
     unit = _load_unit("fleetboot-login-console.service")
     after = unit["Unit"]["After"]
     assert "display-manager.service" in after
-    assert "fleetboot-nfs-mounted.service" in after
+    assert "fleetboot-nfs-mounted.service" not in after
 
 
 @pytest.mark.parametrize(
     "unit_name",
     [
         "fleetboot-network-up.service",
-        "fleetboot-nfs-mounted.service",
         "fleetboot-login-console.service",
     ],
 )

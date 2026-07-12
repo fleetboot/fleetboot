@@ -23,7 +23,9 @@ Assumptions about the fleet:
    squashfs root with a tmpfs overlay. This *is* the lockdown surface.
 3. **Identity & storage** — FreeIPA (Kerberos + LDAP + DNS) for central accounts,
    the `admin` / `teacher` / `headmaster` / `student` levels, and Kerberos-secured
-   NFSv4 home directories.
+   NFSv4 home directories. This layer is a **separate project, `fleetid`**
+   (see below): the fleetboot base image is identity-agnostic, and a deployment
+   opts in by standing up fleetid and composing its `freeipa` image profile.
 4. **Network control** — filtering DNS resolver (blocklists) plus an egress
    firewall to stop students reaching anything not granted.
 
@@ -33,7 +35,7 @@ Assumptions about the fleet:
 
 | Area | Decision | Why |
 |------|----------|-----|
-| Identity / NFS | **FreeIPA** (Kerberos + LDAP + DNS) | Kerberos-secured NFSv4 out of the box; without it NFS is network-spoofable. |
+| Identity / NFS | **FreeIPA** (Kerberos + LDAP + DNS), as the separate **`fleetid`** project | Kerberos-secured NFSv4 out of the box; without it NFS is network-spoofable. Kept out of the base image so identity is opt-in per deployment. |
 | Root filesystem | **squashfs over HTTP + tmpfs overlay** | Immutable, scalable, fresh every boot — no writable system surface to attack. |
 | Control-plane language | **Python (FastAPI)** | Readable for school maintainers; fast to build. |
 | Network bootloader | **Signed GRUB EFI** (shim → grub), not iPXE | Works on x86_64 **and** arm64, keeps Secure Boot intact, scriptable. |
@@ -153,11 +155,18 @@ change.
 
 ## Identity, user levels, and authorization
 
+Identity and storage are the separate **`fleetid`** project, not part of the
+fleetboot base image. Everything in this section describes what a deployment
+gets when it composes fleetid's `freeipa` profile into its image chain and
+stands up fleetid's servers; a deployment that doesn't carries none of it.
+See fleetid's own `DESIGN.md` for the full detail.
+
 - Accounts and the `admin` / `teacher` / `headmaster` / `student` levels live in
   **FreeIPA** as users and groups.
 - The desktop image pulls them via PAM/nsswitch (SSSD), provisioned by
-  `freeipa-client`, `sssd`, `sssd-ipa`, `libpam-sss`, and `libnss-sss`
-  (in the apt list of the base recipe).
+  `freeipa-client`, `sssd`, `sssd-ipa`, `libpam-sss`, and `libnss-sss` —
+  installed by the **`freeipa` profile's `extra-packages.list`** (fleetid),
+  not the base recipe.
 - **Privilege is enforced at the OS layer** by group membership → `polkit`,
   `sudo`, and PAM rules — never by the boot profile.
 - `/home` is **NFSv4 with Kerberos (krb5p)**, mounted per-user at login by
@@ -166,8 +175,8 @@ change.
 
 ### FreeIPA enrolment flow
 
-A booted image enrols itself with FreeIPA on its first boot when (and only
-when) `/etc/fleetboot/identity.conf` is present:
+A booted image (with the `freeipa` profile layered) enrols itself with FreeIPA
+on its first boot when (and only when) `/etc/fleetboot/identity.conf` is present:
 
 ```
 IPA_REALM=FLEETBOOT.EXAMPLE
@@ -176,18 +185,25 @@ IPA_SERVER=ipa1.fleetboot.example      # optional, auto-discoverable
 IPA_KEYTAB=/etc/fleetboot/enrol.keytab # one-time enrolment keytab
 ```
 
-The systemd oneshot `fleetboot-freeipa-enroll.service`
-(in `image/identity/`) runs `ipa-client-install --unattended --keytab=...`,
-which lays down `/etc/ipa/default.conf`. The unit is idempotent (skips when
-that file is already present) and gated on `/etc/fleetboot/identity.conf`
-existing — an image that has not been provisioned never tries to enrol.
+The systemd oneshot `fleetboot-freeipa-enroll.service` (shipped by fleetid's
+`freeipa` profile) runs `ipa-client-install --unattended --keytab=...`, which
+lays down `/etc/ipa/default.conf`. The unit is idempotent (skips when that
+file is already present) and gated on `/etc/fleetboot/identity.conf` existing —
+an image that has not been provisioned never tries to enrol.
 
 The identity config gets onto a machine either by an admin overlay
 (`image/custom/overlay/etc/fleetboot/identity.conf`) at build time, or — for
 per-machine secrets — by writing the file at first boot from a profile-scoped
-asset served by fleetboot. The latter is on the deferred list below.
+asset served by fleetboot.
 
-The autofs map `/etc/auto.home` (in `image/identity/`) mounts
+The one-time enrolment keytab is delivered per-machine over fleetboot's generic
+`/enrol/<token>/keytab` rail: fleetid mints the keytab (keyed by the MAC
+fleetboot registered) and drops it in fleetboot's keytabs dir, and the image's
+`fetch-keytab` oneshot pulls it using the per-boot token. This is the whole of
+fleetid's coupling to fleetboot — it "just happens to use fleetboot to register
+machines" and to carry the keytab.
+
+The autofs map `/etc/auto.home` (in fleetid's `freeipa` profile) mounts
 `<NFS_SERVER>:/export/home/<user>` on `/home/<user>` with
 `sec=krb5p,nfs4`. `<NFS_SERVER>` is substituted at enrolment time.
 
@@ -283,12 +299,16 @@ VLAN support.
 
 ## Project layout
 
-- **`fleetboot`** — umbrella: image build, FreeIPA, NFS, DNS/network control,
-  integration tests.
+- **`fleetboot`** — umbrella: image build, control plane + dashboard, the
+  machine registry, DNS/network control, integration tests. Identity-agnostic.
 - **`tftpjail`** — separate project: the boot-policy TFTP brain.
+- **`fleetid`** — separate project: the identity + storage layer (FreeIPA
+  server, Kerberos NFSv4 server, and the composable `freeipa` image profile).
+  Uses fleetboot only to register machines and to deliver enrolment keytabs.
 
-Proposed `tftpjail` first slice: `protocol` + `identity` + `policy` (default-deny
-core) with full unit tests — the security spine — before wiring the live UDP loop.
+Both `tftpjail` and `fleetid` are deliberately decoupled: fleetboot's specific
+glue to tftpjail lives in `fleetboot/tftp_glue/`, and its only surface for
+fleetid is the machine registry plus the `/enrol/<token>/keytab` delivery rail.
 
 ---
 

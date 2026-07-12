@@ -68,3 +68,20 @@ own overlays builds `make image PROFILE=cinnamon-desktop` while
 their site-specific tweaks sit in `image/custom/`. A deployer with
 their own profile tree replaces / adds under `profiles/<name>/` and
 selects with `PROFILE=<name>`.
+
+## Profiles from another project
+
+The resolver only reads `image/profiles/`, but a profile directory can
+be a symlink to one shipped by a sibling project. The separate
+[`fleetid`](https://github.com/fleetboot/fleetid) project ships a
+composable `freeipa` profile (FreeIPA enrolment + Kerberos NFSv4 homes)
+this way:
+
+```sh
+ln -s ../../../fleetid/profile/freeipa image/profiles/freeipa
+```
+
+Once linked, `freeipa` composes like any other fragment — list it among
+a deployment profile's `parent` names alongside a desktop. This is how a
+fleetboot image gains central identity without the base image carrying
+any of it.

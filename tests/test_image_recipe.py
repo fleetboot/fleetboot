@@ -154,15 +154,22 @@ def test_login_console_unit_always_enabled(recipe: dict):
     assert "systemctl enable fleetboot-login-console.service" in commands
 
 
-def test_freeipa_client_packages_present(recipe: dict):
-    """sssd / freeipa-client / nfs-common / krb5-user must be installed.
+# ---------- the base image is identity-agnostic ----------
+#
+# FreeIPA identity + Kerberos NFSv4 homes are NOT in the base image. They
+# are an opt-in layer supplied by the separate `fleetid` project, which
+# ships a composable `freeipa` profile. The base recipe must therefore
+# NOT install the identity packages, overlay the identity assets, or wire
+# the enrolment / autofs units. These inverse tests keep FreeIPA from
+# silently creeping back into the base.
 
-    Without these the image has no FreeIPA identity and no Kerberos NFS,
-    which the lockdown model explicitly relies on.
-    """
+
+def test_base_recipe_does_not_install_identity_packages(recipe: dict):
+    """The identity packages belong to the fleetid `freeipa` profile, not
+    the base. If they reappear here the base is no longer identity-agnostic."""
     apt_actions = _actions_of_type(recipe, "apt")
     all_packages = {pkg for a in apt_actions for pkg in a.get("packages", [])}
-    required = {
+    forbidden = {
         "freeipa-client",
         "sssd",
         "sssd-ipa",
@@ -172,56 +179,40 @@ def test_freeipa_client_packages_present(recipe: dict):
         "nfs-common",
         "autofs",
     }
-    missing = required - all_packages
-    assert not missing, f"recipe is missing identity packages: {sorted(missing)}"
+    leaked = forbidden & all_packages
+    assert not leaked, (
+        f"base recipe must not install identity packages (moved to fleetid): "
+        f"{sorted(leaked)}"
+    )
 
 
-def test_identity_assets_overlaid(recipe: dict):
-    """The IPA enrolment helper, its systemd unit, and the autofs map ship."""
+def test_base_recipe_does_not_overlay_identity_assets(recipe: dict):
+    """No ./identity overlay in the base — that tree lives in fleetid's
+    freeipa profile overlay/ now."""
     overlays = _actions_of_type(recipe, "overlay")
     matches = [
-        a
-        for a in overlays
-        if "identity" in (a.get("source", "") or "")
-        and "identity" in (a.get("destination", "") or "")
+        a for a in overlays if "identity" in (a.get("source", "") or "")
     ]
-    assert matches, "no overlay action installs the identity assets"
+    assert not matches, "base recipe must not overlay identity assets"
 
 
-def test_freeipa_enroll_service_enabled(recipe: dict):
-    """A run action must enable the FreeIPA enrolment oneshot."""
-    runs = _actions_of_type(recipe, "run")
-    found = any(
-        "systemctl enable fleetboot-freeipa-enroll.service" in (a.get("command", "") or "")
-        for a in runs
-    )
-    assert found, "fleetboot-freeipa-enroll.service is not enabled in the recipe"
-
-
-def test_keytab_fetch_service_enabled_and_script_installed(recipe: dict):
-    """The keytab-fetch oneshot must land and be enabled, and the fetch
-    script must be installed under /usr/local/lib/fleetboot/."""
+def test_base_recipe_does_not_wire_freeipa_or_autofs(recipe: dict):
+    """The enrolment / keytab-fetch / autofs wiring moved to the fleetid
+    freeipa profile's setup-chroot. The base must not reference any of it."""
     runs = _actions_of_type(recipe, "run")
     commands = " \n".join((a.get("command", "") or "") for a in runs)
-    assert "fetch-keytab" in commands
-    assert "fleetboot-keytab-fetch.service" in commands
-    assert "systemctl enable fleetboot-keytab-fetch.service" in commands
-
-
-def test_autofs_wired_to_auto_home(recipe: dict):
-    """The image must register our /home -> /etc/auto.home mapping."""
-    runs = _actions_of_type(recipe, "run")
-    commands = " \n".join((a.get("command", "") or "") for a in runs)
-    assert "/etc/auto.home" in commands
-    assert "auto.master" in commands
-
-
-def test_autofs_wired_to_auto_shared(recipe: dict):
-    """The image must register our /shared -> /etc/auto.shared mapping
-    so group-scoped NFS mounts work."""
-    runs = _actions_of_type(recipe, "run")
-    commands = " \n".join((a.get("command", "") or "") for a in runs)
-    assert "/etc/auto.shared" in commands
+    for token in (
+        "fleetboot-freeipa-enroll.service",
+        "fleetboot-keytab-fetch.service",
+        "fetch-keytab",
+        "/etc/auto.home",
+        "/etc/auto.shared",
+        "fleetboot-nfs-mounted.service",
+    ):
+        assert token not in commands, (
+            f"base recipe still references identity wiring '{token}' "
+            "(should live in the fleetid freeipa profile)"
+        )
 
 
 def test_recipe_does_not_install_a_pam_session_hook(recipe: dict):
