@@ -307,7 +307,8 @@ def create_app(
         dashboard. If None, both return 503.
     `dashboard_repo_root` — path to the fleetboot repo (so the dashboard
         can read profiles and trigger `make image`). When None, the
-        dashboard is not mounted.
+        dashboard is not mounted, and /machines cannot check that a
+        profile name exists — there is nowhere to look.
     `keytabs_dir` — directory holding per-MAC FreeIPA enrolment keytabs at
         `<keytabs_dir>/<mac>.keytab`. Served via /enrol/{token}/keytab.
         If None, /enrol/* returns 503 (keytab delivery disabled).
@@ -325,6 +326,37 @@ def create_app(
     app.state.boot_dir = boot_dir
     app.state.registry = registry
     app.state.admin_secret = admin_secret
+
+    # Where profiles live, when the caller told us. Enrolling a machine
+    # onto a profile that doesn't exist fails much later and much worse
+    # — at boot, on the machine — so the API checks up front.
+    profiles_root = (
+        dashboard_repo_root / "image" / "profiles"
+        if dashboard_repo_root is not None else None
+    )
+    app.state.profiles_root = profiles_root
+
+    def _require_known_profile(profile_name: str) -> None:
+        """Reject a profile name that has no directory.
+
+        Only possible when `dashboard_repo_root` was supplied — that is
+        every real deployment (see fleetboot.server.__main__), but an
+        app embedded without a repo root has nothing to check against
+        and stays permissive rather than rejecting everything.
+        """
+        if profiles_root is None or not profiles_root.is_dir():
+            return
+        from fleetboot.server.dashboard import _list_profile_names
+
+        known = _list_profile_names(profiles_root)
+        if profile_name not in known:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    f"unknown profile: {profile_name}. "
+                    f"Known profiles: {', '.join(known) or '(none)'}"
+                ),
+            )
 
     @app.get("/healthz", include_in_schema=False)
     def healthz() -> dict:
@@ -528,6 +560,7 @@ def create_app(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="scratch_mode must be volatile/persistent/off",
             )
+        _require_known_profile(body.profile_name)
         machine = registry.enroll(  # type: ignore[union-attr]
             mac=body.mac,
             profile_name=body.profile_name,
@@ -574,6 +607,7 @@ def create_app(
         keeps running its current image until it next boots.
         """
         _require_admin(authorization)
+        _require_known_profile(body.profile_name)
         if not registry.set_profile(mac, body.profile_name):  # type: ignore[union-attr]
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND, detail="not found"
@@ -670,6 +704,9 @@ def create_app(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="platform must be 'any', 'efi', or 'pc'",
             )
+        # A rule pointing at a profile that doesn't exist silently
+        # enrols every machine it matches onto an unbootable image.
+        _require_known_profile(body.profile_name)
         try:
             rule = registry.add_auto_enrol_rule(  # type: ignore[union-attr]
                 name=body.name,

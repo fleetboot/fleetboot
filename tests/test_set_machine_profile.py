@@ -167,6 +167,115 @@ def test_patch_machines_requires_the_admin_secret(client: TestClient):
     ).json()["profile_name"] == "default"
 
 
+def test_patch_machines_rejects_a_profile_that_does_not_exist(
+    client: TestClient, registry: MachineRegistry,
+):
+    """A machine on a nonexistent profile boots nothing — and finds out
+    at PXE time, in front of whoever is using it."""
+    response = client.patch(
+        f"/machines/{MAC}",
+        json={"profile_name": "no-such-profile"},
+        headers=_bearer(),
+    )
+
+    assert response.status_code == 400
+    detail = response.json()["detail"]
+    assert "unknown profile" in detail
+    # The error names what was available.
+    assert "render-node" in detail
+    assert registry.lookup(MAC).profile_name == "default"
+
+
+def test_enrolling_rejects_a_profile_that_does_not_exist(
+    client: TestClient, registry: MachineRegistry,
+):
+    """Same check on the way in, not just on reassignment."""
+    response = client.post(
+        "/machines",
+        json={
+            "mac": "aa:bb:cc:dd:ee:99", "profile_name": "no-such-profile",
+            "architecture": "x86_64", "platform": "efi",
+        },
+        headers=_bearer(),
+    )
+
+    assert response.status_code == 400
+    assert "unknown profile" in response.json()["detail"]
+    assert registry.lookup("aa:bb:cc:dd:ee:99") is None
+
+
+def test_auto_enrol_rules_reject_a_profile_that_does_not_exist(
+    client: TestClient,
+):
+    """A bad rule is worse than a bad enrolment: it silently puts every
+    machine it matches onto an unbootable image."""
+    response = client.post(
+        "/auto-enrol-rules",
+        json={
+            "name": "lab", "match_kind": "mac_prefix",
+            "match_value": "aa:bb", "profile_name": "no-such-profile",
+        },
+        headers=_bearer(),
+    )
+
+    assert response.status_code == 400
+    assert "unknown profile" in response.json()["detail"]
+    assert client.get(
+        "/auto-enrol-rules", headers=_bearer(),
+    ).json() == []
+
+
+def test_a_real_profile_still_enrols(client: TestClient):
+    """The check must not be so eager it blocks normal use."""
+    response = client.post(
+        "/machines",
+        json={
+            "mac": "aa:bb:cc:dd:ee:98", "profile_name": "render-node",
+            "architecture": "x86_64", "platform": "efi",
+        },
+        headers=_bearer(),
+    )
+    assert response.status_code == 201
+
+
+def test_validation_is_skipped_when_the_server_has_no_profile_tree(
+    tmp_path: Path,
+):
+    """An app embedded without a repo root has nowhere to look, so it
+    stays permissive rather than rejecting every profile name. Every
+    real deployment passes a repo root (see fleetboot.server.__main__),
+    which is what makes the check effective in production."""
+    registry = MachineRegistry(tmp_path / "rootless.sqlite")
+    rootless = TestClient(create_app(
+        sessions=BootSessionStore(),
+        registry=registry,
+        admin_secret=ADMIN,
+    ))
+
+    response = rootless.post(
+        "/machines",
+        json={
+            "mac": MAC, "profile_name": "anything-goes",
+            "architecture": "x86_64", "platform": "efi",
+        },
+        headers=_bearer(),
+    )
+
+    assert response.status_code == 201
+
+
+def test_mcp_enrolment_rejects_a_profile_that_does_not_exist(
+    client: TestClient, registry: MachineRegistry,
+):
+    got = _call_tool(client, "enrol_machine", {
+        "mac": "aa:bb:cc:dd:ee:97", "profile_name": "no-such-profile",
+    })
+
+    assert got["is_error"] is True
+    assert "unknown profile" in got["payload"]["error"]
+    assert registry.lookup("aa:bb:cc:dd:ee:97") is None
+
+
 def test_patch_machines_rejects_an_empty_profile(client: TestClient):
     response = client.patch(
         f"/machines/{MAC}", json={"profile_name": ""}, headers=_bearer(),

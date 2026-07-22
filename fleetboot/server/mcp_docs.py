@@ -343,6 +343,12 @@ The same operation over the admin REST API is
 `PATCH /machines/<mac>` with `{"profile_name": "..."}`, and on the
 dashboard it's the profile dropdown on a machine's page.
 
+Every route that sets a profile — this tool, `enrol_machine`, the REST
+API, the dashboard, and auto-enrol rules — rejects a profile with no
+directory. A machine pointed at a profile that doesn't exist boots
+nothing, and discovers that at PXE time rather than when you made the
+mistake. `list_profiles` tells you what's real.
+
 ## Change an image and roll it out to everything running it
 
 1. `get_profile` to read what's there now.

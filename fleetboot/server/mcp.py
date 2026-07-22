@@ -940,6 +940,14 @@ def _build_tool_impls(
             raise _ToolError("platform must be 'efi' or 'pc'")
         if scratch_mode not in ("volatile", "persistent", "off"):
             raise _ToolError("scratch_mode must be volatile/persistent/off")
+        # Enrolling onto a profile that doesn't exist fails at boot, on
+        # the machine, long after the call that caused it.
+        known = _list_profile_names(profiles_root)
+        if profile_name not in known:
+            raise _ToolError(
+                f"unknown profile: {profile_name!r}. Known profiles: "
+                + (", ".join(known) or "(none)")
+            )
         registry.enroll(
             mac=mac,
             profile_name=profile_name,

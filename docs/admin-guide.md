@@ -470,6 +470,14 @@ The machine keeps running its current image until it next boots. If the
 change should land now, reboot it afterwards (dashboard button,
 `power_machine`, or arm the soft-reboot signal).
 
+All of these reject a profile that has no directory under
+`image/profiles/`, as do enrolment (`POST /machines`, `enrol_machine`)
+and auto-enrol rules. A machine pointed at a nonexistent profile boots
+nothing, and you'd find out at PXE time rather than at the moment of
+the mistake. The one exception is an app embedded without a repo root,
+which has no profile tree to check against — not something a normal
+deployment does.
+
 ### Pushing a new image
 
 1. Edit the recipe / profile.
