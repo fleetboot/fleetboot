@@ -54,3 +54,26 @@ include:
   # somewhere other than a sibling directory.
   - path: ${FLEETID_DIR:-../../../fleetid}/compose/docker-compose.yml
     env_file: ${FLEETID_DIR:-../../../fleetid}/compose/.env
+
+# NOTE: `include` deliberately forbids overriding an imported service, so
+# the fleetid profile mount cannot be added here — it lives in the base
+# docker-compose.yml, switched on with FLEETID_DIR. See below.
+#
+# ---- One variable to set for identity image builds ----------------------
+#
+# fleetid ships a composable `freeipa` image profile, wired into
+# fleetboot by symlinking it into the profile tree:
+#
+#   image/profiles/freeipa -> ../../../fleetid/profile/freeipa
+#
+# Builds started from the dashboard or MCP run `make image` *inside* the
+# fleetboot container, where that symlink lands on /fleetid/profile/freeipa
+# (three levels up from /app/image/profiles is `/`). The base compose file
+# mounts FLEETID_DIR there, so set it in fleetboot's own .env — an
+# absolute path is clearest:
+#
+#   FLEETID_DIR=/opt/fleetboot/fleetid
+#
+# Without it, `make image` from a shell on the host still works, but a
+# build of a freeipa-composing profile started from the dashboard or MCP
+# fails with "profile not found: 'freeipa'".

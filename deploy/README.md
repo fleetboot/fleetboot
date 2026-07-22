@@ -153,6 +153,23 @@ docker compose --profile nfs up -d nfs    # Kerberos NFSv4 homes
 Set `FLEETID_DIR` if the checkout is somewhere other than a sibling
 directory.
 
+**Also set `FLEETID_DIR` in fleetboot's own `.env`** (absolute path) if
+your profile tree symlinks in fleetid's `freeipa` profile. Builds
+started from the dashboard or MCP run `make image` *inside* the
+fleetboot container, which sees only what is bind-mounted — and that
+symlink points out of the repo:
+
+```
+image/profiles/freeipa -> ../../../fleetid/profile/freeipa
+```
+
+Three levels up from `/app/image/profiles` in the container is `/`, so
+the link lands on `/fleetid/profile/freeipa`, which is exactly where
+`FLEETID_DIR` is mounted. Without it, `make image` from a shell on the
+host still works while the same build from the dashboard fails with
+`profile not found: 'freeipa'` — a confusing split-brain worth avoiding.
+`deploy/fleetid-placeholder/README.md` covers the details.
+
 The identity services sit behind compose profiles deliberately: FreeIPA
 claims host ports 443, 389, 88 and 464, and the NFS container is
 privileged with host networking. Neither should start by accident.

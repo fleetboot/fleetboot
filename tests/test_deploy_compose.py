@@ -10,7 +10,8 @@ nothing can ask for.
 
 from __future__ import annotations
 
-from pathlib import Path
+import os
+from pathlib import Path, PurePosixPath
 
 import pytest
 import yaml
@@ -92,6 +93,81 @@ def test_secrets_have_no_defaults(compose: dict):
     assert ":?" in compose["services"]["tftpjail"]["environment"][
         "CLIENT_BASE_URL"
     ]
+
+
+# ---- Profiles the container has to be able to see -----------------------
+
+
+def _volume_targets(service: dict) -> set[str]:
+    """Container-side paths this service mounts.
+
+    Entries look like `source:target[:mode]`, and the source may itself
+    contain a colon (`${VAR:-default}`), so split from the right.
+    """
+    targets = set()
+    for entry in service.get("volumes", []):
+        parts = entry.rsplit(":", 2)
+        if len(parts) >= 2 and parts[1].startswith("/"):
+            targets.add(parts[1])
+    return targets
+
+
+def test_externally_symlinked_profiles_are_mounted_for_the_container():
+    """Builds started from the dashboard or MCP run `make image` inside
+    the fleetboot container, which sees only what is bind-mounted. A
+    profile symlinked in from another project (fleetid's `freeipa`)
+    therefore needs its target mounted, or those builds fail with
+    "profile not found" while the identical build on the host works.
+    """
+    compose_yaml = yaml.safe_load(COMPOSE_FILE.read_text())
+    targets = _volume_targets(compose_yaml["services"]["fleetboot"])
+    profiles_dir = REPO_ROOT / "image" / "profiles"
+    # Where the profile tree lives inside the container.
+    container_profiles = PurePosixPath("/app/image/profiles")
+
+    symlinked = [p for p in profiles_dir.iterdir() if p.is_symlink()]
+    for profile in symlinked:
+        # Resolve the (relative) link as the container would.
+        landing = PurePosixPath(
+            os.path.normpath(
+                container_profiles / os.readlink(profile)
+            )
+        )
+        assert any(
+            landing == PurePosixPath(target)
+            or PurePosixPath(target) in landing.parents
+            for target in targets
+        ), (
+            f"profile {profile.name} symlinks to {landing} inside the "
+            f"container, but nothing is mounted there — a build started "
+            f"from the dashboard or MCP would fail. Mounts: {targets}"
+        )
+
+
+def test_the_fleetid_mount_has_a_default_that_exists():
+    """The mount is on unconditionally, so its default source must be a
+    real path — otherwise a deployment with no fleetid checkout either
+    fails to start or has a stray directory created for it by Docker."""
+    compose_yaml = yaml.safe_load(COMPOSE_FILE.read_text())
+    matching = [
+        volume
+        for volume in compose_yaml["services"]["fleetboot"]["volumes"]
+        if volume.rsplit(":", 2)[1] == "/fleetid"
+    ]
+    assert matching, "nothing is mounted at /fleetid"
+    entry = matching[0]
+    assert "${FLEETID_DIR:-" in entry
+    default = entry.split(":-", 1)[1].split("}", 1)[0]
+    # Sources are relative to the compose file's directory, which is the
+    # repo root; the path itself starts ../fleetboot/ because the build
+    # context is the workspace parent.
+    assert (REPO_ROOT.parent / default.lstrip("./")).is_dir(), default
+    assert ":ro" in entry, "builds read profiles, they never write them"
+
+
+def test_env_example_documents_the_fleetid_path():
+    text = (REPO_ROOT / ".env.example").read_text()
+    assert "FLEETID_DIR" in text
 
 
 # ---- Healthcheck --------------------------------------------------------

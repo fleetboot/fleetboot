@@ -80,12 +80,22 @@ dashboard on port 8080) and `tftpjail` (jailed TFTP server on UDP
 port 69, host-networked). Point a booted machine at the LAN via DHCP
 and browse to `http://localhost:8080/dashboard`.
 
-Image builds still run on the host (they need `debos` + `fakemachine`
-with kernel access, which containers don't get):
+Images can be built two ways, and both end up in the same place:
 
 ```
-make image PROFILE=default ARCH=amd64
+make image PROFILE=default ARCH=amd64          # from a shell, on the host
 ```
+
+...or from the dashboard's build button / the MCP `start_build` tool,
+which run the same `make image` **inside the fleetboot container**. The
+container ships `debos` + `make` and is given `/dev/kvm`, the host `kvm`
+group, and read-only `/lib/modules` + `/boot`, because `fakemachine`
+boots a VM to do the build.
+
+The difference matters in one case: the container sees only what is
+bind-mounted, so a profile symlinked in from outside the repo (such as
+fleetid's `freeipa`) needs its target mounted too — see `FLEETID_DIR` in
+`.env.example`.
 
 Artefacts land in `build/` which is bind-mounted into both containers,
 so a new build is immediately picked up without a restart.

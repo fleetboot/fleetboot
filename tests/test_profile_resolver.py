@@ -218,6 +218,35 @@ def test_real_cinnamon_desktop_profile_resolves_with_ancestors(tmp_path):
     assert "lightdm" in packages
 
 
+def test_every_shipped_profile_has_a_resolvable_parent_chain():
+    """No profile in the tree may name a parent that isn't there.
+
+    A broken chain is invisible until someone builds that profile —
+    and it's the kind of thing a typo in a `parent` file causes.
+
+    The one tolerated failure is a parent that exists as a *dangling
+    symlink*: profiles can be composed in from a sibling project (that
+    is how fleetid's `freeipa` is wired in), and that project is
+    legitimately absent on a machine that doesn't use it, including
+    CI. A missing directory with no symlink is always a real error.
+    """
+    module = _load_resolver()
+    profiles_dir = REPO_ROOT / "image" / "profiles"
+
+    for entry in sorted(profiles_dir.iterdir()):
+        if not entry.is_dir():
+            continue
+        try:
+            module.resolve_chain(entry.name)
+        except module.ResolutionError as err:
+            missing = str(err).split("'")[1]
+            candidate = profiles_dir / missing
+            assert candidate.is_symlink(), (
+                f"profile {entry.name} names a parent that does not "
+                f"exist: {missing}"
+            )
+
+
 def test_real_default_profile_resolves_to_just_itself(tmp_path):
     """`default` is the thin base — no parent, no extra packages."""
     module = _load_resolver()

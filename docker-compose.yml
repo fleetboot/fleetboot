@@ -65,6 +65,17 @@ services:
       # the mount is a no-op. Point FLEETBOOT_TLS_CERT + _KEY at
       # /tls/<file>.pem to enable HTTPS.
       - ../fleetboot/tls:/tls:ro
+      # Optional: a fleetid checkout, so its composable `freeipa` image
+      # profile resolves for builds started from the dashboard or MCP
+      # (those run `make image` in THIS container, not on the host).
+      # A deployment symlinks the profile in as
+      # image/profiles/freeipa -> ../../../fleetid/profile/freeipa,
+      # which lands on /fleetid/profile/freeipa in here. Defaults to an
+      # empty placeholder so deployments without fleetid neither fail to
+      # start nor get a stray directory created for them; set
+      # FLEETID_DIR in .env to switch it on. See
+      # deploy/fleetid-placeholder/README.md.
+      - ${FLEETID_DIR:-../fleetboot/deploy/fleetid-placeholder}:/fleetid:ro
       # fakemachine (used by debos) boots a KVM guest for the actual
       # image build. That guest needs kernel modules matching the
       # RUNNING kernel — which the container inherits from the host,

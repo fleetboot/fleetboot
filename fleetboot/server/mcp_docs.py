@@ -288,6 +288,19 @@ profile.
 
 Then build it — see the `workflows` topic.
 
+## Profiles composed in from another project
+
+A profile directory can be a symlink to one another project ships —
+that is how fleetid's `freeipa` identity profile is wired in. Two
+things follow. `list_profiles` only lists what the server can actually
+see, so a symlink whose target isn't reachable simply won't appear.
+And `start_build` runs the build inside the control-plane container, so
+a build can fail with `profile not found: '<parent>'` even though the
+profile is fine on the host — the deployment needs the other project's
+tree mounted (`FLEETID_DIR`). If a build fails that way, that mount is
+the first thing to check; it is not something you can fix by editing
+the profile.
+
 ## Conventions worth keeping
 
 - Root every profile at `default` (directly or through ancestors); it
