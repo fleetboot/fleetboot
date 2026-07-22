@@ -432,6 +432,30 @@ class MachineRegistry:
                 (cleaned, normalised_mac),
             )
 
+    def set_profile(self, mac: str, profile_name: str) -> bool:
+        """Move a machine onto a different profile in place.
+
+        Returns True if a row was updated, False if the MAC is unknown —
+        callers turn that into a 404 rather than silently succeeding.
+
+        Only the profile changes: architecture, platform, scratch mode,
+        serial console and power wiring all stay as they were. That is
+        the difference from re-enrolling, which replaces the row.
+
+        The machine keeps running its current image until it next boots;
+        arm a reboot (soft or PDU) if you want the change to land now.
+        """
+        cleaned = (profile_name or "").strip()
+        if not cleaned:
+            raise ValueError("profile_name must not be empty")
+        normalised_mac = _normalise_mac(mac)
+        with self._write_lock, self._connect() as connection:
+            cursor = connection.execute(
+                "UPDATE machines SET profile_name = ? WHERE mac = ?",
+                (cleaned, normalised_mac),
+            )
+            return cursor.rowcount > 0
+
     def set_pending_reboot(self, mac: str, pending: bool) -> None:
         """Toggle the soft-reboot signal on the machine row.
 

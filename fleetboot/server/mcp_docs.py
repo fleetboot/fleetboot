@@ -136,7 +136,7 @@ Everything below is a tool on this endpoint.
 | Service | Tools |
 |---------|-------|
 | Fleet inventory | `list_machines`, `get_machine` |
-| Enrolment | `enrol_machine`, `delete_machine` |
+| Enrolment | `enrol_machine`, `set_machine_profile`, `delete_machine` |
 | Power | `power_machine`, `power_fleet`, `reboot_machine`, `set_pending_reboot` |
 | Power wiring | `set_power_command`, `set_pdu_alias`, `set_reboot_command` |
 | Image authoring | `list_profiles`, `get_profile`, `save_profile`, `write_profile_overlay` |
@@ -204,7 +204,8 @@ but knowing them makes diagnosis far easier.
 
 - `/dashboard` — machines, profiles, builds, events, settings, plus a
   live-rendered copy of this MCP documentation at `/dashboard/mcp`.
-- `POST /machines`, `GET /machines`, `DELETE /machines/{mac}` and
+- `POST /machines`, `GET /machines`, `PATCH /machines/{mac}` (move a
+  machine to another profile), `DELETE /machines/{mac}` and
   `/auto-enrol-rules` — the admin REST API behind the dashboard,
   gated by the same admin secret this MCP endpoint uses.
 
@@ -320,6 +321,27 @@ _WORKFLOWS = """\
   "platform": "efi"
 }}
 ```
+
+## Change what a machine boots
+
+`set_machine_profile` moves an enrolled machine onto a different
+profile and touches nothing else — architecture, platform, scratch
+mode and power wiring all survive:
+
+```json
+{"name": "set_machine_profile", "arguments": {
+  "mac": "54:b2:03:92:33:a9", "profile_name": "render-node"
+}}
+```
+
+Use this rather than re-running `enrol_machine`, which replaces the
+whole row and resets anything you don't pass. The machine keeps running
+its current image until it next boots, so follow with `reboot_machine`
+if the change should land now.
+
+The same operation over the admin REST API is
+`PATCH /machines/<mac>` with `{"profile_name": "..."}`, and on the
+dashboard it's the profile dropdown on a machine's page.
 
 ## Change an image and roll it out to everything running it
 

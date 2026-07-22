@@ -775,6 +775,37 @@ def build_dashboard_router(
         reboot_machine(registry, mac, then_delete=then_delete)
 
     @router.post(
+        "/dashboard/machines/{mac}/profile",
+        response_class=HTMLResponse,
+        dependencies=[Depends(require_admin)],
+    )
+    def set_machine_profile(
+        mac: str,
+        profile_name: str = Form(...),
+    ) -> RedirectResponse:
+        """Move a machine to a different profile.
+
+        Only the profile changes — everything else about the row (arch,
+        platform, scratch mode, power wiring) survives, unlike a
+        re-enrolment. The machine boots the new image next time it PXEs.
+        """
+        known = _list_profile_names(profiles_root)
+        if profile_name not in known:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"unknown profile: {profile_name}",
+            )
+        if not registry.set_profile(mac, profile_name):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="machine not found",
+            )
+        return RedirectResponse(
+            url=f"/dashboard/machines/{mac}",
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+
+    @router.post(
         "/dashboard/machines/{mac}/power/{action}",
         response_class=HTMLResponse,
         dependencies=[Depends(require_admin)],
@@ -855,6 +886,7 @@ def build_dashboard_router(
                 "last_seen": last_seen.get(machine.mac),
                 "polling_seconds": LIVE_POLL_SECONDS,
                 "hardware": hardware,
+                "profile_names": _list_profile_names(profiles_root),
             },
         )
 

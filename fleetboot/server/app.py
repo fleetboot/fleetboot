@@ -228,6 +228,18 @@ class MachineRecord(BaseModel):
         )
 
 
+class MachineProfileChange(BaseModel):
+    """Body of PATCH /machines/{mac} — move a machine to another profile."""
+
+    profile_name: str = Field(
+        ..., min_length=1,
+        description=(
+            "Profile the machine should boot from its next PXE onwards. "
+            "Nothing else about the machine changes."
+        ),
+    )
+
+
 class AutoEnrolRuleRequest(BaseModel):
     """Body of POST /auto-enrol-rules."""
 
@@ -547,6 +559,28 @@ def create_app(
                 status_code=status.HTTP_404_NOT_FOUND, detail="not found"
             )
         return MachineRecord.from_machine(machine)
+
+    @app.patch("/machines/{mac}", response_model=MachineRecord)
+    def change_machine_profile(
+        mac: str,
+        body: MachineProfileChange,
+        authorization: str | None = Header(default=None),
+    ) -> MachineRecord:
+        """Move an already-enrolled machine onto a different profile.
+
+        Distinct from re-POSTing to /machines, which replaces the whole
+        row: this touches the profile and nothing else, so architecture,
+        platform, scratch mode and power wiring survive. The machine
+        keeps running its current image until it next boots.
+        """
+        _require_admin(authorization)
+        if not registry.set_profile(mac, body.profile_name):  # type: ignore[union-attr]
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="not found"
+            )
+        return MachineRecord.from_machine(
+            registry.lookup(mac),  # type: ignore[union-attr, arg-type]
+        )
 
     @app.get("/resolve/{mac}", response_model=MachineRecord)
     def resolve_machine(

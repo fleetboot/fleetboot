@@ -456,6 +456,28 @@ def _tool_catalogue() -> list[dict]:
             },
         },
         {
+            "name": "set_machine_profile",
+            "description": (
+                "Move an already-enrolled machine onto a different "
+                "profile — the way to change what a machine boots. "
+                "Only the profile changes: architecture, platform, "
+                "scratch mode and power wiring survive, unlike "
+                "`enrol_machine`, which replaces the row. The machine "
+                "keeps running its current image until it next boots, "
+                "so follow with `reboot_machine` (or "
+                "`set_pending_reboot`) if the change should land now."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "mac": {"type": "string"},
+                    "profile_name": {"type": "string"},
+                },
+                "required": ["mac", "profile_name"],
+                "additionalProperties": False,
+            },
+        },
+        {
             "name": "delete_machine",
             "description": "Remove a machine's registry row.",
             "inputSchema": {
@@ -928,6 +950,21 @@ def _build_tool_impls(
         )
         return _tool_text_result(_machine_dict(registry.lookup(mac)))
 
+    def set_machine_profile(args: dict) -> dict:
+        mac = _require(args, "mac", str)
+        profile_name = _require(args, "profile_name", str)
+        known = _list_profile_names(profiles_root)
+        if profile_name not in known:
+            raise _ToolError(
+                f"unknown profile: {profile_name!r}. Known profiles: "
+                + ", ".join(known)
+            )
+        if not registry.set_profile(mac, profile_name):
+            raise _ToolError(f"no machine with MAC {mac!r}")
+        return _tool_text_result(
+            _machine_dict(registry.lookup(mac), _liveness_by_mac(sessions)),
+        )
+
     def delete_machine(args: dict) -> dict:
         mac = _require(args, "mac", str)
         removed = registry.remove(mac)
@@ -1245,6 +1282,7 @@ def _build_tool_impls(
         "list_machines": list_machines,
         "get_machine": get_machine,
         "enrol_machine": enrol_machine,
+        "set_machine_profile": set_machine_profile,
         "delete_machine": delete_machine,
         "reboot_machine": reboot,
         "power_machine": power,

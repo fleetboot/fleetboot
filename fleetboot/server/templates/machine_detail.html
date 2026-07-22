@@ -33,7 +33,23 @@
         <span class="muted">—</span>
       {% endif %}
     </td></tr>
-    <tr><th>Profile</th><td>{{ machine.profile_name }}</td></tr>
+    <tr><th>Profile</th><td>
+      <form method="post"
+            action="/dashboard/machines/{{ machine.mac }}/profile"
+            style="display:inline">
+        <select name="profile_name">
+          {% for p in profile_names %}
+          <option value="{{ p }}"
+                  {% if p == machine.profile_name %}selected{% endif %}>
+            {{ p }}
+          </option>
+          {% endfor %}
+        </select>
+        <button type="submit">change</button>
+      </form>
+      <span class="muted">— takes effect on the machine's next boot;
+        nothing else about the row changes</span>
+    </td></tr>
     <tr><th>Arch / platform</th><td>{{ machine.architecture }} / {{ machine.platform }}</td></tr>
     <tr><th>Source</th><td>
       {% if machine.enrolled_by == "manual" %}

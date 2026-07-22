@@ -454,6 +454,22 @@ image; see DESIGN.md.
 3. Enrol via the `/machines` API (above).
 4. Boot the machine. It PXE-boots, lands at the FreeIPA login.
 
+### Moving a machine to a different profile
+
+Reclassifying a machine — a desktop becoming a compute node, a spare
+joining the kiosk fleet — changes only its profile. Architecture,
+platform, scratch mode and power wiring stay as they are, which is why
+this is not the same as re-enrolling the MAC (that replaces the row).
+
+- **Dashboard:** the profile dropdown on the machine's page.
+- **API:** `PATCH /machines/<mac>` with `{"profile_name": "..."}` and
+  the admin bearer token.
+- **MCP:** `set_machine_profile`.
+
+The machine keeps running its current image until it next boots. If the
+change should land now, reboot it afterwards (dashboard button,
+`power_machine`, or arm the soft-reboot signal).
+
 ### Pushing a new image
 
 1. Edit the recipe / profile.
