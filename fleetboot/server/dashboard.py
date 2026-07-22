@@ -11,6 +11,7 @@ exposure put it behind a reverse proxy + your own SSO.
 from __future__ import annotations
 
 import hmac
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
@@ -771,6 +772,50 @@ def build_dashboard_router(
     def _reboot_machine(mac: str, *, then_delete: bool) -> None:
         reboot_machine(registry, mac, then_delete=then_delete)
 
+    @router.post(
+        "/dashboard/machines/{mac}/power/{action}",
+        response_class=HTMLResponse,
+        dependencies=[Depends(require_admin)],
+    )
+    def power_machine_route(mac: str, action: str) -> RedirectResponse:
+        """Switch a machine on or off from its detail page.
+
+        Unlike reboot there is no soft fallback — power needs a
+        per-machine command or a pdudaemon alias, so an unwired machine
+        fails visibly rather than silently doing nothing.
+        """
+        if action not in POWER_ACTIONS:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"action must be one of {', '.join(POWER_ACTIONS)}",
+            )
+        power_machine(registry, mac, action)
+        return RedirectResponse(
+            url=f"/dashboard/machines/{mac}",
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+
+    @router.post(
+        "/dashboard/machines/{mac}/power-settings",
+        response_class=HTMLResponse,
+        dependencies=[Depends(require_admin)],
+    )
+    def set_power_settings(
+        mac: str,
+        pdu_alias: str = Form(""),
+        power_on_command: str = Form(""),
+        power_off_command: str = Form(""),
+    ) -> RedirectResponse:
+        """Per-machine power wiring: the pdudaemon alias, plus optional
+        bespoke on/off commands for hardware pdudaemon doesn't cover."""
+        registry.set_pdu_alias(mac, pdu_alias)
+        registry.set_power_command(mac, "on", power_on_command)
+        registry.set_power_command(mac, "off", power_off_command)
+        return RedirectResponse(
+            url=f"/dashboard/machines/{mac}",
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+
     @router.get(
         "/dashboard/machines/{mac}",
         response_class=HTMLResponse,
@@ -996,61 +1041,162 @@ def _list_overlay_files(profile_dir: Path) -> list[dict]:
     return entries
 
 
-def reboot_machine(
-    registry: MachineRegistry, mac: str, *, then_delete: bool,
-) -> None:
-    """Reboot `mac`, optionally deleting its registry row.
+POWER_ACTIONS = ("on", "off", "reboot")
 
-    Called by the dashboard's /reboot + /delete-and-reboot buttons and by
-    the MCP `reboot_machine` tool. Two PDU paths in priority order:
 
-      1. Per-machine `reboot_command` — free-text shell (shell=True on
-         the fleetboot host). Admin owns the string.
-      2. Fleet-wide pdudaemon fallback when `pdudaemon_host` is set AND
-         the machine has a hostname: builds
-         `curl --fail "<pdudaemon>/power/control/reboot?alias=<host>"`.
+@dataclass(frozen=True)
+class PowerResult:
+    """What actually happened when we tried to switch a machine.
 
-    `then_delete=True` always removes the row (soft-reboot signal can't
-    be delivered to a deleted row — /status wouldn't find the machine).
-    `then_delete=False` arms the soft-reboot signal when PDU fails or
-    isn't configured, so the machine reboots itself on its next
-    heartbeat.
+    Power control fails quietly and often — an unplugged PDU port, a
+    wrong alias, a machine that was never wired up — so every caller
+    gets told which route was taken and whether it worked, rather than
+    having to assume.
+    """
+
+    mac: str
+    action: str
+    # 'machine_command' | 'pdudaemon' | 'soft_reboot' | 'none'
+    method: str
+    ok: bool
+    detail: str
+    deleted: bool = False
+
+
+def power_machine(
+    registry: MachineRegistry,
+    mac: str,
+    action: str,
+    *,
+    then_delete: bool = False,
+) -> PowerResult:
+    """Switch `mac` on, off, or through a reboot.
+
+    Two routes are tried in priority order, the same for every action:
+
+      1. The machine's own command for that action (`power_on_command`,
+         `power_off_command`, `reboot_command`) — free-text shell, run
+         with shell=True on the fleetboot host. Admin owns the string.
+      2. The fleet-wide pdudaemon, when `pdudaemon_host` is set and the
+         machine has an alias (`pdu_alias`, else its reported hostname):
+         `curl --fail "<pdudaemon>/power/control/<action>?alias=<alias>"`.
+
+    `reboot` has a third route the other actions can't have: if both
+    fail, the soft-reboot signal is armed and the machine reboots
+    itself on its next heartbeat. There is no equivalent for `on` (a
+    machine that is off cannot be asked to do anything) or for `off`
+    (the reporter has no soft-poweroff), so those report failure
+    honestly rather than pretending.
+
+    `then_delete=True` removes the registry row afterwards — only
+    meaningful for reboot, where the soft path needs the row gone to
+    avoid an immediate re-arm.
     """
     import subprocess
 
-    machine = registry.lookup(mac)
-    command: Optional[str] = None
-    if machine is not None:
-        if machine.reboot_command:
-            command = machine.reboot_command
-        else:
-            pdu_host = registry.get_setting("pdudaemon_host")
-            if pdu_host and machine.hostname:
-                command = _pdudaemon_reboot_command(
-                    pdu_host=pdu_host, alias=machine.hostname,
-                )
+    if action not in POWER_ACTIONS:
+        raise ValueError(
+            f"unknown power action {action!r}; expected one of "
+            + ", ".join(POWER_ACTIONS)
+        )
 
-    pdu_succeeded = False
+    machine = registry.lookup(mac)
+    if machine is None:
+        return PowerResult(
+            mac=mac, action=action, method="none", ok=False,
+            detail=f"no machine with MAC {mac}",
+        )
+
+    command = _machine_power_command(machine, action)
+    method = "machine_command" if command else "none"
+    detail = ""
+    if not command:
+        pdu_host = registry.get_setting("pdudaemon_host")
+        alias = machine.pdu_alias or machine.hostname
+        if pdu_host and alias:
+            command = _pdudaemon_power_command(
+                pdu_host=pdu_host, alias=alias, action=action,
+            )
+            method = "pdudaemon"
+        elif not pdu_host:
+            detail = (
+                "no per-machine power command and no fleet pdudaemon_host "
+                "setting"
+            )
+        else:
+            detail = (
+                "no per-machine power command, and no pdudaemon alias "
+                "(machine has never reported a hostname — set pdu_alias)"
+            )
+
+    succeeded = False
     if command:
         try:
             result = subprocess.run(
                 command, shell=True, timeout=10,
                 stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT,
             )
-            pdu_succeeded = result.returncode == 0
+            succeeded = result.returncode == 0
+            detail = (
+                f"{method} succeeded" if succeeded
+                else f"{method} exited {result.returncode}"
+            )
         except subprocess.TimeoutExpired:
-            pdu_succeeded = False
+            detail = f"{method} timed out after 10s"
 
     if then_delete:
         registry.remove(mac)
-    elif not pdu_succeeded:
+        return PowerResult(
+            mac=mac, action=action, method=method, ok=succeeded,
+            detail=detail, deleted=True,
+        )
+
+    if action == "reboot" and not succeeded:
         registry.set_pending_reboot(mac, True)
+        return PowerResult(
+            mac=mac, action=action, method="soft_reboot", ok=True,
+            detail=(
+                "armed the soft-reboot signal; the machine reboots itself "
+                "on its next heartbeat"
+                + (f" ({detail})" if detail else "")
+            ),
+        )
+
+    return PowerResult(
+        mac=mac, action=action, method=method, ok=succeeded, detail=detail,
+    )
 
 
-def _pdudaemon_reboot_command(*, pdu_host: str, alias: str) -> str:
-    """Build the curl line that asks pdudaemon to reboot a given alias.
+def reboot_machine(
+    registry: MachineRegistry, mac: str, *, then_delete: bool,
+) -> PowerResult:
+    """Reboot `mac`, optionally deleting its registry row.
 
-    The hostname is URL-quoted because aliases can legitimately include
+    Kept as its own name because the dashboard's /reboot and
+    /delete-and-reboot buttons and the MCP `reboot_machine` tool all
+    speak in terms of rebooting. See `power_machine` for the routes.
+    """
+    return power_machine(registry, mac, "reboot", then_delete=then_delete)
+
+
+def _machine_power_command(machine, action: str) -> Optional[str]:
+    """The machine's own shell command for one action, if it has one."""
+    return {
+        "on": machine.power_on_command,
+        "off": machine.power_off_command,
+        "reboot": machine.reboot_command,
+    }[action]
+
+
+def _pdudaemon_power_command(
+    *, pdu_host: str, alias: str, action: str,
+) -> str:
+    """Build the curl line that asks pdudaemon to switch an alias.
+
+    pdudaemon's HTTP API takes the action in the path and the machine
+    by alias: `/power/control/{on,off,reboot}?alias=<alias>`.
+
+    The alias is URL-quoted because names can legitimately include
     characters that need escaping (host naming schemes often use dots or
     dashes). pdu_host is taken verbatim — the admin set it so they can
     include port, scheme, etc.
@@ -1063,12 +1209,12 @@ def _pdudaemon_reboot_command(*, pdu_host: str, alias: str) -> str:
         base = pdu_host
     else:
         base = f"http://{pdu_host}"
-    # `--fail` makes curl exit non-zero on HTTP 4xx/5xx so our
-    # soft-reboot fallback fires when pdudaemon refuses the request
-    # (unknown alias, port unconfigured, server down). Without it
-    # curl returns 0 for a "404 alias not found" body, which would
-    # masquerade as success.
-    return f'curl --fail "{base}/power/control/reboot?alias={safe_alias}"'
+    # `--fail` makes curl exit non-zero on HTTP 4xx/5xx so a refused
+    # request (unknown alias, port unconfigured, server down) is
+    # reported as a failure — and, for reboot, falls through to the
+    # soft-reboot path. Without it curl returns 0 for a "404 alias not
+    # found" body, which would masquerade as success.
+    return f'curl --fail "{base}/power/control/{action}?alias={safe_alias}"'
 
 
 def _list_profile_names(profiles_root: Path) -> list[str]:

@@ -815,17 +815,7 @@ def create_app(
         from fleetboot.server.dashboard import build_dashboard_router
         from fleetboot.server.mcp import build_mcp_router
 
-        # amd64/x86_64/x64 all name the same wire-format arch — Debian
-        # uses "amd64" for build artefacts, but the registry stores
-        # whatever the PXE boot loader announced (typically "x86_64"
-        # for BIOS or "x64" for EFI). Same story for arm64/aarch64.
-        _ARCH_ALIASES = {
-            "amd64": ("amd64", "x86_64", "x64"),
-            "x86_64": ("amd64", "x86_64", "x64"),
-            "x64": ("amd64", "x86_64", "x64"),
-            "arm64": ("arm64", "aarch64"),
-            "aarch64": ("arm64", "aarch64"),
-        }
+        from fleetboot.server.registry import architecture_aliases
 
         def _fleet_wide_reboot_on_success(job: BuildJob) -> None:
             """Arm the soft-reboot signal on every machine running the
@@ -836,9 +826,7 @@ def create_app(
             """
             if not job.auto_reboot:
                 return
-            aliases = _ARCH_ALIASES.get(
-                job.architecture, (job.architecture,)
-            )
+            aliases = architecture_aliases(job.architecture)
             armed = 0
             for machine in registry.list_all():
                 if (

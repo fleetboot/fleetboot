@@ -201,10 +201,68 @@
 
 <h2>Power control</h2>
 <p class="muted">
-  Free-text shell command run on the fleetboot host when "delete + reboot"
-  is clicked. Runs with <code>shell=True</code> as the dev server user.
-  A structured power-control layer is future work; for now, anything
-  shell-callable works (curl to a PDU, IPMI, wake-on-LAN tool, …).
+  Every action tries the machine's own command first, then the
+  fleet-wide pdudaemon
+  (<code>/power/control/&lt;action&gt;?alias=&lt;alias&gt;</code>, alias
+  below). Reboot has a third route the others can't: if both fail it
+  arms the soft-reboot signal and the machine reboots itself on its
+  next heartbeat. On and off have no such fallback — an unwired
+  machine simply won't switch.
+</p>
+
+<form method="post" action="/dashboard/machines/{{ machine.mac }}/power/on"
+      style="display:inline">
+  <button type="submit">power on</button>
+</form>
+&nbsp;
+<form method="post" action="/dashboard/machines/{{ machine.mac }}/power/off"
+      onsubmit="return confirm('Power off {{ machine.mac }}?');"
+      style="display:inline">
+  <button type="submit" class="danger">power off</button>
+</form>
+&nbsp;
+<form method="post" action="/dashboard/machines/{{ machine.mac }}/reboot"
+      style="display:inline">
+  <button type="submit">reboot</button>
+</form>
+
+<h3>Wiring</h3>
+<form method="post"
+      action="/dashboard/machines/{{ machine.mac }}/power-settings">
+  <p>
+    <label>pdudaemon alias
+      <input type="text" name="pdu_alias"
+             value="{{ machine.pdu_alias or '' }}"
+             placeholder="{{ machine.hostname or 'e.g. lab-node-04' }}"
+             style="width: 300px;">
+    </label>
+    <span class="muted">— defaults to the reported hostname
+      ({{ machine.hostname or 'none yet' }}). Set it by hand for a
+      machine that has never booted, so it can be switched on.</span>
+  </p>
+  <p>
+    <label>Power-on command
+      <input type="text" name="power_on_command"
+             value="{{ machine.power_on_command or '' }}"
+             placeholder='e.g. ipmitool -H bmc-04 power on'
+             style="width: 600px;">
+    </label>
+  </p>
+  <p>
+    <label>Power-off command
+      <input type="text" name="power_off_command"
+             value="{{ machine.power_off_command or '' }}"
+             placeholder='e.g. ipmitool -H bmc-04 power off'
+             style="width: 600px;">
+    </label>
+  </p>
+  <button type="submit">save wiring</button>
+</form>
+
+<p class="muted">
+  Commands run on the fleetboot host with <code>shell=True</code> as the
+  server user, and override pdudaemon for that action. Anything
+  shell-callable works (curl to a PDU, IPMI, a wake-on-LAN tool, …).
 </p>
 <form method="post" action="/dashboard/machines/{{ machine.mac }}/reboot-command">
   <label>Reboot command

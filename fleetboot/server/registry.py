@@ -44,6 +44,18 @@ CREATE TABLE IF NOT EXISTS machines (
     last_ip          TEXT,
     last_ip_at       TEXT,
     reboot_command   TEXT,
+    -- Per-machine power control, symmetric with reboot_command: shell
+    -- commands that switch this machine on and off. Left NULL on the
+    -- normal case, where power is routed through the fleet-wide
+    -- pdudaemon instead (see pdu_alias below).
+    power_on_command  TEXT,
+    power_off_command TEXT,
+    -- The name this machine answers to on pdudaemon. Defaults to the
+    -- reported hostname when NULL, but a machine that has never booted
+    -- has no hostname — and powering *on* a machine that has never
+    -- booted is exactly the on-demand case — so it can be set ahead of
+    -- time.
+    pdu_alias        TEXT,
     -- Soft-reboot signal. When non-zero, the next /status reply tells
     -- the machine to `systemctl reboot`. Used as a fallback when the
     -- PDU power-cycle command fails (or no PDU is configured): the
@@ -171,6 +183,19 @@ def _add_diagnostics_columns_if_missing(
             pass
 
 
+def _add_power_columns_if_missing(connection: sqlite3.Connection) -> None:
+    """Migration: on/off power control alongside the existing reboot."""
+    for column_def in (
+        "ALTER TABLE machines ADD COLUMN power_on_command TEXT",
+        "ALTER TABLE machines ADD COLUMN power_off_command TEXT",
+        "ALTER TABLE machines ADD COLUMN pdu_alias TEXT",
+    ):
+        try:
+            connection.execute(column_def)
+        except sqlite3.OperationalError:
+            pass
+
+
 @dataclass(frozen=True)
 class BootEvent:
     """One row from the boot_events log."""
@@ -231,6 +256,14 @@ class Machine:
     # shell=True semantics — this is dev-only power control; a real
     # structured-power-control layer is a future task.
     reboot_command: Optional[str] = None
+    # Same idea for switching the machine on and off. Usually left
+    # unset: most fleets route power through the fleet-wide pdudaemon,
+    # which needs no per-machine command at all.
+    power_on_command: Optional[str] = None
+    power_off_command: Optional[str] = None
+    # What this machine is called on pdudaemon. Falls back to the
+    # reported hostname when unset.
+    pdu_alias: Optional[str] = None
     # When True, the next /status response tells the machine to
     # `systemctl reboot`. Set as a soft fallback when an explicit
     # PDU power-cycle has failed (or no PDU is configured); cleared
@@ -281,6 +314,7 @@ class MachineRegistry:
             _add_boot_version_columns_if_missing(connection)
             _add_scratch_mode_columns_if_missing(connection)
             _add_diagnostics_columns_if_missing(connection)
+            _add_power_columns_if_missing(connection)
             # Rename / drop boot_events.state values that no longer
             # exist (e.g. login_ready → login_console; user_logged_in
             # was dropped entirely). Idempotent — no-op on a fresh DB.
@@ -328,7 +362,20 @@ class MachineRegistry:
                 f"scratch_mode must be volatile/persistent/off, got {scratch_mode!r}"
             )
         normalised_mac = _normalise_mac(mac)
+        # Re-enrolling replaces the row wholesale, which would throw away
+        # how this machine is powered — and a machine you can no longer
+        # switch on is a machine you've lost. Power wiring is physical
+        # and survives a profile change, so carry it across.
+        power_columns = (
+            "reboot_command", "power_on_command",
+            "power_off_command", "pdu_alias",
+        )
         with self._write_lock, self._connect() as connection:
+            previous = connection.execute(
+                f"SELECT {', '.join(power_columns)} FROM machines "
+                "WHERE mac = ?",
+                (normalised_mac,),
+            ).fetchone()
             connection.execute(
                 "INSERT OR REPLACE INTO machines "
                 "(mac, profile_name, architecture, platform, "
@@ -340,6 +387,12 @@ class MachineRegistry:
                     scratch_mode,
                 ),
             )
+            if previous is not None:
+                assignments = ", ".join(f"{c} = ?" for c in power_columns)
+                connection.execute(
+                    f"UPDATE machines SET {assignments} WHERE mac = ?",
+                    (*(previous[c] for c in power_columns), normalised_mac),
+                )
         result = self.lookup(normalised_mac)
         # lookup must succeed -- we just wrote the row inside the lock.
         assert result is not None
@@ -402,11 +455,47 @@ class MachineRegistry:
     def set_reboot_command(self, mac: str, command: Optional[str]) -> None:
         """Set or clear the machine's reboot shell command. None / empty
         clears it (admin's way of disabling the delete+reboot button)."""
+        self.set_power_command(mac, "reboot", command)
+
+    # Which column backs each power action. One dict rather than three
+    # near-identical methods, so adding an action later is one line.
+    _POWER_COMMAND_COLUMNS = {
+        "on": "power_on_command",
+        "off": "power_off_command",
+        "reboot": "reboot_command",
+    }
+
+    def set_power_command(
+        self, mac: str, action: str, command: Optional[str],
+    ) -> None:
+        """Set or clear the shell command for one power action.
+
+        `action` is 'on', 'off' or 'reboot'. None / empty clears the
+        command, which falls the machine back to the fleet-wide
+        pdudaemon (if configured) for that action.
+        """
+        column = self._POWER_COMMAND_COLUMNS.get(action)
+        if column is None:
+            raise ValueError(
+                f"unknown power action {action!r}; expected one of "
+                + ", ".join(sorted(self._POWER_COMMAND_COLUMNS))
+            )
         normalised_mac = _normalise_mac(mac)
         value = (command or "").strip() or None
         with self._write_lock, self._connect() as connection:
             connection.execute(
-                "UPDATE machines SET reboot_command = ? WHERE mac = ?",
+                f"UPDATE machines SET {column} = ? WHERE mac = ?",
+                (value, normalised_mac),
+            )
+
+    def set_pdu_alias(self, mac: str, alias: Optional[str]) -> None:
+        """Set or clear the machine's pdudaemon alias. Cleared means
+        'fall back to the reported hostname'."""
+        normalised_mac = _normalise_mac(mac)
+        value = (alias or "").strip() or None
+        with self._write_lock, self._connect() as connection:
+            connection.execute(
+                "UPDATE machines SET pdu_alias = ? WHERE mac = ?",
                 (value, normalised_mac),
             )
 
@@ -503,6 +592,7 @@ class MachineRegistry:
         "last_hardware", "last_hardware_at",
         "last_ip", "last_ip_at",
         "reboot_command",
+        "power_on_command", "power_off_command", "pdu_alias",
         "pending_reboot",
         "created_at",
     )
@@ -842,6 +932,38 @@ def _row_to_rule(row: sqlite3.Row) -> "AutoEnrolRule":
     )
 
 
+# amd64/x86_64/x64 all name the same wire-format arch — Debian uses
+# "amd64" for build artefacts, but the registry stores whatever the PXE
+# boot loader announced ("x86_64" for BIOS, "x64" for EFI). Same story
+# for arm64/aarch64. Anything selecting machines by architecture has to
+# treat these as one, so the mapping lives here rather than in each
+# caller.
+ARCHITECTURE_ALIASES: dict[str, tuple[str, ...]] = {
+    "amd64": ("amd64", "x86_64", "x64"),
+    "x86_64": ("amd64", "x86_64", "x64"),
+    "x64": ("amd64", "x86_64", "x64"),
+    "arm64": ("arm64", "aarch64"),
+    "aarch64": ("arm64", "aarch64"),
+}
+
+
+def architecture_aliases(architecture: str) -> tuple[str, ...]:
+    """Every spelling of `architecture`, including itself."""
+    return ARCHITECTURE_ALIASES.get(architecture, (architecture,))
+
+
+def matches_architecture(candidate: str, wanted: str) -> bool:
+    """True when two architecture strings name the same architecture."""
+    return candidate in architecture_aliases(wanted)
+
+
+def _optional_column(row: sqlite3.Row, name: str):
+    """Read a column that older databases may predate. Migrations add
+    it on open, so this only matters for rows read from a connection
+    opened before the migration ran."""
+    return row[name] if name in row.keys() else None
+
+
 def _row_to_machine(row: sqlite3.Row) -> Machine:
     return Machine(
         mac=row["mac"],
@@ -862,6 +984,9 @@ def _row_to_machine(row: sqlite3.Row) -> Machine:
         last_ip=row["last_ip"],
         last_ip_at=row["last_ip_at"],
         reboot_command=row["reboot_command"],
+        power_on_command=_optional_column(row, "power_on_command"),
+        power_off_command=_optional_column(row, "power_off_command"),
+        pdu_alias=_optional_column(row, "pdu_alias"),
         pending_reboot=bool(row["pending_reboot"]) if (
             "pending_reboot" in row.keys()
         ) else False,

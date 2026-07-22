@@ -468,6 +468,48 @@ talking to the sqlite registry directly.
 
 ---
 
+## Power control
+
+Every machine can be switched **on**, **off** or **rebooted** from its
+dashboard page, from the MCP tools (`power_machine`, `power_fleet`), or
+by the delete+reboot recovery path. Each action resolves the same way:
+
+1. **The machine's own command** for that action, if one is set —
+   `power_on_command`, `power_off_command`, `reboot_command`. Free-text
+   shell, run on the fleetboot host with `shell=True`. Use it for
+   hardware pdudaemon doesn't cover (IPMI, a cloud API, a wake-on-LAN
+   tool).
+2. **The fleet-wide pdudaemon.** Set `pdudaemon_host` once under
+   *Settings* (e.g. `prowl:16421`), give each machine an alias, and
+   fleetboot fires:
+
+   ```
+   curl --fail "http://prowl:16421/power/control/<on|off|reboot>?alias=<alias>"
+   ```
+
+`--fail` matters: without it curl exits 0 on a "404 unknown alias"
+body, and a refusal would masquerade as success.
+
+Reboot has a third route the others can't have — if both fail, the
+soft-reboot signal is armed and the machine reboots itself on its next
+heartbeat. **On and off have no such fallback**: a machine that is off
+can't be asked to do anything, and the reporter has no soft poweroff.
+An unwired machine reports failure rather than silently doing nothing.
+
+### Aliases
+
+The alias defaults to the machine's reported hostname, which only
+exists once it has booted at least once. For anything you intend to
+**power on**, set the alias explicitly — on the machine's dashboard
+page under *Power control → Wiring*, or via the `set_pdu_alias` MCP
+tool. A machine that has never booted is exactly the one you need to
+switch on, and it has no hostname to fall back to.
+
+Power wiring survives re-enrolment: changing a machine's profile won't
+throw away how it is powered.
+
+---
+
 ## Troubleshooting
 
 | Symptom | What to check |

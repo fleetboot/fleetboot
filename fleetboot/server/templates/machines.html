@@ -88,10 +88,10 @@
       <td class="row-actions">
         {% if m.reboot_command %}
           {% set hint = m.reboot_command %}
-        {% elif m.hostname %}
-          {% set hint = "pdudaemon alias=" ~ m.hostname ~ " (soft-reboot fallback if PDU fails)" %}
+        {% elif m.pdu_alias or m.hostname %}
+          {% set hint = "pdudaemon alias=" ~ (m.pdu_alias or m.hostname) ~ " (soft-reboot fallback if PDU fails)" %}
         {% else %}
-          {% set hint = "soft reboot via /status reply (no PDU / no hostname)" %}
+          {% set hint = "soft reboot via /status reply (no PDU / no alias)" %}
         {% endif %}
         <form method="post" action="/dashboard/machines/{{ m.mac }}/reboot"
               onsubmit="return confirm('Reboot {{ m.mac }}?');">
