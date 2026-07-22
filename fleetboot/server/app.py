@@ -314,6 +314,21 @@ def create_app(
     app.state.registry = registry
     app.state.admin_secret = admin_secret
 
+    @app.get("/healthz", include_in_schema=False)
+    def healthz() -> dict:
+        """Liveness probe for the container healthcheck and any external
+        monitoring.
+
+        Deliberately unauthenticated and deliberately trivial: it says
+        "this process is serving HTTP", nothing more. Every other route
+        either redirects to the dashboard (which 401s without Basic
+        auth) or needs a token, so a health probe has nowhere else to
+        point — an authenticated healthcheck just marks a working
+        container unhealthy forever. It leaks nothing: no version, no
+        fleet state, no configuration.
+        """
+        return {"ok": True}
+
     @app.post("/status", response_model=StatusAcknowledgement)
     def post_status(
         report: StatusReport,

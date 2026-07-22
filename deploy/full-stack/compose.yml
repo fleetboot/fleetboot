@@ -1,0 +1,56 @@
+# Full stack: fleetboot control plane + tftpjail + fleetid identity.
+#
+# One `docker compose` project that brings up everything a fleet with
+# central login needs:
+#
+#   fleetboot    control plane, dashboard, MCP endpoint     (HTTP 8080)
+#   tftpjail     jailed TFTP boot server                    (UDP 69, host net)
+#   ipa          FreeIPA — Kerberos + LDAP + CA             (443/389/88/464)
+#   fleetid-nfs  Kerberised NFSv4 home directories          (host net)
+#
+# The two halves stay separate projects on disk — fleetboot knows
+# nothing about identity, and fleetid uses fleetboot only to register
+# machines and hand out enrolment keytabs. This file composes them
+# without merging them: `include` pulls in each project's own compose
+# file, with its own .env, resolving that file's relative paths
+# against its own directory. Edit the real files, not this one.
+#
+# ---- Layout it expects --------------------------------------------------
+#
+#   <workspace>/fleetboot/     this repo (contains deploy/full-stack/)
+#   <workspace>/tftpjail/      sibling checkout — the tftpjail image is
+#                              built from both trees, so it must be here
+#   <workspace>/fleetid/       sibling checkout (override with FLEETID_DIR)
+#
+# ---- Bringing it up -----------------------------------------------------
+#
+#   cd fleetboot/deploy/full-stack
+#   cp ../../.env.example ../../.env                 # fleetboot secrets
+#   cp ../../../fleetid/compose/.env.example \
+#      ../../../fleetid/compose/.env                 # identity settings
+#   $EDITOR ../../.env ../../../fleetid/compose/.env
+#
+#   docker compose up -d --build                     # boot plane only
+#   docker compose --profile ipa up -d ipa           # + identity server
+#   docker compose --profile nfs up -d nfs           # + Kerberos NFS homes
+#
+# The identity services are behind compose profiles on purpose: FreeIPA
+# claims host 443/389/88/464 and the NFS container is privileged with
+# host networking, so neither starts by accident. Bring `ipa` up first
+# and let it finish installing (5-10 min, watch `docker compose logs -f
+# ipa`) before the NFS server, which needs a keytab minted from it.
+#
+# See deploy/README.md for the full walkthrough, including the DHCP and
+# DNS prerequisites that neither compose file can do for you.
+
+name: fleetboot-full-stack
+
+include:
+  # The control plane and its TFTP boot server.
+  - path: ../../docker-compose.yml
+    env_file: ../../.env
+
+  # Identity and storage. FLEETID_DIR lets you point at a checkout
+  # somewhere other than a sibling directory.
+  - path: ${FLEETID_DIR:-../../../fleetid}/compose/docker-compose.yml
+    env_file: ${FLEETID_DIR:-../../../fleetid}/compose/.env

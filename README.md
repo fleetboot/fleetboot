@@ -93,6 +93,13 @@ so a new build is immediately picked up without a restart.
 The dashboard walks you through enrolling a machine, defining
 auto-enrol rules (by MAC prefix or IP CIDR), and triggering builds.
 
+For a real deployment on a new machine — host prerequisites, secrets,
+running it as a systemd-supervised service, backups, upgrades — see
+[`deploy/README.md`](deploy/README.md). `deploy/full-stack/compose.yml`
+is a worked example that brings up the control plane, tftpjail, and the
+`fleetid` identity stack (FreeIPA + Kerberos NFSv4 homes) as one
+compose project.
+
 ## Driving it from an agent
 
 The control plane speaks [MCP](https://modelcontextprotocol.io) at

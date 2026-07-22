@@ -75,27 +75,35 @@ Hardware on the clients:
 
 ## Installing fleetboot and tftpjail
 
-On the fleetboot server, as `root`:
+Deployment is **docker compose** — the same path used for local
+development, and the only supported one. `deploy/README.md` is the full
+walkthrough (host prerequisites, secrets, systemd supervision, backups,
+upgrades, TLS); the short version is:
 
 ```sh
-# Dependencies
-apt install python3 python3-fastapi python3-httpx uvicorn \
-            debos grub-common qemu-utils mksquashfs
-
-# Get the code
+# Docker Engine + compose plugin must already be installed, and UDP 69
+# must be free (`systemctl disable --now tftpd-hpa` if that's squatting).
 mkdir -p /opt/fleetboot && cd /opt/fleetboot
-git clone https://github.com/your-org/fleetboot.git
-git clone https://github.com/your-org/tftpjail.git
+git clone https://github.com/fleetboot/fleetboot.git
+git clone https://github.com/fleetboot/tftpjail.git     # sibling: required
+cd fleetboot
+cp .env.example .env && chmod 600 .env
+$EDITOR .env        # FLEETBOOT_ADMIN_SECRET, FLEETBOOT_MINT_SECRET,
+                    # CLIENT_BASE_URL=http://<this host's LAN IP>:8080
+docker compose up -d --build
+curl -fsS http://localhost:8080/healthz && echo
 ```
 
-Grant the Python interpreter permission to bind UDP/69 without root
-(tftpjail is the only thing that needs it):
+tftpjail is **not optional**: the PXE chain starts at TFTP, and tftpjail
+is what authorises a MAC and renders its `grub.cfg`. It's in the same
+compose file for that reason, and its image is built from both
+checkouts — hence the sibling clone.
 
-```sh
-setcap cap_net_bind_service=+ep $(readlink -f $(which python3))
-```
+To run the identity stack alongside, use
+`deploy/full-stack/compose.yml`, which composes this project with
+`fleetid`'s. See "Identity + storage" below.
 
-Run the test gates once to confirm the environment is healthy:
+Confirm the environment is healthy before enrolling anything real:
 
 ```sh
 cd /opt/fleetboot/fleetboot && make test
