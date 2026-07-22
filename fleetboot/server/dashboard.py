@@ -349,6 +349,7 @@ def build_dashboard_router(
     def mcp_docs(request: Request) -> HTMLResponse:
         """Docs page describing the MCP endpoint. Pulls the tool
         catalogue live so the docs never drift from the server."""
+        from fleetboot.server import mcp_docs
         from fleetboot.server.mcp import (
             PROTOCOL_VERSION, SERVER_INSTRUCTIONS, _tool_catalogue,
         )
@@ -361,6 +362,7 @@ def build_dashboard_router(
                 "protocol_version": PROTOCOL_VERSION,
                 "instructions": SERVER_INSTRUCTIONS,
                 "tools": _tool_catalogue(),
+                "doc_topics": mcp_docs.TOPICS,
             },
         )
 

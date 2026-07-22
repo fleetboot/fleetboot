@@ -26,13 +26,21 @@ from fleetboot.server.build_jobs import (
     BuildAlreadyRunningError,
     BuildJobManager,
 )
+from fleetboot.server.boot_sessions import BootSessionStore
 from fleetboot.server.dashboard import (
+    _STALE_AFTER_SECONDS,
+    POWER_ACTIONS,
     _list_profile_names,
     _safe_overlay_path,
     _safe_profile_dir,
+    power_machine,
     reboot_machine,
 )
-from fleetboot.server.registry import MachineRegistry
+from fleetboot.server import mcp_docs
+from fleetboot.server.registry import (
+    MachineRegistry,
+    matches_architecture,
+)
 
 
 PROTOCOL_VERSION = "2025-06-18"
@@ -47,6 +55,21 @@ machines. Everything a machine boots into is produced by an "image
 build" from a named "profile" (a directory under image/profiles/ that
 lists extra packages, a setup-chroot script, an overlay/ tree, and an
 optional parent chain).
+
+It serves two jobs from the same registry:
+
+  Fleet control — keep a set of known machines running a known image:
+  enrol them, roll out new images, watch them boot, recover the ones
+  that wedge.
+
+  On-demand compute — treat that same hardware as a pool you switch
+  on when there's work and off when there isn't. `power_fleet` takes
+  a profile and a count, `list_machines` tells you which ones came up
+  (`online`, `state`), and powering off afterwards costs nothing to
+  undo: the image is immutable, so a machine that comes back is
+  identical to the one you switched off. Call
+  `describe_fleetboot(topic="on-demand-compute")` for the full
+  pattern.
 
 Typical workflows an agent can drive here:
 
@@ -65,13 +88,19 @@ Typical workflows an agent can drive here:
     4. Poll `get_build` until state is "succeeded"; `auto_reboot_armed`
        reports how many machines were swept.
 
-  Reboot a machine
-    - `reboot_machine` tries the per-machine reboot_command, then the
-      fleet pdudaemon fallback; if both are absent or fail, it arms
-      the soft-reboot signal so the machine reboots itself on its
-      next /status heartbeat.
-    - Pass delete_after=true only when you also want the registry row
-      gone (a soft-reboot cannot deliver to a deleted row).
+  Power a machine on, off, or through a reboot
+    - `power_machine` with action on/off/reboot. Each action tries the
+      machine's own command for it, then the fleet-wide pdudaemon
+      (/power/control/<action>?alias=<alias>). Check `ok` in the
+      result — power control fails quietly in the real world.
+    - Only `reboot` has a soft fallback (arming the in-image reboot
+      signal). `on` and `off` need real power control; if none is
+      wired up they report failure rather than pretending.
+    - `power_fleet` does the same across a profile, with an optional
+      count — that's the on-demand lever.
+    - `reboot_machine` is the reboot-only shorthand. Pass
+      delete_after=true only when you also want the registry row gone
+      (a soft-reboot cannot deliver to a deleted row).
 
   Watch the fleet
     - `list_machines` for a snapshot; `recent_events` for a live feel
@@ -80,6 +109,16 @@ Typical workflows an agent can drive here:
 State is durable: profile edits land on disk, enrolments land in
 SQLite, builds produce artefacts under build/. There is no undo — a
 delete or a save overwrites in place.
+
+This server documents itself. Before doing anything non-obvious — or
+whenever you need to explain fleetboot to someone — call
+`describe_fleetboot`, which serves full documentation with worked
+examples: what the system is (`overview`), everything it offers
+(`services`), how images are composed (`profiles`), step-by-step
+recipes (`workflows`), what each boot state means when a machine
+stalls (`boot-lifecycle`), and the raw wire protocol (`examples`).
+The same pages are available as MCP resources under
+`fleetboot://docs/<topic>`.
 """
 
 
@@ -113,12 +152,26 @@ def _tool_text_result(payload: Any, *, is_error: bool = False) -> dict:
     }
 
 
+def _tool_markdown_result(text: str) -> dict:
+    """Wrap prose as MCP tool content: one markdown text block.
+
+    Documentation goes back as-is rather than JSON-encoded — a model
+    reads markdown better than an escaped string, and there is no
+    structure here worth parsing.
+    """
+    return {
+        "content": [{"type": "text", "text": text}],
+        "isError": False,
+    }
+
+
 def build_mcp_router(
     *,
     registry: MachineRegistry,
     profiles_root: Path,
     builds: BuildJobManager,
     admin_secret: str,
+    sessions: Optional[BootSessionStore] = None,
 ) -> APIRouter:
     """Construct the /mcp router."""
 
@@ -145,6 +198,7 @@ def build_mcp_router(
         registry=registry,
         profiles_root=profiles_root,
         builds=builds,
+        sessions=sessions,
     )
 
     @router.get("/mcp", include_in_schema=False)
@@ -223,7 +277,12 @@ def _dispatch(
             result = {
                 "protocolVersion": PROTOCOL_VERSION,
                 "serverInfo": SERVER_INFO,
-                "capabilities": {"tools": {"listChanged": False}},
+                "capabilities": {
+                    "tools": {"listChanged": False},
+                    # The documentation topics. Static, so nothing to
+                    # subscribe to and no change notifications.
+                    "resources": {"listChanged": False, "subscribe": False},
+                },
                 "instructions": SERVER_INSTRUCTIONS,
             }
         elif method == "notifications/initialized" or method == "initialized":
@@ -233,6 +292,36 @@ def _dispatch(
             result = {}
         elif method == "tools/list":
             result = {"tools": tools}
+        elif method == "resources/list":
+            result = {"resources": mcp_docs.resource_descriptors()}
+        elif method == "resources/templates/list":
+            # No parameterised resources — answer the question rather
+            # than making a conformant client handle a method error.
+            result = {"resourceTemplates": []}
+        elif method == "resources/read":
+            uri = params.get("uri")
+            topic = (
+                mcp_docs.topic_for_uri(uri) if isinstance(uri, str) else None
+            )
+            if topic is None:
+                return None if is_notification else _rpc_error(
+                    id_, _INVALID_PARAMS,
+                    f"unknown resource: {uri!r}. Known resources: "
+                    + ", ".join(
+                        t["uri"] for t in mcp_docs.resource_descriptors()
+                    ),
+                )
+            result = {
+                "contents": [
+                    {
+                        "uri": topic.uri,
+                        "name": topic.name,
+                        "title": topic.title,
+                        "mimeType": mcp_docs.DOC_MIME_TYPE,
+                        "text": topic.body + mcp_docs.topic_index(),
+                    },
+                ],
+            }
         elif method == "tools/call":
             name = params.get("name")
             arguments = params.get("arguments") or {}
@@ -278,11 +367,47 @@ def _tool_catalogue() -> list[dict]:
     """
     return [
         {
+            "name": "describe_fleetboot",
+            "description": (
+                "Read fleetboot's own documentation: what the system "
+                "is, what it can do, what services it offers, and "
+                "worked examples. Call this first when you are new to "
+                "this server, when a user asks what fleetboot is or "
+                "what it can do, or before any non-obvious sequence of "
+                "calls. Returns markdown. Topics: "
+                + ", ".join(
+                    f"{topic.name} ({topic.summary.rstrip('.')})"
+                    for topic in mcp_docs.TOPICS
+                )
+                + "."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "topic": {
+                        "type": "string",
+                        "enum": mcp_docs.topic_names(),
+                        "default": mcp_docs.DEFAULT_TOPIC,
+                        "description": (
+                            "Which documentation page to read. "
+                            "Defaults to the overview."
+                        ),
+                    },
+                },
+                "additionalProperties": False,
+            },
+        },
+        {
             "name": "list_machines",
             "description": (
                 "List every enrolled machine — MAC, hostname, profile, "
-                "architecture, last observed IP, boot version, and "
-                "whether a soft-reboot signal is armed."
+                "architecture, last observed IP, boot version, power "
+                "wiring, and whether a soft-reboot signal is armed. "
+                "Also carries the live view: `state` (how far the "
+                "current boot got), `last_seen`, and `online` (it has "
+                "heartbeated in the last 6 minutes). Use `online` and "
+                "`state == 'login_console'` to tell when a machine you "
+                "powered on is actually ready for work."
             ),
             "inputSchema": {
                 "type": "object", "properties": {}, "additionalProperties": False,
@@ -290,7 +415,10 @@ def _tool_catalogue() -> list[dict]:
         },
         {
             "name": "get_machine",
-            "description": "Return the full record for a single MAC.",
+            "description": (
+                "Return the full record for a single MAC, including its "
+                "live boot state and whether it is currently online."
+            ),
             "inputSchema": {
                 "type": "object",
                 "properties": {"mac": {"type": "string"}},
@@ -353,6 +481,121 @@ def _tool_catalogue() -> list[dict]:
                     "delete_after": {"type": "boolean", "default": False},
                 },
                 "required": ["mac"],
+                "additionalProperties": False,
+            },
+        },
+        {
+            "name": "power_machine",
+            "description": (
+                "Switch one machine on, off, or through a reboot. Tries "
+                "the machine's own command for that action, then the "
+                "fleet-wide pdudaemon "
+                "(/power/control/<action>?alias=<alias>). Only `reboot` "
+                "has a soft fallback (arming the in-image reboot "
+                "signal); `on` and `off` need real power control and "
+                "report failure honestly if none is wired up. The "
+                "result says which route was taken and whether it "
+                "worked — check `ok`, don't assume."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "mac": {"type": "string"},
+                    "action": {
+                        "type": "string",
+                        "enum": list(POWER_ACTIONS),
+                    },
+                },
+                "required": ["mac", "action"],
+                "additionalProperties": False,
+            },
+        },
+        {
+            "name": "power_fleet",
+            "description": (
+                "Switch a whole class of machines at once — the "
+                "on-demand compute lever. Selects enrolled machines by "
+                "profile (optionally architecture), then powers "
+                "`count` of them (all matching, if count is omitted). "
+                "Selection is idempotent: `on` only targets machines "
+                "that aren't already online, `off` and `reboot` only "
+                "ones that are, so asking twice for four workers "
+                "doesn't cycle the four you already have. Returns a "
+                "per-machine result plus `short_by` when the fleet "
+                "couldn't supply the count you asked for."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": list(POWER_ACTIONS),
+                    },
+                    "profile": {
+                        "type": "string",
+                        "description": "Only machines on this profile.",
+                    },
+                    "architecture": {
+                        "type": "string",
+                        "description": (
+                            "Optional further filter. amd64/x86_64/x64 "
+                            "are treated as one architecture, as are "
+                            "arm64/aarch64."
+                        ),
+                    },
+                    "count": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "description": (
+                            "How many machines to switch. Omit for "
+                            "every eligible machine."
+                        ),
+                    },
+                },
+                "required": ["action", "profile"],
+                "additionalProperties": False,
+            },
+        },
+        {
+            "name": "set_power_command",
+            "description": (
+                "Set (or clear, with empty string) the shell command "
+                "that performs one power action for a machine. Runs on "
+                "the fleetboot host with shell=True, and overrides "
+                "pdudaemon for that action. Use for hardware pdudaemon "
+                "doesn't cover — IPMI, a cloud API, wake-on-LAN."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "mac": {"type": "string"},
+                    "action": {
+                        "type": "string",
+                        "enum": list(POWER_ACTIONS),
+                    },
+                    "command": {"type": "string"},
+                },
+                "required": ["mac", "action", "command"],
+                "additionalProperties": False,
+            },
+        },
+        {
+            "name": "set_pdu_alias",
+            "description": (
+                "Set (or clear, with empty string) the name this "
+                "machine answers to on pdudaemon. Defaults to the "
+                "machine's reported hostname — but a machine that has "
+                "never booted has no hostname, and powering one of "
+                "those on is exactly the on-demand case, so set the "
+                "alias at enrolment time."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "mac": {"type": "string"},
+                    "alias": {"type": "string"},
+                },
+                "required": ["mac", "alias"],
                 "additionalProperties": False,
             },
         },
@@ -528,11 +771,61 @@ def _tool_catalogue() -> list[dict]:
     ]
 
 
+def _liveness_by_mac(
+    sessions: Optional[BootSessionStore],
+) -> dict[str, dict]:
+    """How alive each machine looks, keyed by MAC.
+
+    An agent that just switched a machine on needs to know when it is
+    usable, and the only evidence the control plane has is the boot
+    session: the furthest state that boot reached, and how long ago the
+    machine last said anything. A machine that has stopped heartbeating
+    is off, wedged, or off the network — from here they look the same,
+    so `online` claims no more than "it spoke to us recently".
+    """
+    from datetime import datetime, timezone
+
+    if sessions is None:
+        return {}
+
+    states: dict[str, str] = {}
+    for session in sessions.active_sessions():
+        if session.latest_state is not None:
+            states[session.mac] = session.latest_state.value
+
+    now = datetime.now(timezone.utc)
+    out: dict[str, dict] = {}
+    for mac, raw_timestamp in sessions.last_seen_by_mac().items():
+        try:
+            # SQLite's datetime('now') gives "YYYY-MM-DD HH:MM:SS" UTC.
+            seen_at = datetime.fromisoformat(raw_timestamp).replace(
+                tzinfo=timezone.utc,
+            )
+        except ValueError:
+            continue
+        seconds = max(0, int((now - seen_at).total_seconds()))
+        out[mac] = {
+            "state": states.get(mac),
+            "last_seen": raw_timestamp,
+            "seconds_since_last_seen": seconds,
+            "online": seconds < _STALE_AFTER_SECONDS,
+        }
+    for mac, state in states.items():
+        out.setdefault(mac, {
+            "state": state,
+            "last_seen": None,
+            "seconds_since_last_seen": None,
+            "online": False,
+        })
+    return out
+
+
 def _build_tool_impls(
     *,
     registry: MachineRegistry,
     profiles_root: Path,
     builds: BuildJobManager,
+    sessions: Optional[BootSessionStore] = None,
 ) -> dict[str, Callable[[dict], dict]]:
 
     def _require(args: dict, key: str, kind: type) -> Any:
@@ -552,7 +845,15 @@ def _build_tool_impls(
             raise _ToolError(err.detail if isinstance(err.detail, str)
                              else "invalid profile name")
 
-    def _machine_dict(m) -> dict:
+    _OFFLINE = {
+        "state": None,
+        "last_seen": None,
+        "seconds_since_last_seen": None,
+        "online": False,
+    }
+
+    def _machine_dict(m, liveness: Optional[dict] = None) -> dict:
+        live = (liveness or {}).get(m.mac, _OFFLINE)
         return {
             "mac": m.mac,
             "hostname": m.hostname,
@@ -563,14 +864,38 @@ def _build_tool_impls(
             "boot_version": m.boot_version,
             "pending_reboot": bool(m.pending_reboot),
             "reboot_command": m.reboot_command,
+            "power_on_command": m.power_on_command,
+            "power_off_command": m.power_off_command,
+            "pdu_alias": m.pdu_alias,
             "scratch_mode": m.scratch_mode,
             "serial_console": bool(m.serial_console),
             "enrolled_by": m.enrolled_by,
+            # Live view: how far this machine's current boot got, and
+            # whether it is still talking to us.
+            "state": live["state"],
+            "last_seen": live["last_seen"],
+            "seconds_since_last_seen": live["seconds_since_last_seen"],
+            "online": live["online"],
         }
 
+    def describe_fleetboot(args: dict) -> dict:
+        name = args.get("topic", mcp_docs.DEFAULT_TOPIC)
+        if not isinstance(name, str):
+            raise _ToolError("topic must be a string")
+        topic = mcp_docs.get_topic(name)
+        if topic is None:
+            raise _ToolError(
+                f"unknown topic: {name!r}. Known topics: "
+                + ", ".join(mcp_docs.topic_names())
+            )
+        return _tool_markdown_result(topic.body + mcp_docs.topic_index())
+
     def list_machines(_: dict) -> dict:
+        liveness = _liveness_by_mac(sessions)
         return _tool_text_result(
-            {"machines": [_machine_dict(m) for m in registry.list_all()]},
+            {"machines": [
+                _machine_dict(m, liveness) for m in registry.list_all()
+            ]},
         )
 
     def get_machine(args: dict) -> dict:
@@ -578,7 +903,9 @@ def _build_tool_impls(
         m = registry.lookup(mac)
         if m is None:
             raise _ToolError(f"no machine with MAC {mac!r}")
-        return _tool_text_result(_machine_dict(m))
+        return _tool_text_result(
+            _machine_dict(m, _liveness_by_mac(sessions)),
+        )
 
     def enrol_machine(args: dict) -> dict:
         mac = _require(args, "mac", str)
@@ -615,6 +942,122 @@ def _build_tool_impls(
             "mac": mac,
             "deleted": m is None,
             "pending_reboot": bool(m.pending_reboot) if m else False,
+        })
+
+    def _power_result_dict(result) -> dict:
+        return {
+            "mac": result.mac,
+            "action": result.action,
+            "method": result.method,
+            "ok": result.ok,
+            "detail": result.detail,
+            "deleted": result.deleted,
+        }
+
+    def power(args: dict) -> dict:
+        mac = _require(args, "mac", str)
+        action = _require(args, "action", str)
+        if action not in POWER_ACTIONS:
+            raise _ToolError(
+                f"action must be one of {', '.join(POWER_ACTIONS)}"
+            )
+        if registry.lookup(mac) is None:
+            raise _ToolError(f"no machine with MAC {mac!r}")
+        return _tool_text_result(
+            _power_result_dict(power_machine(registry, mac, action)),
+        )
+
+    def power_fleet(args: dict) -> dict:
+        action = _require(args, "action", str)
+        profile = _require(args, "profile", str)
+        if action not in POWER_ACTIONS:
+            raise _ToolError(
+                f"action must be one of {', '.join(POWER_ACTIONS)}"
+            )
+        architecture = args.get("architecture")
+        if architecture is not None and not isinstance(architecture, str):
+            raise _ToolError("architecture must be a string")
+        count = args.get("count")
+        if count is not None:
+            if not isinstance(count, int) or isinstance(count, bool):
+                raise _ToolError("count must be an integer")
+            if count < 1:
+                raise _ToolError("count must be at least 1")
+
+        liveness = _liveness_by_mac(sessions)
+        matching = [
+            m for m in registry.list_all()
+            if m.profile_name == profile
+            and (
+                architecture is None
+                or matches_architecture(m.architecture, architecture)
+            )
+        ]
+        # Switching on only makes sense for machines that aren't already
+        # up, and switching off only for ones that are — so a repeated
+        # "give me four" is idempotent rather than cycling live work.
+        def _is_online(machine) -> bool:
+            return bool(liveness.get(machine.mac, _OFFLINE)["online"])
+
+        if action == "on":
+            candidates = [m for m in matching if not _is_online(m)]
+        else:
+            candidates = [m for m in matching if _is_online(m)]
+        # Deterministic order so a partial request is repeatable.
+        candidates.sort(key=lambda m: m.mac)
+        selected = candidates if count is None else candidates[:count]
+
+        results = [
+            _power_result_dict(power_machine(registry, m.mac, action))
+            for m in selected
+        ]
+        succeeded = sum(1 for r in results if r["ok"])
+        shortfall = (
+            max(0, count - len(selected)) if count is not None else 0
+        )
+        return _tool_text_result({
+            "action": action,
+            "profile": profile,
+            "architecture": architecture,
+            "matching": len(matching),
+            "eligible": len(candidates),
+            "selected": len(selected),
+            "succeeded": succeeded,
+            "short_by": shortfall,
+            "results": results,
+        })
+
+    def set_power_command_tool(args: dict) -> dict:
+        mac = _require(args, "mac", str)
+        action = _require(args, "action", str)
+        command = _require(args, "command", str)
+        if action not in POWER_ACTIONS:
+            raise _ToolError(
+                f"action must be one of {', '.join(POWER_ACTIONS)}"
+            )
+        if registry.lookup(mac) is None:
+            raise _ToolError(f"no machine with MAC {mac!r}")
+        registry.set_power_command(mac, action, command)
+        machine = registry.lookup(mac)
+        return _tool_text_result({
+            "mac": mac,
+            "action": action,
+            "command": {
+                "on": machine.power_on_command,
+                "off": machine.power_off_command,
+                "reboot": machine.reboot_command,
+            }[action],
+        })
+
+    def set_pdu_alias_tool(args: dict) -> dict:
+        mac = _require(args, "mac", str)
+        alias = _require(args, "alias", str)
+        if registry.lookup(mac) is None:
+            raise _ToolError(f"no machine with MAC {mac!r}")
+        registry.set_pdu_alias(mac, alias)
+        return _tool_text_result({
+            "mac": mac,
+            "pdu_alias": registry.lookup(mac).pdu_alias,
         })
 
     def set_pending_reboot_tool(args: dict) -> dict:
@@ -798,11 +1241,16 @@ def _build_tool_impls(
         })
 
     return {
+        "describe_fleetboot": describe_fleetboot,
         "list_machines": list_machines,
         "get_machine": get_machine,
         "enrol_machine": enrol_machine,
         "delete_machine": delete_machine,
         "reboot_machine": reboot,
+        "power_machine": power,
+        "power_fleet": power_fleet,
+        "set_power_command": set_power_command_tool,
+        "set_pdu_alias": set_pdu_alias_tool,
         "set_pending_reboot": set_pending_reboot_tool,
         "set_reboot_command": set_reboot_command_tool,
         "list_profiles": list_profiles,

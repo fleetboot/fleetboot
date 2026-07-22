@@ -53,6 +53,35 @@ the "here's what fleetboot is and how to use these tools together"
 briefing.</p>
 <pre>{{ instructions }}</pre>
 
+<h2>Documentation ({{ doc_topics|length }} topics)</h2>
+<p class="muted">fleetboot documents itself to whoever connects. Every
+topic below is served two ways — as an MCP resource, and via the
+<code>describe_fleetboot</code> tool for clients that don't read
+resources. This page renders the same text.</p>
+
+<table>
+  <thead>
+    <tr><th>Topic</th><th>Resource URI</th><th>Covers</th></tr>
+  </thead>
+  <tbody>
+    {% for topic in doc_topics %}
+    <tr>
+      <td><code>{{ topic.name }}</code></td>
+      <td><code>{{ topic.uri }}</code></td>
+      <td>{{ topic.summary }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+{% for topic in doc_topics %}
+<details>
+  <summary><strong>{{ topic.title }}</strong>
+    <span class="muted">— <code>{{ topic.name }}</code></span></summary>
+  <pre>{{ topic.body }}</pre>
+</details>
+{% endfor %}
+
 <h2>Tools ({{ tools|length }})</h2>
 <p class="muted">Every tool's JSON Schema is delivered live via
 <code>tools/list</code>; this table is the same catalogue rendered for

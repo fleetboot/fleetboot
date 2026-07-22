@@ -861,6 +861,7 @@ def create_app(
                 profiles_root=profiles_root,
                 builds=builds,
                 admin_secret=admin_secret,
+                sessions=store,
             )
         )
         app.state.builds = builds

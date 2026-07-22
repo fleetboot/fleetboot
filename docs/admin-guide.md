@@ -508,6 +508,75 @@ switch on, and it has no hostname to fall back to.
 Power wiring survives re-enrolment: changing a machine's profile won't
 throw away how it is powered.
 
+### Using the fleet as on-demand compute
+
+Because the image is immutable and nothing persists on the machine,
+powering hardware down costs nothing to undo — what comes back is
+identical to what you switched off. That makes a fleetboot fleet usable
+as a burst pool: enrol machines on a worker profile, wire their power,
+and switch on as many as the work needs:
+
+```
+{"name": "power_fleet", "arguments":
+ {"action": "on", "profile": "render-node", "count": 8}}
+```
+
+Selection is idempotent — `on` only targets machines that aren't
+already online, `off` and `reboot` only ones that are — so asking twice
+for eight workers doesn't cycle the eight you already have. The reply
+reports `succeeded` and `short_by` (how many the fleet couldn't
+supply). Poll `list_machines` for `online` and `state` to see which
+ones are ready. Full walkthrough: `describe_fleetboot` topic
+`on-demand-compute`.
+
+There is no scheduler and no queueing here: fleetboot switches machines
+on and tells you when they're up. What runs on them is your workload's
+business.
+
+---
+
+## Driving fleetboot from an AI agent (MCP)
+
+The control plane speaks the [Model Context
+Protocol](https://modelcontextprotocol.io) at `POST /mcp`, so an LLM
+client (Claude Code, Claude Desktop, anything that speaks MCP) can do
+anything the dashboard can: enrol machines, author profiles, start
+builds, roll a new image out to a whole class of machines, reboot a
+wedged host, tail boot events. Auth is a bearer token — the same admin
+secret that opens the dashboard.
+
+```
+claude mcp add --transport http fleetboot http://<fleetboot-host>:8080/mcp \
+    --header "Authorization: Bearer <admin secret>"
+```
+
+The endpoint **documents itself**. An agent that connects gets a
+briefing at handshake time, and can then call `describe_fleetboot` for
+full documentation with worked examples:
+
+| Topic | Covers |
+|-------|--------|
+| `overview` | What fleetboot is, the four layers, what it deliberately isn't |
+| `services` | Every service on offer — MCP tools, the HTTP rails machines boot against, the operator API |
+| `profiles` | The profile contract and how inheritance merges packages, overlays and scripts |
+| `workflows` | Recipes: enrol, roll out an image, diagnose, reboot, retire |
+| `boot-lifecycle` | Each boot state, who emits it, and what a stall there means |
+| `examples` | Raw JSON-RPC: client config, handshake, tool calls, error shapes |
+
+The same pages are served as MCP resources (`fleetboot://docs/<topic>`)
+for clients that read resources, and rendered for humans at
+`/dashboard/mcp` alongside the live tool catalogue. Because the docs
+are generated from the same module the server runs, the tool list on
+that page can't drift from the tools that actually exist.
+
+Two things to know before pointing an agent at a live fleet:
+
+- **The bearer token is full admin.** There is no read-only MCP scope.
+  An agent that can list machines can also delete them.
+- **Nothing is versioned.** Profile saves overwrite files in place and
+  `delete_machine` drops the row. The `workflows` topic tells the agent
+  this too, but it's worth knowing yourself.
+
 ---
 
 ## Troubleshooting

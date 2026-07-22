@@ -93,6 +93,43 @@ so a new build is immediately picked up without a restart.
 The dashboard walks you through enrolling a machine, defining
 auto-enrol rules (by MAC prefix or IP CIDR), and triggering builds.
 
+## Driving it from an agent
+
+The control plane speaks [MCP](https://modelcontextprotocol.io) at
+`POST /mcp`, so an LLM client can do anything the dashboard can —
+enrol machines, author profiles, build images, roll one out fleet-wide,
+reboot a wedged host, tail boot events:
+
+```
+claude mcp add --transport http fleetboot http://<host>:8080/mcp \
+    --header "Authorization: Bearer <admin secret>"
+```
+
+The endpoint explains itself. `describe_fleetboot` serves fleetboot's
+own documentation — what the system is, everything it offers, how
+profiles compose, step-by-step recipes, what each boot state means when
+a machine stalls, and the raw wire protocol — all with worked examples.
+The same pages are MCP resources (`fleetboot://docs/<topic>`) and are
+rendered for humans at `/dashboard/mcp`.
+
+## On-demand compute
+
+The same registry that keeps a lab on the right image will run that
+hardware as a burst pool. Machines are switched on and off through
+pdudaemon (or a per-machine command), and because the root filesystem
+is read-only with a tmpfs overlay, powering one down costs nothing to
+undo — what comes back is identical to what you switched off:
+
+```
+{"name": "power_fleet", "arguments":
+ {"action": "on", "profile": "render-node", "count": 8}}
+```
+
+`list_machines` reports `online` and how far each boot got, so an agent
+can tell when the capacity it asked for is actually ready. There's no
+scheduler and no queueing — fleetboot switches machines on and tells
+you when they're up.
+
 ## Repository layout
 
 - `fleetboot/server/` — FastAPI app + Jinja2 dashboard
