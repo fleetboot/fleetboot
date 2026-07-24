@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import re
 import shutil
 import stat
 from pathlib import Path
@@ -808,6 +809,51 @@ def test_machines_page_lists_existing_machines(dashboard_root: Path):
     assert response.status_code == 200
     assert "aa:bb:cc:dd:ee:ff" in response.text
     assert "school" in response.text
+
+
+def test_machines_list_offers_power_on_and_off_per_row(dashboard_root: Path):
+    """Power on/off must be reachable from the fleet overview, not only
+    from each machine's own page."""
+    client = _client(dashboard_root)
+    client.post(
+        "/dashboard/machines",
+        data={
+            "mac": "aa:bb:cc:dd:ee:ff", "profile_name": "school",
+            "architecture": "x86_64", "platform": "efi",
+        },
+        headers=_auth_header(),
+    )
+    page = client.get("/dashboard", headers=_auth_header()).text
+    assert 'action="/dashboard/machines/aa:bb:cc:dd:ee:ff/power/on"' in page
+    assert 'action="/dashboard/machines/aa:bb:cc:dd:ee:ff/power/off"' in page
+
+
+def test_machines_list_lets_you_change_profile_per_row(dashboard_root: Path):
+    """Reassigning a machine's profile from the fleet overview, without
+    clicking into its detail page. The dropdown offers every profile
+    with the machine's current one selected."""
+    client = _client(dashboard_root)
+    client.post(
+        "/dashboard/machines",
+        data={
+            "mac": "aa:bb:cc:dd:ee:ff", "profile_name": "school",
+            "architecture": "x86_64", "platform": "efi",
+        },
+        headers=_auth_header(),
+    )
+    page = client.get("/dashboard", headers=_auth_header()).text
+    assert 'action="/dashboard/machines/aa:bb:cc:dd:ee:ff/profile"' in page
+    assert re.search(r'value="school"\s+selected', page)
+
+    # And it actually reassigns: after the change, the dropdown selects
+    # the new profile instead.
+    client.post(
+        "/dashboard/machines/aa:bb:cc:dd:ee:ff/profile",
+        data={"profile_name": "default"}, headers=_auth_header(),
+    )
+    after = client.get("/dashboard", headers=_auth_header()).text
+    assert re.search(r'value="default"\s+selected', after)
+    assert not re.search(r'value="school"\s+selected', after)
 
 
 def test_enrol_form_normalises_mac_and_redirects(dashboard_root: Path):

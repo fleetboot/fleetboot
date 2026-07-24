@@ -38,7 +38,19 @@
         <br><span class="muted" data-role="last-ip" hidden></span>
         {% endif %}
       </td>
-      <td>{{ m.profile_name }}</td>
+      <td>
+        <form method="post" action="/dashboard/machines/{{ m.mac }}/profile"
+              style="display:inline"
+              title="Change profile — takes effect on this machine's next boot; nothing else about the row changes">
+          <select name="profile_name" onchange="this.form.submit()">
+            {% for p in profile_names %}
+            <option value="{{ p }}"
+                    {% if p == m.profile_name %}selected{% endif %}>{{ p }}</option>
+            {% endfor %}
+          </select>
+          <noscript><button type="submit">change</button></noscript>
+        </form>
+      </td>
       <td>{{ m.architecture }}/{{ m.platform }}</td>
       <td>
         {% if m.enrolled_by == "manual" %}
@@ -93,6 +105,21 @@
         {% else %}
           {% set hint = "soft reboot via /status reply (no PDU / no alias)" %}
         {% endif %}
+        {% if m.pdu_alias or m.hostname or m.power_on_command %}
+          {% set power_hint = "per-machine command, else pdudaemon alias=" ~ (m.pdu_alias or m.hostname) %}
+        {% else %}
+          {% set power_hint = "no power command and no pdudaemon alias — will report failure" %}
+        {% endif %}
+        <form method="post" action="/dashboard/machines/{{ m.mac }}/power/on"
+              style="display:inline">
+          <button type="submit" title="Power on. {{ power_hint }}">on</button>
+        </form>
+        <form method="post" action="/dashboard/machines/{{ m.mac }}/power/off"
+              onsubmit="return confirm('Power OFF {{ m.mac }}?');"
+              style="display:inline">
+          <button type="submit" class="danger"
+                  title="Power off. {{ power_hint }}">off</button>
+        </form>
         <form method="post" action="/dashboard/machines/{{ m.mac }}/reboot"
               onsubmit="return confirm('Reboot {{ m.mac }}?');">
           <button type="submit" title="{{ hint }}">reboot</button>
