@@ -10,6 +10,7 @@
       <th>Hostname</th>
       <th>Network</th>
       <th>Profile</th>
+      <th>Scratch</th>
       <th>Arch</th>
       <th>Source</th>
       <th>Build version</th>
@@ -50,6 +51,18 @@
           </select>
           <noscript><button type="submit">change</button></noscript>
         </form>
+      </td>
+      <td data-role="scratch">
+        {% if m.scratch_mode == "volatile" %}
+          <span class="version-stale"
+                title="Local disk is wiped + reformatted every boot">volatile</span>
+        {% elif m.scratch_mode == "persistent" %}
+          <span class="muted"
+                title="Local disk kept across reboots (fleetboot-scratch label)">persistent</span>
+        {% else %}
+          <span class="muted"
+                title="Local disk left untouched — no scratch mounted">off</span>
+        {% endif %}
       </td>
       <td>{{ m.architecture }}/{{ m.platform }}</td>
       <td>

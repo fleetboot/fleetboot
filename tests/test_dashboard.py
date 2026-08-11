@@ -856,6 +856,39 @@ def test_machines_list_lets_you_change_profile_per_row(dashboard_root: Path):
     assert not re.search(r'value="school"\s+selected', after)
 
 
+def test_machines_list_shows_each_machines_scratch_mode(dashboard_root: Path):
+    """The scratch mode decides whether a machine's local disk is wiped
+    every boot, so it belongs on the fleet overview where an operator can
+    see it at a glance — the read-only column reports whatever each
+    machine was enrolled with."""
+    client = _client(dashboard_root)
+    client.post(
+        "/dashboard/machines",
+        data={
+            "mac": "aa:bb:cc:dd:ee:01", "profile_name": "default",
+            "architecture": "x86_64", "platform": "efi",
+            "scratch_mode": "off",
+        },
+        headers=_auth_header(),
+    )
+    client.post(
+        "/dashboard/machines",
+        data={
+            "mac": "aa:bb:cc:dd:ee:02", "profile_name": "default",
+            "architecture": "x86_64", "platform": "efi",
+            "scratch_mode": "volatile",
+        },
+        headers=_auth_header(),
+    )
+    page = client.get("/dashboard", headers=_auth_header()).text
+    # A header for the new column, plus each machine's own value rendered.
+    assert "<th>Scratch</th>" in page
+    off_row = page.split('data-mac="aa:bb:cc:dd:ee:01"')[1].split("</tr>")[0]
+    volatile_row = page.split('data-mac="aa:bb:cc:dd:ee:02"')[1].split("</tr>")[0]
+    assert ">off</span>" in off_row
+    assert ">volatile</span>" in volatile_row
+
+
 def test_enrol_form_normalises_mac_and_redirects(dashboard_root: Path):
     client = _client(dashboard_root)
     response = client.post(
