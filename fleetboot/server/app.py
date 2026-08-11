@@ -952,6 +952,19 @@ def create_app(
         )
         app.state.builds = builds
 
+        # Lease reaper: releases expired compute leases and powers the
+        # freed machines off. Created here (registry + power layer are
+        # both wired) but NOT started — the production entry point starts
+        # the thread; tests drive reap_once() directly so importing the
+        # app spawns no background threads.
+        from fleetboot.server.dashboard import power_machine
+        from fleetboot.server.reservation_reaper import ReservationReaper
+
+        app.state.reservation_reaper = ReservationReaper(
+            registry=registry,
+            power_off=lambda mac: power_machine(registry, mac, "off"),
+        )
+
     return app
 
 

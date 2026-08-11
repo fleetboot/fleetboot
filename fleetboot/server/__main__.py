@@ -91,6 +91,12 @@ def main() -> None:
         authorized_keys_path=authorized_keys_path,
     )
 
+    # Start the background lease reaper (created by create_app). It
+    # releases expired compute leases and powers the freed machines off.
+    reaper = getattr(app.state, "reservation_reaper", None)
+    if reaper is not None:
+        reaper.start()
+
     kwargs: dict = {
         "host": os.environ.get("FLEETBOOT_HOST", "0.0.0.0"),
         "port": int(os.environ.get("FLEETBOOT_PORT", "8080")),
