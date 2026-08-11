@@ -118,6 +118,33 @@ def test_reserve_does_not_double_claim(tmp_path: Path):
     assert second == []
 
 
+def test_reserve_never_leases_or_touches_a_permanent_machine(tmp_path: Path):
+    """Safety invariant: a permanent (fleet) machine is NEVER selected by
+    reserve, and its hold is never released — even when a big count would
+    otherwise sweep up everything available."""
+    reg = _registry(tmp_path)
+    _enrol(reg, "aa:bb:cc:00:00:01")  # permanent by default
+    leased = reg.reserve(
+        profile="claude-compute", count=99, holder="agent:greedy",
+        ttl_seconds=3600,
+    )
+    assert leased == []
+    res = reg.active_reservation("aa:bb:cc:00:00:01")
+    assert res is not None
+    assert res.lease_kind == "permanent"
+    assert res.released_at is None  # untouched
+    assert reg.availability("aa:bb:cc:00:00:01") == AVAILABILITY_PERMANENT
+
+
+def test_reaper_never_releases_a_permanent_hold(tmp_path: Path):
+    """The reaper only ever touches expired leases — a permanent hold
+    (no expiry) must survive every sweep."""
+    reg = _registry(tmp_path)
+    _enrol(reg, "aa:bb:cc:00:00:01")  # permanent, expires_at = NULL
+    assert reg.reap_expired() == []
+    assert reg.availability("aa:bb:cc:00:00:01") == AVAILABILITY_PERMANENT
+
+
 def test_reserve_filters_by_architecture(tmp_path: Path):
     reg = _registry(tmp_path)
     _pool_machine(reg, "aa:bb:cc:00:00:01", arch="x86_64")
