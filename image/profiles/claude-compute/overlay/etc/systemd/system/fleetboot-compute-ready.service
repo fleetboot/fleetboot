@@ -1,0 +1,25 @@
+[Unit]
+Description=Signal fleetboot that this compute worker is ready for an agent
+# "Ready" means the two things an agent needs before it can drive the
+# box: the network is proven up (DNS + gateway reachable, via the
+# reporter's network-up unit) AND sshd is accepting connections. Ordering
+# after both keeps the reported state honest — the agent won't be told
+# "ready" before it can actually SSH in.
+After=network-online.target fleetboot-network-up.service ssh.service
+Wants=network-online.target
+Requires=ssh.service
+# Only meaningful when this machine PXE'd from fleetboot: it needs a boot
+# token to report against. A locally-booted image has nothing to talk to.
+ConditionKernelCommandLine=fleetboot.boot_token
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+# A custom boot state: the server's BootState enum doesn't rank it, so it
+# lands as an event on the machine's timeline and shows up in
+# recent_events and on list_machines. An agent that called power_fleet
+# waits for `compute_ready` to know the worker is usable, not just up.
+ExecStart=/usr/bin/python3 -m fleetboot.reporter.report compute_ready
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,34 @@
+# Toolchain for an on-demand compute worker that an AI agent SSHes into
+# to run work. Deliberately general-purpose: anything job-specific the
+# agent installs at run time into the tmpfs overlay (or a scratch / NFS
+# mount), so the image stays small and every boot is a clean slate.
+
+# Native compilation — Python wheels with C extensions, small C/C++ jobs.
+build-essential
+pkg-config
+
+# Python: the lingua franca for agent-driven compute. venv + pip so the
+# agent builds a throwaway environment per job on the tmpfs overlay.
+python3
+python3-venv
+python3-pip
+python3-dev
+
+# Move work and results in and out, and check things out of git.
+git
+curl
+wget
+rsync
+ca-certificates
+
+# Glue the agent leans on for shell-side JSON wrangling.
+jq
+
+# Rootless, daemonless containers — the right isolation model for an
+# immutable netboot worker. There is no dockerd state to persist; the
+# agent can `podman run` a job image per task and it dies with the boot.
+podman
+
+# Detach-friendly long jobs and a live view while the agent is away.
+tmux
+htop

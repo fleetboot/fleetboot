@@ -116,6 +116,66 @@ def test_desktop_profile_inherits_from_both_graphics_mixins(name: str):
     assert "amd-graphics" in parents, f"{name} missing amd-graphics"
 
 
+def test_claude_compute_profile_dir_and_readme_exist():
+    p = PROFILES_DIR / "claude-compute"
+    assert p.is_dir(), "image/profiles/claude-compute/ missing"
+    assert (p / "README.md").is_file(), "claude-compute has no README"
+
+
+def test_claude_compute_inherits_ssh_so_an_agent_can_reach_it():
+    """The whole point of the profile is that an agent SSHes in to run
+    work — so it must inherit the ssh-debug parent that installs and
+    hardens sshd and fetches root's authorized_keys at boot."""
+    parent_file = PROFILES_DIR / "claude-compute" / "parent"
+    assert parent_file.is_file(), "claude-compute must declare a parent"
+    parents = [
+        line.strip() for line in parent_file.read_text().splitlines()
+        if line.strip() and not line.startswith("#")
+    ]
+    assert "ssh-debug" in parents, "claude-compute must inherit ssh-debug"
+
+
+def test_claude_compute_ships_a_compute_toolchain():
+    """A worker with no toolchain is useless. Guard the essentials an
+    agent-driven job leans on: native build, Python, and containers."""
+    packages = (
+        PROFILES_DIR / "claude-compute" / "extra-packages.list"
+    ).read_text()
+    for essential in ("build-essential", "python3-venv", "podman"):
+        assert essential in packages, (
+            f"claude-compute is missing {essential}"
+        )
+
+
+def test_claude_compute_is_headless():
+    """A compute worker has no business shipping a desktop — that would
+    bloat the image and slow every cold boot in the burst pool."""
+    packages = (
+        PROFILES_DIR / "claude-compute" / "extra-packages.list"
+    ).read_text()
+    for gui in ("xserver-xorg", "lightdm", "gdm3", "sddm"):
+        assert gui not in packages, f"claude-compute should be headless, ships {gui}"
+
+
+def test_claude_compute_signals_a_ready_state_for_the_agent():
+    """An agent that powered the box on needs to know when it's usable,
+    not just pingable. The profile must enable the readiness unit and
+    that unit must report the `compute_ready` state agents wait on."""
+    setup = (PROFILES_DIR / "claude-compute" / "setup-chroot").read_text()
+    assert "systemctl enable fleetboot-compute-ready.service" in setup, (
+        "claude-compute/setup-chroot must enable the readiness unit"
+    )
+    unit = (
+        PROFILES_DIR / "claude-compute" / "overlay" / "etc" / "systemd"
+        / "system" / "fleetboot-compute-ready.service"
+    )
+    assert unit.is_file(), "claude-compute is missing its readiness unit"
+    text = unit.read_text()
+    assert "report compute_ready" in text, (
+        "the readiness unit must report the compute_ready boot state"
+    )
+
+
 def test_intel_graphics_installs_intel_driver_and_mesa():
     packages = (
         PROFILES_DIR / "intel-graphics" / "extra-packages.list"

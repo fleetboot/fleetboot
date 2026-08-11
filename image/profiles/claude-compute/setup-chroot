@@ -1,0 +1,16 @@
+#!/bin/sh
+# claude-compute profile setup, run inside the image chroot.
+#
+# SSH access and its hardened config come from the ssh-debug parent; the
+# compute toolchain comes from extra-packages.list. The only thing this
+# profile has to wire up itself is the readiness signal, so an agent that
+# powered the box on can tell when it is actually usable rather than just
+# pingable.
+
+set -eu
+
+# policy-rc.d blocks postinst auto-enable during the chroot build, so
+# enable our readiness unit explicitly (the same reason ssh-debug enables
+# ssh.service by hand). Without it the agent has no clean "the box is up"
+# signal and has to infer readiness from heartbeats alone.
+systemctl enable fleetboot-compute-ready.service

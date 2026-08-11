@@ -1,0 +1,7 @@
+# Compute worker for AI agents that drive fleetboot over MCP: powered on
+# when there's work, SSH'd into to run it, powered off again when idle.
+#   ssh-debug — hardened sshd (pubkeys only) plus the boot-time root
+#               authorized_keys fetch, so the agent can actually reach
+#               the box. Provide the agent's public key via the
+#               deployment authorized_keys file (see README).
+ssh-debug
