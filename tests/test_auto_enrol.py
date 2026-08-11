@@ -323,6 +323,66 @@ def test_update_auto_enrol_rule_replaces_fields(registry: MachineRegistry):
     assert updated.scratch_mode == "persistent"
 
 
+def test_renaming_a_rule_updates_the_machines_it_enrolled(
+    registry: MachineRegistry,
+):
+    """`enrolled_by` is a snapshot ('rule:<name>') taken at enrol time,
+    so a rename must carry across to every machine that rule enrolled —
+    otherwise the machines list keeps showing the old name. Machines
+    enrolled manually or by a *different* rule stay untouched."""
+    rule = registry.add_auto_enrol_rule(
+        name="lab-a", match_kind="mac_prefix", match_value="aa:bb",
+        profile_name="default",
+    )
+    registry.enroll(
+        mac="aa:bb:cc:00:00:01", profile_name="default",
+        architecture="x86_64", platform="efi",
+        enrolled_by=f"rule:{rule.name}",
+    )
+    registry.enroll(
+        mac="aa:bb:cc:00:00:02", profile_name="default",
+        architecture="x86_64", platform="efi",
+        enrolled_by="manual",
+    )
+    registry.enroll(
+        mac="aa:bb:cc:00:00:03", profile_name="default",
+        architecture="x86_64", platform="efi",
+        enrolled_by="rule:some-other-rule",
+    )
+
+    registry.update_auto_enrol_rule(
+        rule.id,
+        name="lab-a-renamed", match_kind="mac_prefix",
+        match_value="aa:bb", profile_name="default",
+    )
+
+    assert registry.lookup("aa:bb:cc:00:00:01").enrolled_by == "rule:lab-a-renamed"
+    assert registry.lookup("aa:bb:cc:00:00:02").enrolled_by == "manual"
+    assert registry.lookup("aa:bb:cc:00:00:03").enrolled_by == "rule:some-other-rule"
+
+
+def test_updating_a_rule_without_renaming_leaves_enrolled_by_alone(
+    registry: MachineRegistry,
+):
+    """Editing other fields but keeping the name must not churn the
+    machine rows (the cascade only fires on an actual name change)."""
+    rule = registry.add_auto_enrol_rule(
+        name="lab-b", match_kind="mac_prefix", match_value="aa:bb",
+        profile_name="default",
+    )
+    registry.enroll(
+        mac="aa:bb:cc:00:00:04", profile_name="default",
+        architecture="x86_64", platform="efi",
+        enrolled_by=f"rule:{rule.name}",
+    )
+    registry.update_auto_enrol_rule(
+        rule.id,
+        name="lab-b", match_kind="mac_prefix", match_value="aa:bb",
+        profile_name="cinnamon-desktop",
+    )
+    assert registry.lookup("aa:bb:cc:00:00:04").enrolled_by == "rule:lab-b"
+
+
 def test_update_auto_enrol_rule_unknown_id_returns_none(
     registry: MachineRegistry,
 ):

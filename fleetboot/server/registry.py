@@ -801,6 +801,16 @@ class MachineRegistry:
             )
         normalised = _normalise_match_value(match_kind, match_value)
         with self._write_lock, self._connect() as connection:
+            # A machine's `enrolled_by` is a snapshot ('rule:<name>')
+            # taken when the rule enrolled it, not a live reference. So a
+            # rename has to carry across to every machine this rule
+            # enrolled, or the machines list keeps showing the old name.
+            # Read the current name first so we know which snapshot to
+            # rewrite.
+            previous_name_row = connection.execute(
+                "SELECT name FROM auto_enrol_rules WHERE id = ?",
+                (rule_id,),
+            ).fetchone()
             cursor = connection.execute(
                 "UPDATE auto_enrol_rules SET "
                 "    name = ?, match_kind = ?, match_value = ?, "
@@ -815,6 +825,13 @@ class MachineRegistry:
             )
             if cursor.rowcount == 0:
                 return None
+            previous_name = previous_name_row["name"]
+            if previous_name != name:
+                connection.execute(
+                    "UPDATE machines SET enrolled_by = ? "
+                    "WHERE enrolled_by = ?",
+                    (f"rule:{name}", f"rule:{previous_name}"),
+                )
         return self.get_auto_enrol_rule(rule_id)
 
     def remove_auto_enrol_rule(self, rule_id: int) -> bool:
