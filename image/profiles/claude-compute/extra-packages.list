@@ -24,6 +24,10 @@ ca-certificates
 # Glue the agent leans on for shell-side JSON wrangling.
 jq
 
+# Lets the fleetboot worker account install whatever the job needs at run
+# time (see setup-chroot — passwordless sudo for that account).
+sudo
+
 # Rootless, daemonless containers — the right isolation model for an
 # immutable netboot worker. There is no dockerd state to persist; the
 # agent can `podman run` a job image per task and it dies with the boot.

@@ -176,6 +176,24 @@ def test_claude_compute_signals_a_ready_state_for_the_agent():
     )
 
 
+def test_claude_compute_has_an_open_login_for_agents():
+    """Deliberately open (see the profile README): a fixed
+    fleetboot/fleetboot account with passwordless sudo, and SSH password
+    auth re-enabled, so an agent can log in with no key provisioned."""
+    setup = (PROFILES_DIR / "claude-compute" / "setup-chroot").read_text()
+    assert "useradd" in setup
+    assert "fleetboot:fleetboot" in setup
+    assert "NOPASSWD:ALL" in setup
+    assert "PasswordAuthentication yes" in setup
+    # The override must sort before the ssh-debug parent's 50-*.conf,
+    # because sshd takes the first value it sees for a keyword.
+    assert "10-claude-compute.conf" in setup
+    packages = (
+        PROFILES_DIR / "claude-compute" / "extra-packages.list"
+    ).read_text()
+    assert "sudo" in packages
+
+
 def test_intel_graphics_installs_intel_driver_and_mesa():
     packages = (
         PROFILES_DIR / "intel-graphics" / "extra-packages.list"

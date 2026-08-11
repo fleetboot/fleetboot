@@ -31,16 +31,29 @@ for the full pattern this profile is the worker half of.
 
 ## Giving the agent SSH access
 
-The `ssh-debug` parent fetches root's `authorized_keys` at boot from
-fleetboot's `/enrol/<token>/authorized_keys` endpoint — a
-**deployment-wide** file (the same admin keys grant root on any
-fleetboot machine, so keep it to keys you trust with the fleet).
+This profile ships a **deliberately open login** so an agent needs no
+key to get in:
 
-Put the agent's public key in that file so the agent — or the host it
-runs on — can `ssh root@<worker>` once the box is up. The file is
-configured per deployment via `FLEETBOOT_AUTHORIZED_KEYS` (see
-`docs/admin-guide.md`); production deployments that don't set it serve a
-503 and no one can log in.
+- user **`fleetboot`**, password **`fleetboot`**, with **passwordless
+  sudo**;
+- SSH **password authentication is on** (this profile overrides the
+  `ssh-debug` parent's password-off default).
+
+So once a worker is up an agent just runs `ssh fleetboot@<worker>`
+(password `fleetboot`) and can `sudo apt-get install …` whatever the job
+needs. Nothing to provision.
+
+> ⚠️ **This is insecure by design and scoped to this worker profile.**
+> The credentials are baked into the image and identical on every
+> machine that boots it. It is acceptable only because the worker is
+> transient (tmpfs overlay, powered off after the job) on a trusted
+> admin network. **Never put `claude-compute` on the permanent / school
+> fleet.**
+
+Key-based root login still works too, inherited from `ssh-debug`: if you
+set the deployment-wide `FLEETBOOT_AUTHORIZED_KEYS` file, its keys are
+fetched at boot and grant `ssh root@<worker>`. You don't need it for the
+password login above.
 
 ## Scratch disk
 

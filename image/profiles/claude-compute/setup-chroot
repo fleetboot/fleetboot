@@ -14,3 +14,37 @@ set -eu
 # ssh.service by hand). Without it the agent has no clean "the box is up"
 # signal and has to infer readiness from heartbeats alone.
 systemctl enable fleetboot-compute-ready.service
+
+# --- Deliberately open login for agents -----------------------------------
+# This is a lab / on-demand compute worker, intentionally NOT secured: a
+# fixed local account (fleetboot / fleetboot) with passwordless sudo, plus
+# SSH password auth turned back on (the ssh-debug parent disables it). An
+# agent can just `ssh fleetboot@<worker>` with the password and get to
+# work — no key to provision.
+#
+# DO NOT put this profile on the permanent / school fleet: the credentials
+# are baked into the image and identical on every machine that boots it.
+# It is fine here because the worker is transient (tmpfs overlay, powered
+# off after the job) and lives on a trusted admin network.
+if ! id -u fleetboot >/dev/null 2>&1; then
+    useradd --create-home --shell /bin/bash \
+        --comment 'fleetboot on-demand compute worker' fleetboot
+fi
+echo 'fleetboot:fleetboot' | chpasswd
+
+# Passwordless sudo so the agent can install whatever the job needs at run
+# time (apt-get, cross toolchains, ...) with no friction.
+printf 'fleetboot ALL=(ALL) NOPASSWD:ALL\n' > /etc/sudoers.d/50-fleetboot
+chmod 0440 /etc/sudoers.d/50-fleetboot
+
+# Re-enable SSH password authentication. The ssh-debug parent writes
+# `50-fleetboot.conf` with it off; sshd uses the FIRST value it sees for a
+# keyword, and drop-ins are read in lexical order, so this file must sort
+# BEFORE 50 to win — hence the `10-` prefix.
+cat > /etc/ssh/sshd_config.d/10-claude-compute.conf <<'EOF'
+# claude-compute: deliberately open compute worker (see profile README).
+# Password auth is ON so an agent can log in as fleetboot/fleetboot with
+# no key. This overrides the ssh-debug parent's password-off default.
+PasswordAuthentication yes
+EOF
+chmod 0644 /etc/ssh/sshd_config.d/10-claude-compute.conf
