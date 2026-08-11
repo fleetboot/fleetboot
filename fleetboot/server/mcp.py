@@ -119,6 +119,18 @@ Typical workflows an agent can drive here:
       delete_after=true only when you also want the registry row gone
       (a soft-reboot cannot deliver to a deleted row).
 
+  Reserve machines for compute
+    - `list_machines` reports each machine's `availability`: `permanent`
+      (a fixed fleet machine — never claim it), `reserved` (leased), or
+      `available` (claimable, whether off or idle). Off does NOT mean
+      unavailable — availability is ownership, not power.
+    - `reserve_machines` leases available machines, pins them to a worker
+      profile, and powers them on; `release_machines` frees + powers them
+      off when you're done; `renew_reservation` extends a long lease.
+      Machines are permanent by default, so an admin must `release_to_pool`
+      one before it's claimable (and `pin_machine` puts it back). Full
+      pattern: `describe_fleetboot(topic="reservations")`.
+
   Watch the fleet
     - `list_machines` for a snapshot; `recent_events` for a live feel
       of what states machines are hitting.

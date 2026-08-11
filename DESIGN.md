@@ -153,6 +153,54 @@ change.
 
 ---
 
+## Reservations — availability for fleet and compute
+
+The registry answers "which machine runs which image". It does **not**,
+on its own, answer "may I take this machine for a compute job?" — and
+that question can't be inferred from power or heartbeat (off ≠ free; on ≠
+busy). Reservations add an explicit ownership record, and deliberately
+one record for both of fleetboot's jobs:
+
+- a **permanent** reservation is a fixed-purpose machine (a classroom
+  desktop, a pinned server). No expiry; never in the compute pool.
+- a **lease** is an agent's timed claim on a pool machine. It carries an
+  `expires_at`; past it a background reaper releases and powers it off.
+
+They are the same row (`reservations` table) with a different expiry. A
+machine is **available** — claimable — exactly when it has no active
+reservation (`released_at IS NULL AND (expires_at IS NULL OR expires_at >
+now)`), enforced one-per-machine by a partial unique index.
+
+**Availability** derives from the active reservation: `permanent` /
+`reserved` / `available`, surfaced on `list_machines` and the dashboard
+alongside (but distinct from) `online`/`state`.
+
+**Safe by default.** Enrolling a machine pins it permanent, and a
+one-time migration pinned every machine that predated reservations. So
+nothing the fleet already runs can be power-cycled out from under it by a
+stray reserve. A machine joins the pool only when an admin calls
+`release_to_pool`; `pin` takes it back out.
+
+**The reservation owns profile + power.** `reserve(profile, count,
+holder, ttl)` picks free machines, writes leases, switches each to the
+worker profile, and the MCP/dashboard layer powers them on. `release`
+powers off and frees. The registry stays pure-DB; power lives in the
+dashboard layer, as everywhere else. Decisions and API live in the
+`reservations` docs topic (`describe_fleetboot`).
+
+```
+reservations(id, mac, holder, purpose, lease_kind['permanent'|'lease'],
+             profile, acquired_at, expires_at, released_at)
+```
+
+**The reaper** (`ReservationReaper`) sweeps every ~60s: expired leases
+are released and their machines powered off, so a crashed agent that
+never called `release` can't leak a running machine. Created by
+`create_app`, started only by the production entry point so tests spawn
+no threads.
+
+---
+
 ## Identity, user levels, and authorization
 
 Identity and storage are the separate **`fleetid`** project, not part of the

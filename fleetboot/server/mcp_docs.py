@@ -127,6 +127,7 @@ fleet with power control already is.
 - `profiles` — how images are composed, and how to author one.
 - `workflows` — recipes: enrol, build and roll out, power, diagnose.
 - `on-demand-compute` — renting the fleet to an agent as generic compute.
+- `reservations` — who holds a machine, and how to tell what's claimable.
 - `boot-lifecycle` — the states a boot passes through, and what a
   stall at each one usually means.
 - `examples` — raw JSON-RPC over the wire, for wiring up a client.
@@ -755,6 +756,84 @@ check `isError`, not just the HTTP status.
 """
 
 
+_RESERVATIONS = """\
+# Reservations: who holds a machine, and until when
+
+Availability can't be read off power or heartbeat — a machine being off
+doesn't mean it's free, and a machine being on doesn't mean it's busy.
+So fleetboot tracks ownership explicitly with **reservations**, and it's
+the same record for both jobs the fleet does:
+
+- a **permanent** reservation is a fixed-purpose machine — a classroom
+  desktop, a pinned server. It never expires and is never handed to the
+  compute pool.
+- a **lease** is an agent's timed claim on a pool machine. It carries an
+  expiry; past it, the reaper releases the machine and powers it off.
+
+They are the same object with a different `expires_at`. A machine is
+**available** (claimable for compute) exactly when it has no active
+reservation.
+
+## Availability, not power
+
+`list_machines` reports an `availability` per machine, separate from
+`online`/`state`:
+
+| availability | meaning | claimable? |
+|---|---|---|
+| `permanent` | a fixed fleet machine | no |
+| `reserved` | leased, not yet expired (holder + `expires_at` on the row) | no (unless it's your lease) |
+| `available` | no active hold — off *or* idle | **yes** |
+
+An `available` machine that is powered off is exactly the thing to claim:
+power is the reaper's job, not a signal of availability.
+
+## Safe by default: permanent unless opted in
+
+Every machine is **permanent by default** — enrolling one pins it, and
+machines that predate reservations were pinned by a one-time migration.
+This is deliberate: nothing your fleet already runs can be power-cycled
+out from under it by a stray `reserve`. A machine joins the compute pool
+only when an admin says so.
+
+Admin, once per machine:
+
+```json
+{"name": "release_to_pool", "arguments": {"mac": "aa:bb:cc:00:00:07"}}
+```
+
+The reverse — take a machine out of the pool as a permanent member — is
+`pin_machine` (optionally switching its profile in the same step).
+
+## The agent loop
+
+```json
+{"name": "reserve_machines", "arguments": {
+  "profile": "claude-compute", "count": 4, "holder": "agent:me",
+  "ttl_minutes": 60
+}}
+```
+
+`reserve_machines` leases free pool machines, pins them to the worker
+profile, powers them on, and returns them — `short_by` says how many the
+pool couldn't supply. Poll `list_machines` for them reaching
+`compute_ready`, do the work over SSH, then:
+
+```json
+{"name": "release_machines", "arguments": {"holder": "agent:me"}}
+```
+
+For a job longer than the lease, `renew_reservation` before it lapses.
+And if you crash without releasing, the lease still expires and the
+reaper reclaims the machine — a reservation can't be leaked.
+
+Pass a stable `holder` (your agent name) so `release_machines` /
+`renew_reservation` can find your machines. This is the same
+on-for-work, off-when-done discipline as the `on-demand-compute` topic,
+now with an ownership record so two agents never claim the same machine.
+"""
+
+
 TOPICS: tuple[DocTopic, ...] = (
     DocTopic(
         name="overview",
@@ -802,6 +881,16 @@ TOPICS: tuple[DocTopic, ...] = (
             "a job, then power it down — and what fleetboot doesn't do."
         ),
         body=_ON_DEMAND_COMPUTE,
+    ),
+    DocTopic(
+        name="reservations",
+        title="Reservations: availability for both fleet and compute",
+        summary=(
+            "How fleetboot tracks who holds a machine — permanent fleet "
+            "holds and timed compute leases in one model — so an agent "
+            "knows what's claimable and a school desktop is never grabbed."
+        ),
+        body=_RESERVATIONS,
     ),
     DocTopic(
         name="boot-lifecycle",

@@ -164,6 +164,19 @@ def test_server_instructions_frame_both_use_cases():
     assert "cross-compile" in text
 
 
+def test_reservations_topic_explains_availability_and_pool_optin():
+    """The dedicated topic must teach the off-is-not-unavailable point,
+    the permanent-by-default posture, and the reserve/release loop."""
+    topic = mcp_docs.get_topic("reservations")
+    assert topic is not None
+    body = topic.body.lower()
+    assert "available" in body and "permanent" in body and "reserved" in body
+    assert "permanent by default" in body or "permanent unless" in body
+    assert "release_to_pool" in body
+    for tool in ("reserve_machines", "release_machines", "renew_reservation"):
+        assert tool in topic.body
+
+
 def test_docs_say_use_generic_profile_and_install_at_runtime():
     """The agent shouldn't build a bespoke image per task: the docs must
     steer it to the generic worker + install-at-run-time, and reserve a
