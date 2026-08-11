@@ -164,6 +164,19 @@ def test_server_instructions_frame_both_use_cases():
     assert "cross-compile" in text
 
 
+def test_on_demand_doc_explains_scratch_for_space_and_persistence():
+    """Agents need to know: RAM is the default and is small + wiped, and
+    /var/scratch (persistent) gives more space and survives reservations."""
+    body = " ".join(
+        mcp_docs.get_topic("on-demand-compute").body.lower().split()
+    )
+    assert "/var/scratch" in body
+    assert "tmpfs" in body or "ram" in body
+    assert "persistent" in body
+    assert "across reservations" in body
+    assert "scratch_mode" in body
+
+
 def test_reservations_topic_explains_availability_and_pool_optin():
     """The dedicated topic must teach the off-is-not-unavailable point,
     the permanent-by-default posture, and the reserve/release loop."""

@@ -155,11 +155,19 @@ def _collect_hardware() -> Optional[dict]:
         pass
     info["disks"] = disks
 
-    # Mount-point free space — only paths that exist; statvfs raises on
-    # missing paths. /var/scratch is the canonical fleetboot scratch
-    # mountpoint, /home is the autofs root for FreeIPA user homes.
+    # Mount-point free space. /var/scratch is the canonical fleetboot
+    # scratch mountpoint, /home is the autofs root for FreeIPA user homes.
+    # We only report a path when it is a REAL mount: a bare directory that
+    # merely exists on the root fs (e.g. /var/scratch when scratch is off
+    # or failed to mount, or /home before autofs mounts anything) would
+    # otherwise report the root filesystem's numbers under a scratch/home
+    # label — misleading. `/` is always its own mount. So the presence of
+    # /var/scratch here now means exactly "scratch is mounted", and its
+    # size is the real disk (much larger than the tmpfs root).
     mounts = []
     for path in ("/", "/var/scratch", "/home"):
+        if path != "/" and not os.path.ismount(path):
+            continue
         try:
             stat = os.statvfs(path)
         except OSError:

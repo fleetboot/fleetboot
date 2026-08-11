@@ -602,6 +602,35 @@ runner, a render node — so the tools are present the instant the machine
 boots with nothing to install per job. For one-off or exploratory work,
 reach for the generic worker and install as you go.
 
+## Where your data lives: RAM vs the scratch disk
+
+By default a worker's storage is the **tmpfs overlay** — RAM. Fast, but
+bounded by the machine's memory, and it dies on power-off (that is what
+makes a reservation costless to reclaim). For anything larger than RAM,
+or anything you want to keep between reservations, use the machine's
+**local scratch disk** at `/var/scratch`.
+
+Scratch behaviour is a per-machine setting, `scratch_mode`, chosen at
+enrolment or on the dashboard:
+
+- **`volatile`** — a fresh, reformatted disk at `/var/scratch` every
+  boot. Gives you the disk's *space* (far more than RAM) but keeps
+  nothing: each reservation starts blank. Good for a big build tree you
+  don't need afterwards.
+- **`persistent`** — the same disk, *kept* across reboots and therefore
+  across reservations. Write a cloned source tree, a package cache, or
+  intermediate results to `/var/scratch` and the next lease on that
+  machine finds them still there. The immutable image and tmpfs root are
+  unchanged — only `/var/scratch` survives.
+- **`off`** — no scratch; the local disk is ignored. `/var/scratch` won't
+  exist, and won't appear in the machine's mount points.
+
+So reach for `/var/scratch` when RAM is too small, and set the machine
+`persistent` when you want files to outlive the reservation. `/var/scratch`
+shows up (with the disk's real size) in the machine's mount points on the
+dashboard exactly when it is mounted. Data that must survive the
+*machine* itself, not just the tmpfs, still belongs on NFS/`/home`.
+
 ## The pattern
 
 **1. Pick or build a worker profile.** For most work, use the generic

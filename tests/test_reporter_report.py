@@ -5,14 +5,39 @@ directly into the app object. This exercises the wire format, headers, status
 codes, and the session store, all together.
 """
 
+import os
+import types
+
 import pytest
 from fastapi.testclient import TestClient
 
 from fleetboot.boot_states import BootState
 from fleetboot.reporter.cmdline import ReporterSettings
+from fleetboot.reporter import report as report_module
 from fleetboot.reporter.report import ReportFailedError, main, report_state
 from fleetboot.server.app import create_app
 from fleetboot.server.boot_sessions import BootSessionStore
+
+
+def test_hardware_mounts_only_lists_real_mounts(monkeypatch):
+    """The mount-points section must reflect actual mounts. A bare
+    directory that merely exists on the root fs (scratch when off, /home
+    before autofs) must NOT appear reporting the root filesystem's size —
+    otherwise `/var/scratch`'s presence wouldn't mean 'scratch mounted'."""
+    # Pretend /var/scratch is a real mount but /home is not.
+    monkeypatch.setattr(
+        os.path, "ismount", lambda p: p == "/var/scratch",
+    )
+    fake = types.SimpleNamespace(
+        f_frsize=4096, f_blocks=10 ** 7, f_bavail=5 * 10 ** 6,
+    )
+    monkeypatch.setattr(os, "statvfs", lambda p: fake)
+
+    hardware = report_module._collect_hardware()
+    paths = [m["path"] for m in hardware["mounts"]]
+    assert "/" in paths            # root is always its own mount
+    assert "/var/scratch" in paths  # a genuine mount shows up
+    assert "/home" not in paths     # a bare directory does not
 
 
 def _wired_client(store: BootSessionStore) -> TestClient:
