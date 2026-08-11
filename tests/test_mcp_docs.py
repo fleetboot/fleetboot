@@ -164,6 +164,23 @@ def test_server_instructions_frame_both_use_cases():
     assert "cross-compile" in text
 
 
+def test_docs_say_use_generic_profile_and_install_at_runtime():
+    """The agent shouldn't build a bespoke image per task: the docs must
+    steer it to the generic worker + install-at-run-time, and reserve a
+    dedicated profile for jobs run often."""
+    on_demand = mcp_docs.get_topic("on-demand-compute").body.lower()
+    assert "per job" in on_demand
+    assert "at run time" in on_demand
+    assert "claude-compute" in on_demand
+    # The "only build your own if you repeat the job" caveat.
+    assert "repeat" in on_demand or "often" in on_demand
+
+    from fleetboot.server.mcp import SERVER_INSTRUCTIONS
+    instr = SERVER_INSTRUCTIONS.lower()
+    assert "run time" in instr
+    assert "repeat often" in instr or "repeat" in instr
+
+
 # ---- Anti-drift: the prose vs the real server ---------------------------
 
 

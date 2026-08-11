@@ -68,7 +68,11 @@ It serves two jobs from the same registry:
   for another architecture, run a batch job, or stand up a throwaway
   build environment, power on a temporary machine, do the work over SSH,
   and power it back down — the `claude-compute` profile is a ready-made
-  worker for exactly this (toolchain + SSH). `power_fleet` takes a
+  worker for exactly this (toolchain + SSH). You rarely need a bespoke
+  image: install whatever else the job needs onto the running worker at
+  run time (it lives in the tmpfs overlay and is gone on power-off), and
+  only build a dedicated profile for jobs you will repeat often.
+  `power_fleet` takes a
   profile and a count, `list_machines` tells you which ones came up
   (`online`, `state`), and powering off afterwards costs nothing to
   undo: the image is immutable, so a machine that comes back is

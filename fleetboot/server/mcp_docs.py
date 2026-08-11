@@ -126,7 +126,7 @@ fleet with power control already is.
 - `services` — everything this server offers, MCP and HTTP.
 - `profiles` — how images are composed, and how to author one.
 - `workflows` — recipes: enrol, build and roll out, power, diagnose.
-- `on-demand-compute` — running the fleet as a burst compute pool.
+- `on-demand-compute` — renting the fleet to an agent as generic compute.
 - `boot-lifecycle` — the states a boot passes through, and what a
   stall at each one usually means.
 - `examples` — raw JSON-RPC over the wire, for wiring up a client.
@@ -576,16 +576,32 @@ the image is immutable, so the next power-on comes back identical. The
 discipline is simply on-for-work, off-when-done; the steps below are how
 you do each half.
 
+## Don't build a profile per job
+
+You almost never need a bespoke image for a task. The shipped
+`claude-compute` profile is a **generic worker** — a compute toolchain
+(build tools, Python, git, podman) plus SSH — and anything else the job
+needs you install *at run time*, straight onto the running machine:
+`apt-get install`, `pip install`, `git clone`, download a tarball. It
+lands in the tmpfs overlay and vanishes on power-off, so the next boot
+is clean again. Want an arm64 kernel compiled? Power on an arm64
+`claude-compute` box, install the toolchain and clone the tree over SSH,
+`make arm64_defconfig && make`, copy the result off, power down.
+
+Build a **dedicated** profile only when you will run the *same* job
+often enough that baking its tools into the image pays for itself — a CI
+runner, a render node — so the tools are present the instant the machine
+boots with nothing to install per job. For one-off or exploratory work,
+reach for the generic worker and install as you go.
+
 ## The pattern
 
-**1. Build a worker image.** A profile rooted at `default` with your
-toolchain in `extra-packages.list` and whatever service starts the
-work in `setup-chroot`. Have it emit a custom boot state when it's
-genuinely ready for work — profiles can report any state string, and
-it shows up in `recent_events` and on `list_machines`. If you just want
-a general-purpose worker to SSH into, the shipped `claude-compute`
-profile already does this: a compute toolchain, SSH access, and a
-`compute_ready` state to wait on.
+**1. Pick or build a worker profile.** For most work, use the generic
+`claude-compute` profile as-is and install what the job needs at run
+time (previous section). Build your own only for a repeated job: a
+profile rooted at `default` with the toolchain in `extra-packages.list`,
+whatever starts the work in `setup-chroot`, and a custom "ready" boot
+state so `list_machines` / `recent_events` show when a worker is usable.
 
 ```json
 {"name": "save_profile", "arguments": {
@@ -791,9 +807,9 @@ TOPICS: tuple[DocTopic, ...] = (
         name="on-demand-compute",
         title="Running the fleet as on-demand compute",
         summary=(
-            "Using the same hardware as a burst pool: build a worker "
-            "image, enrol it with power wiring, ask for capacity, give "
-            "it back — and what fleetboot deliberately doesn't do."
+            "Renting the fleet to an agent as generic compute: spin up a "
+            "temporary worker to compile a kernel, cross-compile, or run "
+            "a job, then power it down — and what fleetboot doesn't do."
         ),
         body=_ON_DEMAND_COMPUTE,
     ),
