@@ -67,9 +67,18 @@ It serves two jobs from the same registry:
   a profile and a count, `list_machines` tells you which ones came up
   (`online`, `state`), and powering off afterwards costs nothing to
   undo: the image is immutable, so a machine that comes back is
-  identical to the one you switched off. Call
-  `describe_fleetboot(topic="on-demand-compute")` for the full
-  pattern.
+  identical to the one you switched off. The `claude-compute` profile
+  is a ready-made worker for exactly this — SSH in, run the job, power
+  it down. Call `describe_fleetboot(topic="on-demand-compute")` for the
+  full pattern.
+
+  If you are an agent using this fleet as compute, you own the power
+  bill: switch machines ON only when you have work for them, and switch
+  them back OFF the moment the work is done. A worker you left running
+  idle wastes real power and holds hardware other work could use — do
+  not leave the pool up "in case". `power_fleet` with action="off" and
+  the profile releases everything you brought up; the immutable image
+  means the next power-on is identical, so there is no reason to hoard.
 
 Typical workflows an agent can drive here:
 

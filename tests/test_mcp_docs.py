@@ -95,6 +95,37 @@ def test_topic_index_lists_every_topic():
         assert f"`{topic.name}`" in index
 
 
+# ---- On-demand compute norms: don't leave workers running ---------------
+
+
+def test_on_demand_doc_tells_agents_to_power_down_when_done():
+    """An agent using the fleet as compute must be told, in the docs it
+    reads, to switch workers off when the work finishes — otherwise the
+    obvious failure mode is a pool left running idle, burning power."""
+    topic = mcp_docs.get_topic("on-demand-compute")
+    assert topic is not None
+    body = topic.body.lower()
+    assert "responsibility" in body, (
+        "the on-demand doc should spell out the agent's power responsibility"
+    )
+    # It must say both halves of the discipline: on for work, off when done.
+    assert "off the moment the work is done" in body
+    assert "idle" in body
+
+
+def test_server_instructions_tell_agents_to_power_down_when_idle():
+    """The always-on server instructions (not just the deep-dive topic)
+    must carry the power-down norm, since an agent sees them first."""
+    from fleetboot.server.mcp import SERVER_INSTRUCTIONS
+
+    text = SERVER_INSTRUCTIONS.lower()
+    assert "own the power" in text or "power bill" in text
+    assert "idle" in text
+    assert "claude-compute" in text, (
+        "the ready-made worker profile should be advertised in the instructions"
+    )
+
+
 # ---- Anti-drift: the prose vs the real server ---------------------------
 
 

@@ -529,13 +529,26 @@ Why an immutable netboot fleet suits this:
 - **Reclaiming is instant.** `power_fleet` with `off` releases the
   hardware; nothing needs cleaning up first.
 
+## Your responsibility as the agent
+
+You own the power. Switch machines **on only when you have work** for
+them, and switch them back **off the moment the work is done** — do not
+leave a worker running idle "in case", because it burns real power and
+holds hardware other work could use. There is no cost to switching off:
+the image is immutable, so the next power-on comes back identical. The
+discipline is simply on-for-work, off-when-done; the steps below are how
+you do each half.
+
 ## The pattern
 
 **1. Build a worker image.** A profile rooted at `default` with your
 toolchain in `extra-packages.list` and whatever service starts the
 work in `setup-chroot`. Have it emit a custom boot state when it's
 genuinely ready for work — profiles can report any state string, and
-it shows up in `recent_events` and on `list_machines`:
+it shows up in `recent_events` and on `list_machines`. If you just want
+a general-purpose worker to SSH into, the shipped `claude-compute`
+profile already does this: a compute toolchain, SSH access, and a
+`compute_ready` state to wait on.
 
 ```json
 {"name": "save_profile", "arguments": {
