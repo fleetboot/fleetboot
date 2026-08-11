@@ -85,6 +85,22 @@ def test_volatile_mode_reports_scratch_wiped():
     assert "scratch_wiped" not in persistent_section
 
 
+def test_scratch_signature_label_fits_ext4_limit():
+    """The ext4 volume label is capped at 16 bytes; mkfs silently
+    truncates a longer one. If the constant exceeds 16, persistent mode
+    writes one label but compares against another and never recognises
+    its own disk — so guard the length here."""
+    import re
+
+    text = (RUNTIME_DIR / "fleetboot-scratch-setup.sh").read_text()
+    match = re.search(r'SIGNATURE_LABEL="([^"]*)"', text)
+    assert match, "SIGNATURE_LABEL not found"
+    label = match.group(1)
+    assert len(label.encode()) <= 16, (
+        f"scratch label {label!r} is {len(label)} bytes; ext4 max is 16"
+    )
+
+
 def test_scratch_script_skips_removable_devices():
     """USB sticks should NOT be auto-formatted. /sys/block/*/removable
     is the standard signal."""

@@ -43,7 +43,13 @@ report_state() {
 }
 
 MOUNTPOINT=/var/scratch
-SIGNATURE_LABEL="fleetboot-scratch"
+# The ext4 volume label that marks a disk as ours. MUST be <= 16 bytes:
+# that is ext4's hard label limit, and mkfs silently TRUNCATES anything
+# longer. The obvious "fleetboot-scratch" is 17 chars, so it was written
+# to disk as "fleetboot-scratc" while the ownership check compared
+# against the full 17 — which never matched, so persistent mode never
+# recognised its own disk and refused to reuse it. Keep this 16 or fewer.
+SIGNATURE_LABEL="fleetboot-scratc"
 
 # --- Read fleetboot.scratch=<mode> from cmdline -----------------------------
 mode=$(awk -v RS=' ' -F= '/^fleetboot\.scratch=/{print $2}' /proc/cmdline | tr -d '[:space:]')
