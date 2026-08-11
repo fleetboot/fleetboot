@@ -72,6 +72,19 @@ def test_volatile_mode_wipes_unconditionally():
     assert "mkfs.ext4" in volatile_section
 
 
+def test_volatile_mode_reports_scratch_wiped():
+    """A volatile disk reformats every boot; that reset is a distinct,
+    destructive event and must be reported as `scratch_wiped` — only in
+    the volatile branch (persistent never wipes existing data)."""
+    body = _action_case_body(
+        (RUNTIME_DIR / "fleetboot-scratch-setup.sh").read_text(),
+    )
+    volatile_section = body[body.find("volatile)"):body.find(";;", body.find("volatile)"))]
+    assert "report_state scratch_wiped" in volatile_section
+    persistent_section = body[body.find("persistent)"):]
+    assert "scratch_wiped" not in persistent_section
+
+
 def test_scratch_script_skips_removable_devices():
     """USB sticks should NOT be auto-formatted. /sys/block/*/removable
     is the standard signal."""

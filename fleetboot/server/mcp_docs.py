@@ -467,12 +467,15 @@ genuinely the furthest a machine got.
 | 7 | `nfs_mounted` | in-image reporter | Network home/shared storage mounted — only in images that use `fleetid`. |
 | 8 | `login_console` | in-image reporter | The greeter is up and a human could log in. This is "fully booted". |
 
-The scratch step reports one of two things, so its silence is never
-ambiguous: `scratch_mounted` (ranked, above) when it actually formatted
-and mounted a disk, or `scratch_skipped` — an unranked event — when it
-knowingly mounted nothing (`scratch_mode=off`, no usable local disk, or
-a foreign filesystem it refused to wipe). A machine that reports neither
-never reached scratch setup.
+The scratch step reports so its silence is never ambiguous:
+`scratch_mounted` (ranked, above) when it actually formatted and mounted
+a disk, or `scratch_skipped` — an unranked event — when it knowingly
+mounted nothing (`scratch_mode=off`, no usable local disk, or a foreign
+filesystem it refused to wipe). A machine that reports neither never
+reached scratch setup. A `volatile` disk additionally emits an unranked
+`scratch_wiped` event the moment it reformats, so a reset is visible in
+the timeline in its own right, before the `scratch_mounted` that
+follows it.
 
 There is deliberately **no** `user_logged_in` state: it used to fire
 from a PAM hook, but the display manager's own session tripped it too,

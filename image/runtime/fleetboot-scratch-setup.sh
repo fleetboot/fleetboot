@@ -127,6 +127,10 @@ case "$mode" in
             warn "mkfs.ext4 failed on $candidate; scratch not configured"
             exit 1
         fi
+        # Whatever was on the disk is gone now. Report the wipe as its own
+        # event (distinct from the later scratch_mounted) so the timeline
+        # shows a volatile disk being reset, not just mounted.
+        report_state scratch_wiped
         ;;
     persistent)
         # Persistent: keep the safety check. A typo on the mode shouldn't
