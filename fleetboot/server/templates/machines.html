@@ -10,6 +10,7 @@
       <th>Hostname</th>
       <th>Network</th>
       <th>Profile</th>
+      <th>Availability</th>
       <th>Scratch</th>
       <th>Arch</th>
       <th>Source</th>
@@ -51,6 +52,34 @@
           </select>
           <noscript><button type="submit">change</button></noscript>
         </form>
+      </td>
+      <td data-role="availability">
+        {% set avail = availability_by_mac.get(m.mac) %}
+        {% set res = reservations.get(m.mac) %}
+        {% if avail == "permanent" %}
+          <span class="muted"
+                title="Permanent fleet machine{% if res %} — held by {{ res.holder }}{% endif %}. Never claimable for compute.">permanent</span>
+          <form method="post" action="/dashboard/machines/{{ m.mac }}/release-to-pool"
+                style="display:inline"
+                onsubmit="return confirm('Put {{ m.mac }} into the compute pool? It becomes claimable for on-demand compute.');">
+            <button type="submit" title="Drop the permanent hold — opt this machine into the compute pool">→ pool</button>
+          </form>
+        {% elif avail == "reserved" %}
+          <span class="state-network_up"
+                title="Leased{% if res %} by {{ res.holder }} until {{ res.expires_at }}{% endif %}">reserved</span>
+          <form method="post" action="/dashboard/machines/{{ m.mac }}/release-lease"
+                style="display:inline"
+                onsubmit="return confirm('End the lease on {{ m.mac }} and power it off?');">
+            <button type="submit" class="danger" title="End the lease early and power off">release</button>
+          </form>
+        {% else %}
+          <span class="version-current" title="No hold — free to be leased for compute">available</span>
+          <form method="post" action="/dashboard/machines/{{ m.mac }}/pin"
+                style="display:inline"
+                onsubmit="return confirm('Pin {{ m.mac }} as a permanent fleet machine (out of the compute pool)?');">
+            <button type="submit" title="Take this machine out of the pool — pin it permanent">pin</button>
+          </form>
+        {% endif %}
       </td>
       <td data-role="scratch">
         {% if m.scratch_mode == "volatile" %}

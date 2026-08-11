@@ -889,6 +889,68 @@ def test_machines_list_shows_each_machines_scratch_mode(dashboard_root: Path):
     assert ">volatile</span>" in volatile_row
 
 
+def _enrol_via_form(client: TestClient, mac: str) -> None:
+    client.post(
+        "/dashboard/machines",
+        data={
+            "mac": mac, "profile_name": "default",
+            "architecture": "x86_64", "platform": "efi",
+        },
+        headers=_auth_header(),
+    )
+
+
+def _availability_cell(page: str, mac: str) -> str:
+    row = page.split(f'data-mac="{mac}"')[1].split("</tr>")[0]
+    return row.split('data-role="availability"')[1].split("</td>")[0]
+
+
+def test_machines_list_shows_availability_column(dashboard_root: Path):
+    """Availability is on the fleet overview — an enrolled machine is
+    'permanent' (protected) by default."""
+    client = _client(dashboard_root)
+    _enrol_via_form(client, "aa:bb:cc:dd:ee:01")
+    page = client.get("/dashboard", headers=_auth_header()).text
+    assert "<th>Availability</th>" in page
+    assert ">permanent</span>" in _availability_cell(page, "aa:bb:cc:dd:ee:01")
+
+
+def test_release_to_pool_and_pin_routes_flip_availability(dashboard_root: Path):
+    client = _client(dashboard_root)
+    _enrol_via_form(client, "aa:bb:cc:dd:ee:01")
+    # Opt it into the pool.
+    client.post(
+        "/dashboard/machines/aa:bb:cc:dd:ee:01/release-to-pool",
+        headers=_auth_header(),
+    )
+    page = client.get("/dashboard", headers=_auth_header()).text
+    assert ">available</span>" in _availability_cell(page, "aa:bb:cc:dd:ee:01")
+    # Pin it back out.
+    client.post(
+        "/dashboard/machines/aa:bb:cc:dd:ee:01/pin", headers=_auth_header(),
+    )
+    page = client.get("/dashboard", headers=_auth_header()).text
+    assert ">permanent</span>" in _availability_cell(page, "aa:bb:cc:dd:ee:01")
+
+
+def test_release_lease_route_frees_a_reserved_machine(dashboard_root: Path):
+    client = _client(dashboard_root)
+    _enrol_via_form(client, "aa:bb:cc:dd:ee:01")
+    # Share the DB to set up a lease directly.
+    reg = MachineRegistry(dashboard_root / "machines.sqlite")
+    reg.release_to_pool("aa:bb:cc:dd:ee:01")
+    reg.reserve(profile="default", count=1, holder="agent:x", ttl_seconds=3600)
+    page = client.get("/dashboard", headers=_auth_header()).text
+    assert ">reserved</span>" in _availability_cell(page, "aa:bb:cc:dd:ee:01")
+    # End the lease from the dashboard.
+    client.post(
+        "/dashboard/machines/aa:bb:cc:dd:ee:01/release-lease",
+        headers=_auth_header(),
+    )
+    page = client.get("/dashboard", headers=_auth_header()).text
+    assert ">available</span>" in _availability_cell(page, "aa:bb:cc:dd:ee:01")
+
+
 def test_enrol_form_normalises_mac_and_redirects(dashboard_root: Path):
     client = _client(dashboard_root)
     response = client.post(

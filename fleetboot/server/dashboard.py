@@ -22,7 +22,7 @@ from fastapi.templating import Jinja2Templates
 
 from fleetboot.server.build_jobs import BuildAlreadyRunningError, BuildJobManager
 from fleetboot.server.boot_sessions import BootSessionStore
-from fleetboot.server.registry import MachineRegistry
+from fleetboot.server.registry import MachineRegistry, availability_of
 
 
 # Templates and static files live alongside this module.
@@ -248,12 +248,18 @@ def build_dashboard_router(
         states_by_mac = _states_by_mac(sessions)
         latest_versions = _latest_versions_by_artefact(boot_dir)
         last_seen = _format_last_seen(sessions.last_seen_by_mac())
+        reservations = registry.all_active_reservations()
+        availability_by_mac = {
+            m.mac: availability_of(reservations.get(m.mac)) for m in machines
+        }
         return templates.TemplateResponse(
             request,
             "machines.html",
             {
                 "machines": machines,
                 "states_by_mac": states_by_mac,
+                "reservations": reservations,
+                "availability_by_mac": availability_by_mac,
                 "profile_names": _list_profile_names(profiles_root),
                 # Every dashboard page polls a JSON snapshot at this
                 # cadence — see startLiveView in base.html.
@@ -826,6 +832,57 @@ def build_dashboard_router(
         return RedirectResponse(
             url=f"/dashboard/machines/{mac}",
             status_code=status.HTTP_303_SEE_OTHER,
+        )
+
+    @router.post(
+        "/dashboard/machines/{mac}/release-to-pool",
+        response_class=HTMLResponse,
+        dependencies=[Depends(require_admin)],
+    )
+    def release_to_pool_route(mac: str) -> RedirectResponse:
+        """Opt a machine into the compute pool by dropping its permanent
+        hold — it becomes claimable for on-demand compute."""
+        if registry.lookup(mac) is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="machine not found",
+            )
+        registry.release_to_pool(mac)
+        return RedirectResponse(
+            url="/dashboard", status_code=status.HTTP_303_SEE_OTHER,
+        )
+
+    @router.post(
+        "/dashboard/machines/{mac}/pin",
+        response_class=HTMLResponse,
+        dependencies=[Depends(require_admin)],
+    )
+    def pin_machine_route(mac: str) -> RedirectResponse:
+        """Take a machine OUT of the pool with a permanent hold — a
+        classroom desktop or any fixed-purpose machine. Keeps its current
+        profile; holder is the admin."""
+        if registry.pin(mac, holder="admin", purpose="pinned from dashboard") is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="machine not found",
+            )
+        return RedirectResponse(
+            url="/dashboard", status_code=status.HTTP_303_SEE_OTHER,
+        )
+
+    @router.post(
+        "/dashboard/machines/{mac}/release-lease",
+        response_class=HTMLResponse,
+        dependencies=[Depends(require_admin)],
+    )
+    def release_lease_route(mac: str) -> RedirectResponse:
+        """End an active compute lease early and power the machine off —
+        it returns to the pool as available."""
+        freed = registry.release(macs=[mac])
+        for freed_mac in freed:
+            power_machine(registry, freed_mac, "off")
+        return RedirectResponse(
+            url="/dashboard", status_code=status.HTTP_303_SEE_OTHER,
         )
 
     @router.post(
