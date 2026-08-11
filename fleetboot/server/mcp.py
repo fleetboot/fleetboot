@@ -39,6 +39,7 @@ from fleetboot.server.dashboard import (
 from fleetboot.server import mcp_docs
 from fleetboot.server.registry import (
     MachineRegistry,
+    availability_of,
     matches_architecture,
 )
 
@@ -595,6 +596,133 @@ def _tool_catalogue() -> list[dict]:
             },
         },
         {
+            "name": "reserve_machines",
+            "description": (
+                "Claim available machines for compute and get them "
+                "running. Leases up to `count` machines that have no "
+                "active reservation, pins each to `profile` (use the "
+                "generic `claude-compute` worker unless you built your "
+                "own), powers them on, and returns them. Only machines an "
+                "admin has released into the pool are claimable — a "
+                "school desktop or any permanently-held machine is never "
+                "selected. Pass a stable `holder` (e.g. your agent name) "
+                "so you can `release_machines` your own later. The lease "
+                "auto-expires after `ttl_minutes` (default 60) and the "
+                "reaper powers the machine off — call `renew_reservation` "
+                "for a long job. `short_by` reports how many the pool "
+                "couldn't supply."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "profile": {
+                        "type": "string",
+                        "description": "Worker profile to pin, e.g. claude-compute.",
+                    },
+                    "count": {"type": "integer", "minimum": 1},
+                    "holder": {
+                        "type": "string",
+                        "description": (
+                            "Who holds the lease (default 'agent'). Use a "
+                            "stable id to release your own machines later."
+                        ),
+                    },
+                    "purpose": {"type": "string"},
+                    "architecture": {
+                        "type": "string",
+                        "description": "Optional filter (amd64/arm64).",
+                    },
+                    "ttl_minutes": {
+                        "type": "number",
+                        "description": "Lease length before auto-release (default 60).",
+                    },
+                },
+                "required": ["profile", "count"],
+                "additionalProperties": False,
+            },
+        },
+        {
+            "name": "release_machines",
+            "description": (
+                "Give leased machines back and power them off. Release "
+                "specific machines with `macs`, or all of a holder's "
+                "leases with `holder`. Only leases are freed — a "
+                "permanent hold is never released this way (use "
+                "`release_to_pool` for that). Do this the moment your "
+                "work is done; nothing is drained first, so checkpoint "
+                "off the node."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "macs": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                    },
+                    "holder": {"type": "string"},
+                },
+                "additionalProperties": False,
+            },
+        },
+        {
+            "name": "renew_reservation",
+            "description": (
+                "Extend an active lease so a long job isn't reaped "
+                "mid-run. Pushes the machine's expiry to `ttl_minutes` "
+                "(default 60) from now. Errors if the machine has no "
+                "active lease (a permanent hold never expires)."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "mac": {"type": "string"},
+                    "ttl_minutes": {"type": "number"},
+                },
+                "required": ["mac"],
+                "additionalProperties": False,
+            },
+        },
+        {
+            "name": "pin_machine",
+            "description": (
+                "Admin: give a machine a permanent hold, taking it OUT "
+                "of the compute pool so it can never be leased. Releases "
+                "whatever hold it has and pins it (optionally switching "
+                "it to `profile`). This is how a machine becomes a "
+                "permanent fleet member — e.g. a classroom desktop."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "mac": {"type": "string"},
+                    "holder": {
+                        "type": "string",
+                        "description": "Who owns it, e.g. 'school' (default 'admin').",
+                    },
+                    "profile": {"type": "string"},
+                    "purpose": {"type": "string"},
+                },
+                "required": ["mac"],
+                "additionalProperties": False,
+            },
+        },
+        {
+            "name": "release_to_pool",
+            "description": (
+                "Admin: release a machine's permanent hold so it becomes "
+                "`available` and can be leased for compute. This is how "
+                "you opt a machine into the pool — machines are permanent "
+                "by default and protected until you do this. No-op if the "
+                "machine isn't permanently held."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {"mac": {"type": "string"}},
+                "required": ["mac"],
+                "additionalProperties": False,
+            },
+        },
+        {
             "name": "set_power_command",
             "description": (
                 "Set (or clear, with empty string) the shell command "
@@ -894,8 +1022,29 @@ def _build_tool_impls(
         "online": False,
     }
 
-    def _machine_dict(m, liveness: Optional[dict] = None) -> dict:
+    def _reservation_dict(res) -> Optional[dict]:
+        if res is None:
+            return None
+        return {
+            "holder": res.holder,
+            "purpose": res.purpose,
+            "lease_kind": res.lease_kind,
+            "acquired_at": res.acquired_at,
+            "expires_at": res.expires_at,
+        }
+
+    def _machine_dict(
+        m,
+        liveness: Optional[dict] = None,
+        reservations: Optional[dict] = None,
+    ) -> dict:
         live = (liveness or {}).get(m.mac, _OFFLINE)
+        # `reservations` (bulk) avoids a per-machine query in list views;
+        # single-machine callers pass None and we look the one up.
+        if reservations is not None:
+            res = reservations.get(m.mac)
+        else:
+            res = registry.active_reservation(m.mac)
         return {
             "mac": m.mac,
             "hostname": m.hostname,
@@ -912,6 +1061,10 @@ def _build_tool_impls(
             "scratch_mode": m.scratch_mode,
             "serial_console": bool(m.serial_console),
             "enrolled_by": m.enrolled_by,
+            # Ownership: is this machine claimable for compute, leased, or
+            # a permanent fleet machine? Separate from power/health below.
+            "availability": availability_of(res),
+            "reservation": _reservation_dict(res),
             # Live view: how far this machine's current boot got, and
             # whether it is still talking to us.
             "state": live["state"],
@@ -934,9 +1087,11 @@ def _build_tool_impls(
 
     def list_machines(_: dict) -> dict:
         liveness = _liveness_by_mac(sessions)
+        reservations = registry.all_active_reservations()
         return _tool_text_result(
             {"machines": [
-                _machine_dict(m, liveness) for m in registry.list_all()
+                _machine_dict(m, liveness, reservations)
+                for m in registry.list_all()
             ]},
         )
 
@@ -1316,6 +1471,140 @@ def _build_tool_impls(
             ],
         })
 
+    # ---- Reservations ---------------------------------------------------
+
+    def reserve_machines(args: dict) -> dict:
+        profile = _require(args, "profile", str)
+        count = _require(args, "count", int)
+        if isinstance(count, bool) or count < 1:
+            raise _ToolError("count must be an integer >= 1")
+        holder = args.get("holder", "agent")
+        if not isinstance(holder, str) or not holder.strip():
+            raise _ToolError("holder must be a non-empty string")
+        purpose = args.get("purpose")
+        if purpose is not None and not isinstance(purpose, str):
+            raise _ToolError("purpose must be a string")
+        architecture = args.get("architecture")
+        if architecture is not None and not isinstance(architecture, str):
+            raise _ToolError("architecture must be a string")
+        ttl_minutes = args.get("ttl_minutes", 60)
+        if isinstance(ttl_minutes, bool) or not isinstance(
+            ttl_minutes, (int, float)
+        ) or ttl_minutes <= 0:
+            raise _ToolError("ttl_minutes must be a positive number")
+        # Reserving pins the worker profile, so it must exist.
+        known = _list_profile_names(profiles_root)
+        if profile not in known:
+            raise _ToolError(
+                f"unknown profile: {profile!r}. Known profiles: "
+                + (", ".join(known) or "(none)")
+            )
+        leased = registry.reserve(
+            profile=profile, count=count, holder=holder.strip(),
+            ttl_seconds=int(ttl_minutes * 60), purpose=purpose,
+            architecture=architecture,
+        )
+        # The reservation owns power: switch each leased machine on.
+        results = [
+            _power_result_dict(power_machine(registry, m.mac, "on"))
+            for m in leased
+        ]
+        liveness = _liveness_by_mac(sessions)
+        reservations = registry.all_active_reservations()
+        return _tool_text_result({
+            "profile": profile,
+            "holder": holder,
+            "requested": count,
+            "reserved": len(leased),
+            "short_by": max(0, count - len(leased)),
+            "ttl_minutes": ttl_minutes,
+            "power_results": results,
+            "machines": [
+                _machine_dict(m, liveness, reservations) for m in leased
+            ],
+        })
+
+    def release_machines(args: dict) -> dict:
+        macs = args.get("macs")
+        holder = args.get("holder")
+        if macs is not None:
+            if not isinstance(macs, list) or not all(
+                isinstance(x, str) for x in macs
+            ):
+                raise _ToolError("macs must be a list of strings")
+        if holder is not None and not isinstance(holder, str):
+            raise _ToolError("holder must be a string")
+        if not macs and not holder:
+            raise _ToolError("pass either macs or holder")
+        freed = registry.release(macs=macs, holder=holder)
+        # Power the freed machines off — the lease is done with them.
+        results = [
+            _power_result_dict(power_machine(registry, mac, "off"))
+            for mac in freed
+        ]
+        return _tool_text_result({
+            "released": freed,
+            "count": len(freed),
+            "power_results": results,
+        })
+
+    def renew_reservation(args: dict) -> dict:
+        mac = _require(args, "mac", str)
+        ttl_minutes = args.get("ttl_minutes", 60)
+        if isinstance(ttl_minutes, bool) or not isinstance(
+            ttl_minutes, (int, float)
+        ) or ttl_minutes <= 0:
+            raise _ToolError("ttl_minutes must be a positive number")
+        ok = registry.renew(mac, ttl_seconds=int(ttl_minutes * 60))
+        if not ok:
+            raise _ToolError(
+                f"no active lease on {mac!r} to renew "
+                "(unknown machine, permanent hold, or already free)"
+            )
+        res = registry.active_reservation(mac)
+        return _tool_text_result({
+            "mac": mac,
+            "expires_at": res.expires_at if res else None,
+        })
+
+    def pin_machine(args: dict) -> dict:
+        mac = _require(args, "mac", str)
+        holder = args.get("holder", "admin")
+        if not isinstance(holder, str) or not holder.strip():
+            raise _ToolError("holder must be a non-empty string")
+        profile = args.get("profile")
+        purpose = args.get("purpose")
+        if profile is not None:
+            if not isinstance(profile, str):
+                raise _ToolError("profile must be a string")
+            known = _list_profile_names(profiles_root)
+            if profile not in known:
+                raise _ToolError(
+                    f"unknown profile: {profile!r}. Known profiles: "
+                    + (", ".join(known) or "(none)")
+                )
+        if purpose is not None and not isinstance(purpose, str):
+            raise _ToolError("purpose must be a string")
+        res = registry.pin(
+            mac, holder=holder.strip(), profile=profile, purpose=purpose,
+        )
+        if res is None:
+            raise _ToolError(f"no machine with MAC {mac!r}")
+        return _tool_text_result(
+            _machine_dict(registry.lookup(mac), _liveness_by_mac(sessions)),
+        )
+
+    def release_to_pool(args: dict) -> dict:
+        mac = _require(args, "mac", str)
+        if registry.lookup(mac) is None:
+            raise _ToolError(f"no machine with MAC {mac!r}")
+        released = registry.release_to_pool(mac)
+        return _tool_text_result({
+            "mac": mac,
+            "released_permanent_hold": released,
+            "availability": registry.availability(mac),
+        })
+
     return {
         "describe_fleetboot": describe_fleetboot,
         "list_machines": list_machines,
@@ -1326,6 +1615,11 @@ def _build_tool_impls(
         "reboot_machine": reboot,
         "power_machine": power,
         "power_fleet": power_fleet,
+        "reserve_machines": reserve_machines,
+        "release_machines": release_machines,
+        "renew_reservation": renew_reservation,
+        "pin_machine": pin_machine,
+        "release_to_pool": release_to_pool,
         "set_power_command": set_power_command_tool,
         "set_pdu_alias": set_pdu_alias_tool,
         "set_pending_reboot": set_pending_reboot_tool,

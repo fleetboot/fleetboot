@@ -613,61 +613,51 @@ state so `list_machines` / `recent_events` show when a worker is usable.
 
 Then `start_build` with that profile, and poll `get_build`.
 
-**2. Enrol the pool, with power wiring.** Each machine needs a MAC, the
-profile, and a way to be switched on. Do the wiring at enrolment —
-`set_pdu_alias` — because the hostname fallback only exists after a
-machine has booted at least once:
+**2. (Admin, once) put machines in the pool.** Machines are permanent by
+default — protected, never leased out from under a lesson. An admin opts
+a machine into the compute pool with `release_to_pool`, and wires its
+power (`set_pdu_alias`) so it can be switched on. The reverse, taking a
+machine back out of the pool as a permanent fleet member, is
+`pin_machine`.
 
 ```json
-{"name": "enrol_machine", "arguments": {
-  "mac": "aa:bb:cc:00:00:07", "profile_name": "render-node",
-  "architecture": "x86_64"
-}}
 {"name": "set_pdu_alias", "arguments": {
   "mac": "aa:bb:cc:00:00:07", "alias": "rack1-port7"
 }}
+{"name": "release_to_pool", "arguments": {"mac": "aa:bb:cc:00:00:07"}}
 ```
 
-**3. Ask for capacity.**
+**3. Reserve capacity.** `reserve_machines` claims free pool machines,
+pins them to your worker profile, powers them on, and hands them back —
+one call. Pass a stable `holder` so you can release your own later.
 
 ```json
-{"name": "power_fleet", "arguments": {
-  "action": "on", "profile": "render-node", "count": 8
+{"name": "reserve_machines", "arguments": {
+  "profile": "claude-compute", "count": 8, "holder": "agent:render",
+  "purpose": "batch render", "ttl_minutes": 120
 }}
 ```
 
-The reply reports what it could actually do:
+The reply reports what it could supply — `reserved`, `short_by`, and the
+`machines` with their `availability` now `reserved`.
+
+**4. Wait for them to be usable.** `reserve_machines` returns when the
+PDU accepts, not when the machines are ready; a cold boot is a minute or
+two. Poll `list_machines` for your leased machines reaching `online:
+true` and the `compute_ready` state; `recent_events` shows the boots
+unfolding. For a job longer than the lease, `renew_reservation` before
+it expires — otherwise the reaper reclaims the machine.
+
+**5. Give the hardware back** with `release_machines`.
 
 ```json
-{"action": "on", "profile": "render-node", "matching": 12,
- "eligible": 10, "selected": 8, "succeeded": 8, "short_by": 0,
- "results": [{"mac": "aa:bb:cc:00:00:07", "method": "pdudaemon",
-              "ok": true, "detail": "pdudaemon succeeded"}]}
+{"name": "release_machines", "arguments": {"holder": "agent:render"}}
 ```
 
-`eligible` excludes machines already online, so asking twice for eight
-doesn't cycle the eight you already have. `short_by` is how many the
-fleet couldn't supply — a small pool, or machines already busy.
-
-**4. Wait for them to be usable.** `power_fleet` returns when the PDU
-accepts, not when the machines are ready; a cold boot is typically a
-minute or two. Poll `list_machines` and count the ones on your profile
-with `online: true` and the state you're waiting for. `recent_events`
-shows the boots unfolding if you want to see progress rather than just
-the count.
-
-**5. Give the hardware back.**
-
-```json
-{"name": "power_fleet", "arguments": {
-  "action": "off", "profile": "render-node"
-}}
-```
-
-With no `count`, every online machine on the profile goes off. There is
-no drain step — make sure your work is finished or checkpointed
-somewhere off the node first, because the tmpfs overlay dies with the
-power.
+That frees every machine you leased and powers them off. There is no
+drain step — checkpoint off the node first, because the tmpfs overlay
+dies with the power. Forget to release and the lease still expires on
+its own, so a crash can't leak a machine.
 
 ## What this does not give you
 
