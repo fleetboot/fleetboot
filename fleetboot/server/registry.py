@@ -100,6 +100,34 @@ CREATE TABLE IF NOT EXISTS auto_enrol_rules (
                     CHECK(scratch_mode IN ('volatile', 'persistent', 'off')),
     created_at      TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+-- Reservations: who holds a machine and until when. This is the one
+-- ownership record that serves BOTH long-lived fleet machines and
+-- transient compute leases — a permanent reservation (school desktop)
+-- and an agent's timed lease are the same row with a different
+-- expires_at. A machine is "available" (claimable for compute) exactly
+-- when it has no active reservation. See the `pin`/`reserve`/`release`
+-- methods and the `reservations` docs topic.
+CREATE TABLE IF NOT EXISTS reservations (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    mac             TEXT NOT NULL,
+    holder          TEXT NOT NULL,
+    purpose         TEXT,
+    lease_kind      TEXT NOT NULL CHECK(lease_kind IN ('permanent', 'lease')),
+    profile         TEXT,
+    acquired_at     TEXT NOT NULL DEFAULT (datetime('now')),
+    -- NULL means it never expires (a permanent hold). A lease carries a
+    -- timestamp; past it, the reaper releases the machine.
+    expires_at      TEXT,
+    -- NULL while the reservation is live; set when released or reaped.
+    released_at     TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_reservations_mac ON reservations(mac);
+-- At most one un-released reservation per machine. reserve/pin release
+-- any prior one first, so this also catches an expired-but-unreaped
+-- lease before a fresh claim is written.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_reservations_one_active
+    ON reservations(mac) WHERE released_at IS NULL;
 """
 
 
@@ -196,6 +224,44 @@ def _add_power_columns_if_missing(connection: sqlite3.Connection) -> None:
             pass
 
 
+def _pin_existing_machines_once(connection: sqlite3.Connection) -> None:
+    """Migration: give every pre-reservation machine a permanent hold.
+
+    Reservations arrived after the fleet did. Without this, every machine
+    already enrolled would read as `available` the moment reservations
+    ship — and an agent could power-cycle a classroom desktop out from
+    under a lesson. So on the first run after the table appears, we pin
+    each existing machine permanently to itself (holder = how it was
+    enrolled, profile = what it already runs). An admin opts a machine
+    into the compute pool later with `release_to_pool`.
+
+    Guarded by a settings flag so it runs exactly once: a machine an
+    admin has since released to the pool must not be re-pinned on the
+    next restart.
+    """
+    already = connection.execute(
+        "SELECT value FROM settings WHERE key = 'reservations_pinned_existing'"
+    ).fetchone()
+    if already is not None:
+        return
+    connection.execute(
+        "INSERT INTO reservations "
+        "(mac, holder, purpose, lease_kind, profile) "
+        "SELECT mac, enrolled_by, "
+        "       'migrated: pre-reservation fleet machine', "
+        "       'permanent', profile_name "
+        "FROM machines m "
+        "WHERE NOT EXISTS ("
+        "    SELECT 1 FROM reservations r "
+        "    WHERE r.mac = m.mac AND r.released_at IS NULL"
+        ")"
+    )
+    connection.execute(
+        "INSERT INTO settings (key, value) "
+        "VALUES ('reservations_pinned_existing', datetime('now'))"
+    )
+
+
 @dataclass(frozen=True)
 class BootEvent:
     """One row from the boot_events log."""
@@ -272,6 +338,34 @@ class Machine:
 
 
 @dataclass(frozen=True)
+class Reservation:
+    """A hold on a machine: who owns it, why, and until when.
+
+    One record type for both jobs. A `permanent` reservation (school
+    desktop, pinned server) has ``expires_at is None`` and never lapses.
+    A `lease` (an agent's compute claim) carries an ``expires_at``; past
+    it the reaper releases the machine. ``released_at`` is set the moment
+    the hold ends, by an explicit release or by the reaper.
+    """
+
+    id: int
+    mac: str
+    holder: str
+    lease_kind: str            # 'permanent' | 'lease'
+    acquired_at: str
+    purpose: Optional[str] = None
+    profile: Optional[str] = None
+    expires_at: Optional[str] = None   # None => permanent
+    released_at: Optional[str] = None  # None => still live (modulo expiry)
+
+
+# Availability, derived from a machine's active reservation (if any).
+AVAILABILITY_PERMANENT = "permanent"   # held forever — never claimable
+AVAILABILITY_RESERVED = "reserved"     # leased and not expired — in use
+AVAILABILITY_AVAILABLE = "available"   # no active hold — claimable
+
+
+@dataclass(frozen=True)
 class AutoEnrolRule:
     """A rule that auto-creates a `machines` row when an unknown MAC asks
     for its config and matches the rule's predicate.
@@ -315,6 +409,9 @@ class MachineRegistry:
             _add_scratch_mode_columns_if_missing(connection)
             _add_diagnostics_columns_if_missing(connection)
             _add_power_columns_if_missing(connection)
+            # Must run after the machines table exists and its columns are
+            # migrated: it reads profile_name/enrolled_by off every row.
+            _pin_existing_machines_once(connection)
             # Rename / drop boot_events.state values that no longer
             # exist (e.g. login_ready → login_console; user_logged_in
             # was dropped entirely). Idempotent — no-op on a fresh DB.
@@ -393,6 +490,20 @@ class MachineRegistry:
                     f"UPDATE machines SET {assignments} WHERE mac = ?",
                     (*(previous[c] for c in power_columns), normalised_mac),
                 )
+            else:
+                # Brand-new machine: pin it permanently by default so it
+                # is protected from the compute pool until an admin opts
+                # it in with release_to_pool. A re-enrol (previous is not
+                # None) leaves whatever reservation state it already has.
+                connection.execute(
+                    "INSERT INTO reservations "
+                    "(mac, holder, purpose, lease_kind, profile) "
+                    "VALUES (?, ?, ?, 'permanent', ?)",
+                    (
+                        normalised_mac, enrolled_by,
+                        "enrolled — permanent by default", profile_name,
+                    ),
+                )
         result = self.lookup(normalised_mac)
         # lookup must succeed -- we just wrote the row inside the lock.
         assert result is not None
@@ -455,6 +566,253 @@ class MachineRegistry:
                 (cleaned, normalised_mac),
             )
             return cursor.rowcount > 0
+
+    # ---- Reservations -----------------------------------------------------
+    #
+    # One ownership record serves both jobs (see the Reservation dataclass
+    # and the reservations table). A machine is AVAILABLE (claimable for
+    # compute) exactly when it has no active reservation. "Active" means
+    # not yet released and, for a lease, not yet expired.
+
+    _ACTIVE_RESERVATION_WHERE = (
+        "released_at IS NULL "
+        "AND (expires_at IS NULL OR expires_at > datetime('now'))"
+    )
+
+    @staticmethod
+    def _release_unreleased(connection: sqlite3.Connection, mac: str) -> None:
+        """Mark any un-released reservation on ``mac`` as released now.
+
+        Clears an expired-but-unreaped lease before a fresh claim, so the
+        one-active-per-machine unique index never conflicts.
+        """
+        connection.execute(
+            "UPDATE reservations SET released_at = datetime('now') "
+            "WHERE mac = ? AND released_at IS NULL",
+            (mac,),
+        )
+
+    def active_reservation(self, mac: str) -> Optional["Reservation"]:
+        """The machine's current hold, or None if it is available."""
+        normalised_mac = _normalise_mac(mac)
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM reservations "
+                f"WHERE mac = ? AND {self._ACTIVE_RESERVATION_WHERE} "
+                "ORDER BY id DESC LIMIT 1",
+                (normalised_mac,),
+            ).fetchone()
+        return _row_to_reservation(row) if row is not None else None
+
+    def all_active_reservations(self) -> dict[str, "Reservation"]:
+        """Every machine's active hold, keyed by MAC — for the list view."""
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT * FROM reservations "
+                f"WHERE {self._ACTIVE_RESERVATION_WHERE}"
+            ).fetchall()
+        return {row["mac"]: _row_to_reservation(row) for row in rows}
+
+    def availability(self, mac: str) -> str:
+        """`permanent` / `reserved` / `available` for one machine."""
+        return availability_of(self.active_reservation(mac))
+
+    def reserve(
+        self,
+        *,
+        profile: str,
+        count: int,
+        holder: str,
+        ttl_seconds: int,
+        purpose: Optional[str] = None,
+        architecture: Optional[str] = None,
+    ) -> list[Machine]:
+        """Lease up to ``count`` available machines and pin them to ``profile``.
+
+        Picks machines with no active reservation (deterministically, by
+        MAC), writes a lease expiring in ``ttl_seconds``, and switches each
+        to ``profile`` so it boots the worker image. Returns the machines
+        actually leased — fewer than ``count`` when the pool is short. Does
+        NOT power anything on; the caller (which owns the power layer)
+        does that for the returned machines.
+        """
+        cleaned_profile = (profile or "").strip()
+        if not cleaned_profile:
+            raise ValueError("profile must not be empty")
+        cleaned_holder = (holder or "").strip()
+        if not cleaned_holder:
+            raise ValueError("holder must not be empty")
+        if count <= 0:
+            return []
+        if ttl_seconds <= 0:
+            raise ValueError("ttl_seconds must be positive")
+        params: list[object] = []
+        arch_clause = ""
+        if architecture:
+            aliases = architecture_aliases(architecture)
+            placeholders = ", ".join("?" for _ in aliases)
+            arch_clause = f" AND m.architecture IN ({placeholders})"
+            params.extend(aliases)
+        leased: list[str] = []
+        with self._write_lock, self._connect() as connection:
+            candidates = connection.execute(
+                "SELECT m.mac FROM machines m WHERE NOT EXISTS ("
+                "    SELECT 1 FROM reservations r WHERE r.mac = m.mac "
+                f"    AND {self._ACTIVE_RESERVATION_WHERE}"
+                ")" + arch_clause + " ORDER BY m.mac LIMIT ?",
+                (*params, count),
+            ).fetchall()
+            for row in candidates:
+                mac = row["mac"]
+                self._release_unreleased(connection, mac)
+                connection.execute(
+                    "INSERT INTO reservations "
+                    "(mac, holder, purpose, lease_kind, profile, expires_at) "
+                    "VALUES (?, ?, ?, 'lease', ?, datetime('now', ?))",
+                    (
+                        mac, cleaned_holder, purpose, cleaned_profile,
+                        f"+{int(ttl_seconds)} seconds",
+                    ),
+                )
+                connection.execute(
+                    "UPDATE machines SET profile_name = ? WHERE mac = ?",
+                    (cleaned_profile, mac),
+                )
+                leased.append(mac)
+        return [m for m in (self.lookup(mac) for mac in leased) if m is not None]
+
+    def renew(self, mac: str, ttl_seconds: int) -> bool:
+        """Push an active lease's expiry out to ``ttl_seconds`` from now.
+
+        Returns False if the machine has no active lease (a permanent hold
+        can't be renewed — it never expires)."""
+        if ttl_seconds <= 0:
+            raise ValueError("ttl_seconds must be positive")
+        normalised_mac = _normalise_mac(mac)
+        with self._write_lock, self._connect() as connection:
+            cursor = connection.execute(
+                "UPDATE reservations SET expires_at = datetime('now', ?) "
+                "WHERE mac = ? AND lease_kind = 'lease' "
+                f"AND {self._ACTIVE_RESERVATION_WHERE}",
+                (f"+{int(ttl_seconds)} seconds", normalised_mac),
+            )
+            return cursor.rowcount > 0
+
+    def release(
+        self,
+        macs: Optional[list[str]] = None,
+        holder: Optional[str] = None,
+    ) -> list[str]:
+        """Release active *leases* — by MAC list, or all of a holder's.
+
+        Only leases are released here; a permanent hold is freed with
+        `release_to_pool`, so an agent's release can never hand a school
+        desktop to the compute pool. Returns the MACs actually freed (the
+        caller powers them off).
+        """
+        freed: list[str] = []
+        with self._write_lock, self._connect() as connection:
+            targets: list[str]
+            if macs:
+                targets = [_normalise_mac(m) for m in macs]
+            elif holder:
+                rows = connection.execute(
+                    "SELECT mac FROM reservations "
+                    "WHERE holder = ? AND lease_kind = 'lease' "
+                    f"AND {self._ACTIVE_RESERVATION_WHERE}",
+                    (holder,),
+                ).fetchall()
+                targets = [row["mac"] for row in rows]
+            else:
+                return []
+            for mac in targets:
+                cursor = connection.execute(
+                    "UPDATE reservations SET released_at = datetime('now') "
+                    "WHERE mac = ? AND lease_kind = 'lease' "
+                    f"AND {self._ACTIVE_RESERVATION_WHERE}",
+                    (mac,),
+                )
+                if cursor.rowcount > 0:
+                    freed.append(mac)
+        return freed
+
+    def pin(
+        self,
+        mac: str,
+        *,
+        holder: str,
+        profile: Optional[str] = None,
+        purpose: Optional[str] = None,
+    ) -> Optional["Reservation"]:
+        """Give a machine a permanent hold, taking it out of the pool.
+
+        Releases whatever hold it currently has (lease or permanent) and
+        writes a fresh permanent reservation. If ``profile`` is given the
+        machine is switched to it. Returns the new reservation, or None if
+        the MAC is unknown.
+        """
+        cleaned_holder = (holder or "").strip()
+        if not cleaned_holder:
+            raise ValueError("holder must not be empty")
+        normalised_mac = _normalise_mac(mac)
+        with self._write_lock, self._connect() as connection:
+            exists = connection.execute(
+                "SELECT 1 FROM machines WHERE mac = ?", (normalised_mac,)
+            ).fetchone()
+            if exists is None:
+                return None
+            self._release_unreleased(connection, normalised_mac)
+            connection.execute(
+                "INSERT INTO reservations "
+                "(mac, holder, purpose, lease_kind, profile) "
+                "VALUES (?, ?, ?, 'permanent', ?)",
+                (normalised_mac, cleaned_holder, purpose, profile),
+            )
+            if profile and profile.strip():
+                connection.execute(
+                    "UPDATE machines SET profile_name = ? WHERE mac = ?",
+                    (profile.strip(), normalised_mac),
+                )
+        return self.active_reservation(normalised_mac)
+
+    def release_to_pool(self, mac: str) -> bool:
+        """Release a *permanent* hold, making the machine claimable.
+
+        The admin action that opts a machine into the compute pool.
+        Returns False if the machine has no permanent hold (a leased or
+        already-free machine is a no-op)."""
+        normalised_mac = _normalise_mac(mac)
+        with self._write_lock, self._connect() as connection:
+            cursor = connection.execute(
+                "UPDATE reservations SET released_at = datetime('now') "
+                "WHERE mac = ? AND lease_kind = 'permanent' "
+                f"AND {self._ACTIVE_RESERVATION_WHERE}",
+                (normalised_mac,),
+            )
+            return cursor.rowcount > 0
+
+    def reap_expired(self) -> list[str]:
+        """Release every lease whose expiry has passed; return their MACs.
+
+        The reaper calls this, then powers off the returned machines. A
+        crashed agent's lease is cleaned up here rather than leaking a
+        machine forever."""
+        freed: list[str] = []
+        with self._write_lock, self._connect() as connection:
+            rows = connection.execute(
+                "SELECT mac FROM reservations "
+                "WHERE released_at IS NULL AND lease_kind = 'lease' "
+                "AND expires_at IS NOT NULL "
+                "AND expires_at <= datetime('now')"
+            ).fetchall()
+            for row in rows:
+                connection.execute(
+                    "UPDATE reservations SET released_at = datetime('now') "
+                    "WHERE mac = ? AND released_at IS NULL",
+                    (row["mac"],),
+                )
+                freed.append(row["mac"])
+        return freed
 
     def set_pending_reboot(self, mac: str, pending: bool) -> None:
         """Toggle the soft-reboot signal on the machine row.
@@ -893,6 +1251,9 @@ class MachineRegistry:
                 )
             except sqlite3.OperationalError:
                 pass
+            connection.execute(
+                "DELETE FROM reservations WHERE mac = ?", (normalised_mac,)
+            )
             cursor = connection.execute(
                 "DELETE FROM machines WHERE mac = ?", (normalised_mac,)
             )
@@ -1003,6 +1364,29 @@ def _optional_column(row: sqlite3.Row, name: str):
     it on open, so this only matters for rows read from a connection
     opened before the migration ran."""
     return row[name] if name in row.keys() else None
+
+
+def _row_to_reservation(row: sqlite3.Row) -> Reservation:
+    return Reservation(
+        id=row["id"],
+        mac=row["mac"],
+        holder=row["holder"],
+        lease_kind=row["lease_kind"],
+        acquired_at=row["acquired_at"],
+        purpose=row["purpose"],
+        profile=row["profile"],
+        expires_at=row["expires_at"],
+        released_at=row["released_at"],
+    )
+
+
+def availability_of(reservation: Optional[Reservation]) -> str:
+    """Map a machine's active reservation (or its absence) to availability."""
+    if reservation is None:
+        return AVAILABILITY_AVAILABLE
+    if reservation.lease_kind == "permanent":
+        return AVAILABILITY_PERMANENT
+    return AVAILABILITY_RESERVED
 
 
 def _row_to_machine(row: sqlite3.Row) -> Machine:
