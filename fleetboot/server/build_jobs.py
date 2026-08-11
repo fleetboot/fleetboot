@@ -35,6 +35,11 @@ class JobState(str, Enum):
     SUCCEEDED = "succeeded"
     FAILED = "failed"
     REJECTED = "rejected"
+    # A downstream build in a cascade that was not attempted because the
+    # cascade's root build failed — the descendants share the root's
+    # profile chain, so they would fail identically. Distinct from FAILED
+    # (we never ran make) and from REJECTED (that's a concurrent submission).
+    SKIPPED = "skipped"
 
 
 @dataclass
@@ -57,6 +62,12 @@ class BuildJob:
     # Set by the manager once the on_success sweep runs — count of
     # machines that had the soft-reboot signal armed. Purely for UI.
     auto_reboot_armed: Optional[int] = None
+    # When this job is part of an inheritance cascade (a build of a
+    # profile that other profiles inherit from), this is the profile that
+    # triggered it — the same value on every job in the cascade, root
+    # included. None for a plain single-profile build. Lets the UI group
+    # "these six builds came from rebuilding intel-graphics".
+    cascade_root: Optional[str] = None
     # Bounded in-memory ring of recent lines, for the dashboard's live tail.
     # The full log lives at ``log_path``.
     recent_lines: deque[str] = field(
@@ -121,6 +132,28 @@ class BuildJobManager:
         # complete we still have it intact until manager restart.
         return list(job.recent_lines)[-n:]
 
+    def _new_job(
+        self,
+        *,
+        profile: str,
+        architecture: str,
+        auto_reboot: bool,
+        cascade_root: Optional[str] = None,
+    ) -> BuildJob:
+        job_id = _make_id()
+        job = BuildJob(
+            job_id=job_id,
+            profile=profile,
+            architecture=architecture,
+            state=JobState.QUEUED,
+            log_path=str(self._log_dir / f"{job_id}.log"),
+            auto_reboot=auto_reboot,
+            cascade_root=cascade_root,
+        )
+        with self._jobs_lock:
+            self._jobs[job_id] = job
+        return job
+
     def start(
         self,
         *,
@@ -128,7 +161,7 @@ class BuildJobManager:
         architecture: str = "amd64",
         auto_reboot: bool = False,
     ) -> BuildJob:
-        """Spawn a build. Raises if one is already running.
+        """Spawn a single build. Raises if one is already running.
 
         `auto_reboot` — if true, on successful build the manager's
         on_success callback fires, which the app wires up to arm the
@@ -138,30 +171,100 @@ class BuildJobManager:
             raise BuildAlreadyRunningError(
                 "another build is already running"
             )
-        job_id = _make_id()
-        log_path = self._log_dir / f"{job_id}.log"
-        job = BuildJob(
-            job_id=job_id,
-            profile=profile,
-            architecture=architecture,
-            state=JobState.RUNNING,
-            started_at=time.time(),
-            log_path=str(log_path),
+        job = self._new_job(
+            profile=profile, architecture=architecture,
             auto_reboot=auto_reboot,
         )
-        with self._jobs_lock:
-            self._jobs[job_id] = job
         thread = threading.Thread(
-            target=self._run, args=(job,), daemon=True,
-            name=f"build-{job_id}",
+            target=self._run_single, args=(job,), daemon=True,
+            name=f"build-{job.job_id}",
         )
         thread.start()
         return job
 
+    def start_with_downstream(
+        self,
+        *,
+        profile: str,
+        architecture: str = "amd64",
+        auto_reboot: bool = False,
+    ) -> list[BuildJob]:
+        """Rebuild `profile` and every profile that inherits from it.
+
+        Returns the ordered list of jobs (the root first, then each
+        descendant). They run sequentially under a single hold of the
+        build lock — debos is heavy, and holding the lock for the whole
+        cascade means an external submission still gets a clean "already
+        running" rather than interleaving. If the root build fails, the
+        descendants are marked SKIPPED rather than run: they embed the
+        root's (now broken) profile chain and would fail identically.
+
+        For a profile with no descendants this is exactly one build, same
+        as `start`.
+        """
+        if not self._running_lock.acquire(blocking=False):
+            raise BuildAlreadyRunningError(
+                "another build is already running"
+            )
+        profiles_root = self._repo_root / "image" / "profiles"
+        cascade = compute_build_cascade(profiles_root, profile)
+        cascade_root = profile if len(cascade) > 1 else None
+        jobs = [
+            self._new_job(
+                profile=name, architecture=architecture,
+                auto_reboot=auto_reboot, cascade_root=cascade_root,
+            )
+            for name in cascade
+        ]
+        thread = threading.Thread(
+            target=self._run_cascade, args=(jobs,), daemon=True,
+            name=f"build-cascade-{jobs[0].job_id}",
+        )
+        thread.start()
+        return jobs
+
     # ---- internals ------------------------------------------------------
 
-    def _run(self, job: BuildJob) -> None:
-        """Execute the build subprocess; release running_lock at the end."""
+    def _run_single(self, job: BuildJob) -> None:
+        """Execute one build, then release the running lock."""
+        try:
+            self._execute(job)
+        finally:
+            self._running_lock.release()
+
+    def _run_cascade(self, jobs: list[BuildJob]) -> None:
+        """Execute a root build then its descendants, under one lock hold.
+
+        The root is jobs[0]. If it fails, the descendants are marked
+        SKIPPED. A descendant that fails does NOT stop its siblings —
+        they're independent images.
+        """
+        try:
+            root = jobs[0]
+            self._execute(root)
+            root_ok = root.state == JobState.SUCCEEDED
+            for job in jobs[1:]:
+                if not root_ok:
+                    job.state = JobState.SKIPPED
+                    job.finished_at = time.time()
+                    job.recent_lines.append(
+                        f"skipped: cascade root build "
+                        f"'{root.profile}' did not succeed"
+                    )
+                    continue
+                self._execute(job)
+        finally:
+            self._running_lock.release()
+
+    def _execute(self, job: BuildJob) -> None:
+        """Run one build's `make image` subprocess and record the result.
+
+        Does NOT touch the running lock — the caller owns that (a single
+        build releases after one call; a cascade releases after the whole
+        sequence). Fires the on_success callback for a SUCCEEDED job.
+        """
+        job.state = JobState.RUNNING
+        job.started_at = time.time()
         try:
             assert job.log_path is not None
             with open(job.log_path, "w", buffering=1) as log_file:
@@ -212,13 +315,14 @@ class BuildJobManager:
             job.exit_code = -1
         finally:
             job.finished_at = time.time()
-            self._running_lock.release()
-        # Fire the success callback OUTSIDE the running_lock so callbacks
-        # can safely start follow-up work (e.g. arm reboots, which may
-        # touch the same registry the dashboard is polling). Callback
-        # exceptions are swallowed into the job log — a fleet-wide
-        # reboot failure shouldn't retroactively "fail" a build that
-        # actually produced a valid artifact.
+        # The running lock is owned by the caller (_run_single releases
+        # after this one build; _run_cascade after the whole sequence),
+        # so we do NOT release it here. The success callback still fires
+        # per build as it completes — it only arms reboots on the
+        # registry, which the lock never guarded. Callback exceptions are
+        # swallowed into the job log — a fleet-wide reboot failure
+        # shouldn't retroactively "fail" a build that produced a valid
+        # artifact.
         if job.state == JobState.SUCCEEDED and self._on_success is not None:
             try:
                 self._on_success(job)
@@ -231,6 +335,80 @@ class BuildJobManager:
 def _make_id() -> str:
     """A short, URL-safe job id; collisions are negligible at our scale."""
     return secrets.token_hex(6)
+
+
+def _read_profile_parents(profiles_root: Path, name: str) -> list[str]:
+    """The profiles a given profile directly inherits from (its `parent`
+    file, one per line, `#` comments and blanks ignored). Empty when the
+    profile declares no parent or the directory is absent."""
+    parent_file = profiles_root / name / "parent"
+    if not parent_file.is_file():
+        return []
+    parents: list[str] = []
+    for line in parent_file.read_text().splitlines():
+        stripped = line.strip()
+        if stripped and not stripped.startswith("#"):
+            parents.append(stripped)
+    return parents
+
+
+def compute_build_cascade(profiles_root: Path, root: str) -> list[str]:
+    """Ordered build list for rebuilding `root` and everything downstream.
+
+    Returns `[root, *descendants]` where descendants are every profile
+    whose inheritance chain includes `root`, ordered so a profile always
+    appears after the parents it inherits from (a topological order). A
+    profile's built image embeds its whole resolved chain, so when a
+    parent changes, its descendants are stale until rebuilt.
+
+    Degrades to `[root]` when there is no profiles directory (e.g. a
+    test repo) or `root` has no descendants.
+    """
+    if not profiles_root.is_dir():
+        return [root]
+    profiles = [d.name for d in profiles_root.iterdir() if d.is_dir()]
+    # Direct-children adjacency (reverse of the parent edges).
+    children: dict[str, list[str]] = {p: [] for p in profiles}
+    for profile in profiles:
+        for parent in _read_profile_parents(profiles_root, profile):
+            children.setdefault(parent, []).append(profile)
+    # Collect the transitive descendant set of `root`.
+    in_set = {root}
+    stack = list(children.get(root, []))
+    while stack:
+        node = stack.pop()
+        if node in in_set:
+            continue
+        in_set.add(node)
+        stack.extend(children.get(node, []))
+    # Topological sort within the set: emit a node once every parent of
+    # it that is also in the set has been emitted. Ties broken
+    # alphabetically for a stable, readable order.
+    remaining_parents = {
+        node: {
+            parent
+            for parent in _read_profile_parents(profiles_root, node)
+            if parent in in_set
+        }
+        for node in in_set
+    }
+    ordered: list[str] = []
+    while remaining_parents:
+        ready = sorted(
+            node for node, parents in remaining_parents.items() if not parents
+        )
+        if not ready:
+            # A cycle (the resolver forbids these) — fall back to a stable
+            # order rather than looping forever.
+            ordered.extend(sorted(remaining_parents))
+            break
+        for node in ready:
+            ordered.append(node)
+            del remaining_parents[node]
+            for parents in remaining_parents.values():
+                parents.discard(node)
+    # `root` has no in-set parents, so it always sorts first.
+    return ordered
 
 
 def make_compat_shutil_which_check() -> bool:

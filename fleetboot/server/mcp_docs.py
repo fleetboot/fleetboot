@@ -262,6 +262,14 @@ Multiple parents are the norm, not an edge case: a real deployment
 profile is usually one line of its own plus a chain like
 `cinnamon-desktop` + `intel-graphics` + `freeipa`.
 
+Because a built image bakes in its whole resolved chain, changing a
+profile makes every profile downstream of it stale. So `start_build`
+on a profile that is inherited from **also rebuilds every downstream
+profile** — the root first, then each descendant, one at a time (debos
+is heavy). The result's `cascade` lists every job; poll each with
+`get_build`. If the root build fails the descendants are `skipped`
+rather than run, since they would fail on the same broken chain.
+
 ## Authoring one from an agent
 
 `save_profile` creates or updates the directory; `write_profile_overlay`

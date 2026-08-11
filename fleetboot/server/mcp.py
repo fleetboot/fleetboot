@@ -734,9 +734,13 @@ def _tool_catalogue() -> list[dict]:
             "description": (
                 "Kick off `make image` for a profile/arch pair. Returns "
                 "the new job_id; poll with get_build to watch state. "
+                "If the profile is inherited from, this also rebuilds "
+                "every downstream profile (their images embed this "
+                "profile's chain, so they'd be stale otherwise); the "
+                "result's `cascade` lists every job, run one at a time. "
                 "Pass `auto_reboot=true` to arm the soft-reboot signal "
                 "on every machine running the same profile+arch when "
-                "the build succeeds — they PXE the new image on their "
+                "each build succeeds — they PXE the new image on their "
                 "next heartbeat."
             ),
             "inputSchema": {
@@ -1231,21 +1235,31 @@ def _build_tool_impls(
         if not pdir.is_dir():
             raise _ToolError(f"profile not found: {profile}")
         try:
-            job = builds.start(
+            jobs = builds.start_with_downstream(
                 profile=profile,
                 architecture=architecture,
                 auto_reboot=auto_reboot,
             )
         except BuildAlreadyRunningError as err:
             raise _ToolError(str(err) or "a build is already running")
-        return _tool_text_result({
-            "job_id": job.job_id,
-            "profile": job.profile,
-            "architecture": job.architecture,
-            "state": job.state.value,
-            "started_at": job.started_at,
-            "auto_reboot": job.auto_reboot,
-        })
+        primary = jobs[0]
+        result = {
+            "job_id": primary.job_id,
+            "profile": primary.profile,
+            "architecture": primary.architecture,
+            "state": primary.state.value,
+            "started_at": primary.started_at,
+            "auto_reboot": primary.auto_reboot,
+        }
+        # When the profile has descendants, building it also rebuilds
+        # them (their images embed its chain). Report the whole cascade
+        # so the caller can poll each job, not just the root.
+        if len(jobs) > 1:
+            result["cascade"] = [
+                {"job_id": j.job_id, "profile": j.profile}
+                for j in jobs
+            ]
+        return _tool_text_result(result)
 
     def _job_dict(j) -> dict:
         return {
@@ -1258,6 +1272,7 @@ def _build_tool_impls(
             "finished_at": j.finished_at,
             "auto_reboot": j.auto_reboot,
             "auto_reboot_armed": j.auto_reboot_armed,
+            "cascade_root": j.cascade_root,
         }
 
     def list_builds(_: dict) -> dict:

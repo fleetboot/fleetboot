@@ -963,7 +963,12 @@ def build_dashboard_router(
                 detail="profile not found",
             )
         try:
-            job = builds.start(
+            # Building a profile also rebuilds everything downstream of
+            # it — a child image embeds this profile's chain, so it goes
+            # stale when the parent changes. For a leaf profile this is a
+            # single build. The root is jobs[0]; we open its page and the
+            # rest of the cascade shows up in the builds list.
+            jobs = builds.start_with_downstream(
                 profile=profile,
                 architecture=architecture,
                 auto_reboot=bool(auto_reboot),
@@ -975,7 +980,7 @@ def build_dashboard_router(
                 status_code=status.HTTP_303_SEE_OTHER,
             )
         return RedirectResponse(
-            url=f"/dashboard/builds/{job.job_id}",
+            url=f"/dashboard/builds/{jobs[0].job_id}",
             status_code=status.HTTP_303_SEE_OTHER,
         )
 
