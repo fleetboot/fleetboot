@@ -337,18 +337,30 @@ def _make_id() -> str:
     return secrets.token_hex(6)
 
 
+# The implicit root every profile inherits from (mirrors the resolver's
+# BASE_PROFILE). Making it every profile's parent here is what turns a
+# build of `base` into a rebuild of the whole fleet.
+BASE_PROFILE = "base"
+
+
 def _read_profile_parents(profiles_root: Path, name: str) -> list[str]:
-    """The profiles a given profile directly inherits from (its `parent`
-    file, one per line, `#` comments and blanks ignored). Empty when the
-    profile declares no parent or the directory is absent."""
-    parent_file = profiles_root / name / "parent"
-    if not parent_file.is_file():
-        return []
+    """The profiles a given profile inherits from, including the implicit
+    `base` root (prepended to every profile except `base` itself, when a
+    `base` profile exists). Declared parents come from its `parent` file,
+    one per line, `#` comments and blanks ignored."""
     parents: list[str] = []
-    for line in parent_file.read_text().splitlines():
-        stripped = line.strip()
-        if stripped and not stripped.startswith("#"):
-            parents.append(stripped)
+    parent_file = profiles_root / name / "parent"
+    if parent_file.is_file():
+        for line in parent_file.read_text().splitlines():
+            stripped = line.strip()
+            if stripped and not stripped.startswith("#"):
+                parents.append(stripped)
+    if (
+        name != BASE_PROFILE
+        and BASE_PROFILE not in parents
+        and (profiles_root / BASE_PROFILE).is_dir()
+    ):
+        parents.insert(0, BASE_PROFILE)
     return parents
 
 

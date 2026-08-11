@@ -40,22 +40,39 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 PROFILES_DIR = REPO_ROOT / "image" / "profiles"
 DEFAULT_OUTPUT_DIR = REPO_ROOT / "image" / "profiles_resolved"
 
+# The implicit root every profile inherits from. Its packages / overlay /
+# setup-chroot merge into every image, and it makes every profile a
+# descendant of `base` for build-cascade purposes. `base` itself has no
+# such parent. Absent (e.g. an older tree) the prepend is simply skipped.
+BASE_PROFILE = "base"
+
 
 class ResolutionError(ValueError):
     """Raised on cycles, missing parents, or other resolver-level errors."""
 
 
 def _read_parents(profile_name: str) -> list[str]:
-    """Return the list of parents declared by `profile_name` (empty if none)."""
-    parent_file = PROFILES_DIR / profile_name / "parent"
-    if not parent_file.is_file():
-        return []
+    """Return the parents of `profile_name`, root-first.
+
+    Declared parents come from its `parent` file; on top of that every
+    profile except `base` implicitly inherits from `base` (prepended, so
+    it resolves as the most ancestral layer). This is why `base` need not
+    — and must not — be listed in any `parent` file.
+    """
     parents: list[str] = []
-    for line in parent_file.read_text().splitlines():
-        stripped = line.strip()
-        if not stripped or stripped.startswith("#"):
-            continue
-        parents.append(stripped)
+    parent_file = PROFILES_DIR / profile_name / "parent"
+    if parent_file.is_file():
+        for line in parent_file.read_text().splitlines():
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#"):
+                continue
+            parents.append(stripped)
+    if (
+        profile_name != BASE_PROFILE
+        and BASE_PROFILE not in parents
+        and (PROFILES_DIR / BASE_PROFILE).is_dir()
+    ):
+        parents.insert(0, BASE_PROFILE)
     return parents
 
 

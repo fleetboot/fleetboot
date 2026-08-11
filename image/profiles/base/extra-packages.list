@@ -1,0 +1,6 @@
+# The `base` profile is the implicit root every other profile inherits
+# from — its packages, overlay, and setup-chroot land in EVERY image.
+# Keep it near-empty: the heavy base (Debian bootstrap, the fleetboot
+# runtime and systemd units) still lives in the recipe image/fleetboot-base.yaml.
+# Add a package here only when you want it on literally every machine in
+# every profile. Doing so, then building `base`, rebuilds the whole fleet.

@@ -179,19 +179,53 @@ def test_compute_build_cascade_orders_parents_before_children(tmp_path: Path):
     """A diamond: base <- {left, right} <- join. Building base must return
     base first, its two children next, and the join (which inherits from
     both) only after both of its parents."""
+    # Root named "top" (not "base") so this exercises plain diamond
+    # ordering without the implicit-base-parent rule folding everything in.
     _with_profiles(tmp_path, {
-        "base": [],
-        "left": ["base"],
-        "right": ["base"],
+        "top": [],
+        "left": ["top"],
+        "right": ["top"],
         "join": ["left", "right"],
         "unrelated": [],
     })
-    order = compute_build_cascade(tmp_path / "image" / "profiles", "base")
-    assert order[0] == "base"
+    order = compute_build_cascade(tmp_path / "image" / "profiles", "top")
+    assert order[0] == "top"
     assert "unrelated" not in order
-    assert set(order) == {"base", "left", "right", "join"}
+    assert set(order) == {"top", "left", "right", "join"}
     assert order.index("left") < order.index("join")
     assert order.index("right") < order.index("join")
+
+
+def test_base_profile_is_implicit_parent_so_building_it_rebuilds_all(tmp_path):
+    """`base` is every profile's implicit parent, so a cascade from base
+    pulls in the whole tree — that's how a shared/base change rebuilds
+    everything."""
+    _with_profiles(tmp_path, {
+        "base": [], "default": [], "intel-graphics": [],
+        "cinnamon-desktop": ["intel-graphics"],
+    })
+    order = compute_build_cascade(tmp_path / "image" / "profiles", "base")
+    assert order[0] == "base"
+    assert set(order) == {
+        "base", "default", "intel-graphics", "cinnamon-desktop",
+    }
+    # Real inheritance order still holds among the descendants.
+    assert order.index("intel-graphics") < order.index("cinnamon-desktop")
+
+
+def test_building_a_leaf_does_not_pull_in_base_or_siblings(tmp_path):
+    """Building a normal profile must NOT cascade to base or unrelated
+    profiles — only building `base` rebuilds the fleet."""
+    _with_profiles(tmp_path, {
+        "base": [], "default": [], "intel-graphics": [],
+        "cinnamon-desktop": ["intel-graphics"],
+    })
+    root = tmp_path / "image" / "profiles"
+    assert compute_build_cascade(root, "default") == ["default"]
+    # intel-graphics still cascades to its own descendant, not to base.
+    assert compute_build_cascade(root, "intel-graphics") == [
+        "intel-graphics", "cinnamon-desktop",
+    ]
 
 
 def test_compute_build_cascade_leaf_is_just_itself(tmp_path: Path):

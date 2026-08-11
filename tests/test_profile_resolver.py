@@ -105,6 +105,27 @@ def test_diamond_dedupes_shared_ancestor(resolver):
     assert chain.count("base") == 1
 
 
+def test_base_is_the_implicit_parent_of_every_profile(resolver):
+    """When a `base` profile exists, every other profile inherits from it
+    without listing it — it is prepended as the most ancestral layer."""
+    module, profiles_dir, _ = resolver
+    _write_profile(profiles_dir, "base")
+    _write_profile(profiles_dir, "solo")                    # no parent file
+    _write_profile(profiles_dir, "child", parents=["solo"])
+    assert module.resolve_chain("solo") == ["base", "solo"]
+    assert module.resolve_chain("child") == ["base", "solo", "child"]
+    # base does not become its own ancestor.
+    assert module.resolve_chain("base") == ["base"]
+
+
+def test_no_base_profile_means_no_implicit_parent(resolver):
+    """Without a `base` profile in the tree, resolution is unchanged —
+    the implicit inheritance is opt-in by the profile existing."""
+    module, profiles_dir, _ = resolver
+    _write_profile(profiles_dir, "solo")
+    assert module.resolve_chain("solo") == ["solo"]
+
+
 def test_missing_parent_raises(resolver):
     module, profiles_dir, _ = resolver
     _write_profile(profiles_dir, "child", parents=["does-not-exist"])
@@ -247,14 +268,15 @@ def test_every_shipped_profile_has_a_resolvable_parent_chain():
             )
 
 
-def test_real_default_profile_resolves_to_just_itself(tmp_path):
-    """`default` is the thin base — no parent, no extra packages."""
+def test_real_default_profile_resolves_to_base_then_itself(tmp_path):
+    """`default` is thin — its only ancestor is the implicit `base` root,
+    which itself ships nothing, so the merged package list stays empty."""
     module = _load_resolver()
     out = module.resolve("default", tmp_path)
     chain = (out / "resolved-from").read_text().strip()
-    assert chain == "default"
+    assert chain == "base -> default"
     packages = (out / "extra-packages.list").read_text().strip()
-    # Comments and blank lines are stripped; nothing real to install.
+    # base and default both ship nothing real.
     assert packages == ""
 
 

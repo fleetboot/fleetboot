@@ -116,6 +116,24 @@ def test_desktop_profile_inherits_from_both_graphics_mixins(name: str):
     assert "amd-graphics" in parents, f"{name} missing amd-graphics"
 
 
+def test_base_profile_exists_and_is_a_thin_root():
+    """The `base` profile is the implicit inheritance root. It must exist
+    with a README, and stay near-empty — the heavy base lives in the
+    recipe, not here (a fat base would bloat every image)."""
+    p = PROFILES_DIR / "base"
+    assert p.is_dir(), "image/profiles/base/ missing"
+    assert (p / "README.md").is_file(), "base has no README"
+    # No parent file — base is the root, it inherits from nothing.
+    assert not (p / "parent").exists()
+    packages = p / "extra-packages.list"
+    if packages.is_file():
+        real = [
+            ln.strip() for ln in packages.read_text().splitlines()
+            if ln.strip() and not ln.startswith("#")
+        ]
+        assert real == [], f"base should ship no packages yet, has {real}"
+
+
 def test_claude_compute_profile_dir_and_readme_exist():
     p = PROFILES_DIR / "claude-compute"
     assert p.is_dir(), "image/profiles/claude-compute/ missing"
