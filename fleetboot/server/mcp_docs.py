@@ -579,15 +579,22 @@ you do each half.
 
 ## Don't build a profile per job
 
-You almost never need a bespoke image for a task. The shipped
-`claude-compute` profile is a **generic worker** — a compute toolchain
-(build tools, Python, git, podman) plus SSH — and anything else the job
-needs you install *at run time*, straight onto the running machine:
-`apt-get install`, `pip install`, `git clone`, download a tarball. It
-lands in the tmpfs overlay and vanishes on power-off, so the next boot
-is clean again. Want an arm64 kernel compiled? Power on an arm64
-`claude-compute` box, install the toolchain and clone the tree over SSH,
+You almost never need a bespoke image for a task, and you never need to
+provision an SSH key. The shipped `claude-compute` profile is a
+**generic worker** — a compute toolchain (build tools, Python, git,
+podman) plus a ready login: `ssh fleetboot@<worker>`, password
+**`fleetboot`**, with passwordless sudo. Anything else the job needs you
+install *at run time*, straight onto the running machine: `sudo apt-get
+install`, `pip install`, `git clone`, download a tarball. It lands in the
+tmpfs overlay and vanishes on power-off, so the next boot is clean again.
+
+Want an arm64 kernel compiled? Power on an arm64 `claude-compute` box,
+`ssh fleetboot@<worker>`, install the toolchain and clone the tree,
 `make arm64_defconfig && make`, copy the result off, power down.
+
+(The login is deliberately open because the worker is transient and on a
+trusted admin network — see the profile's README. It is a worker-only
+convenience, never for the permanent fleet.)
 
 Build a **dedicated** profile only when you will run the *same* job
 often enough that baking its tools into the image pays for itself — a CI
@@ -817,7 +824,9 @@ The reverse — take a machine out of the pool as a permanent member — is
 `reserve_machines` leases free pool machines, pins them to the worker
 profile, powers them on, and returns them — `short_by` says how many the
 pool couldn't supply. Poll `list_machines` for them reaching
-`compute_ready`, do the work over SSH, then:
+`compute_ready`, then log in with **no key to provision** —
+`ssh fleetboot@<worker>`, password `fleetboot`, passwordless sudo — do
+the work, and:
 
 ```json
 {"name": "release_machines", "arguments": {"holder": "agent:me"}}

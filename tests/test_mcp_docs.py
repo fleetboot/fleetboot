@@ -194,6 +194,22 @@ def test_docs_say_use_generic_profile_and_install_at_runtime():
     assert "repeat often" in instr or "repeat" in instr
 
 
+def test_docs_tell_agents_the_worker_login_needs_no_key():
+    """An agent must learn from the docs that a claude-compute worker
+    takes a fixed fleetboot/fleetboot login with sudo — no SSH key to
+    provision — so it doesn't get stuck trying to inject one."""
+    def _flat(topic: str) -> str:
+        # Collapse line wrapping so substring checks don't trip on newlines.
+        return " ".join(mcp_docs.get_topic(topic).body.lower().split())
+
+    on_demand = _flat("on-demand-compute")
+    assert "ssh fleetboot@" in on_demand
+    assert "provision an ssh key" in on_demand
+    reservations = _flat("reservations")
+    assert "no key to provision" in reservations
+    assert "ssh fleetboot@" in reservations
+
+
 # ---- Anti-drift: the prose vs the real server ---------------------------
 
 
