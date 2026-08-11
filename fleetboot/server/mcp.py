@@ -58,19 +58,22 @@ optional parent chain).
 
 It serves two jobs from the same registry:
 
-  Fleet control — keep a set of known machines running a known image:
-  enrol them, roll out new images, watch them boot, recover the ones
-  that wedge.
+  Fleet control — keep a set of permanently-running machines on a known
+  image: enrol them, roll out new images, watch them boot, recover the
+  ones that wedge. This is the always-on deployment, e.g. a classroom of
+  locked-down desktops (the `school` use case).
 
-  On-demand compute — treat that same hardware as a pool you switch
-  on when there's work and off when there isn't. `power_fleet` takes
-  a profile and a count, `list_machines` tells you which ones came up
+  On-demand compute — treat that same hardware as generic compute you
+  can rent by the job. If you need to compile a kernel, cross-compile
+  for another architecture, run a batch job, or stand up a throwaway
+  build environment, power on a temporary machine, do the work over SSH,
+  and power it back down — the `claude-compute` profile is a ready-made
+  worker for exactly this (toolchain + SSH). `power_fleet` takes a
+  profile and a count, `list_machines` tells you which ones came up
   (`online`, `state`), and powering off afterwards costs nothing to
   undo: the image is immutable, so a machine that comes back is
-  identical to the one you switched off. The `claude-compute` profile
-  is a ready-made worker for exactly this — SSH in, run the job, power
-  it down. Call `describe_fleetboot(topic="on-demand-compute")` for the
-  full pattern.
+  identical to the one you switched off. Call
+  `describe_fleetboot(topic="on-demand-compute")` for the full pattern.
 
   If you are an agent using this fleet as compute, you own the power
   bill: switch machines ON only when you have work for them, and switch

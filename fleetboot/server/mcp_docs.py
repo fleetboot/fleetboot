@@ -53,17 +53,24 @@ be tampered with.
 
 ## Two jobs, one registry
 
-**Fleet control** — keep a set of known machines running a known
-image. Enrol hardware, roll out a new image to everything on a
-profile, watch boots unfold, recover what wedges.
+**Fleet control** — keep a set of **permanently-running** machines on a
+known image. Enrol hardware, roll out a new image to everything on a
+profile, watch boots unfold, recover what wedges. This is the always-on
+deployment: a lab or classroom of locked-down desktops (the `school`
+use case — central FreeIPA identity, filtered internet, immutable
+image) that simply have to stay up and correct.
 
-**On-demand compute** — treat that same hardware as a pool you switch
-on when there's work and off when there isn't. `power_fleet` takes a
-profile and a count; the machines PXE the image that profile builds
-and report in when they're ready. Because the image is immutable,
-powering a machine off costs nothing to undo — what comes back is
-identical to what you switched off, so there is no state to drain, snapshot
-or restore. See the `on-demand-compute` topic.
+**On-demand compute** — treat that same hardware as **generic compute
+an agent can rent by the job**. Need to compile a kernel, cross-compile
+for another architecture, run a batch job, or stand up a throwaway
+build environment? Power on a **temporary** machine on a worker profile
+(the shipped `claude-compute` profile is exactly this — toolchain plus
+SSH), do the work over SSH, and power it down when you're done.
+`power_fleet` takes a profile and a count; the machines PXE the image
+that profile builds and report in when they're ready. Because the image
+is immutable, powering one off costs nothing to undo — what comes back
+is identical, so there is no state to drain, snapshot or restore. See
+the `on-demand-compute` topic.
 
 The second is not a different product bolted on; it is what a netboot
 fleet with power control already is.
@@ -527,10 +534,22 @@ _ON_DEMAND_COMPUTE = """\
 # Running the fleet as on-demand compute
 
 The same registry that keeps a lab of desktops on the right image will
-run that hardware as a burst compute pool. Nothing extra is installed:
-a machine's whole identity is the profile it PXEs, so "give me eight
-render nodes" is *power on eight machines enrolled on the render-node
-profile*.
+hand that hardware to an agent as **generic compute, rented by the
+job**. Need to compile an upstream kernel, cross-compile for another
+architecture, run a batch job, or stand up a throwaway build
+environment? Power on a machine enrolled on a worker profile — the
+shipped `claude-compute` profile is exactly this, a compute toolchain
+plus SSH — do the work over SSH, and power it down when you are done.
+
+This is the flip side of the permanent `school`-style deployment: same
+control plane, same immutable images, but the machines are transient.
+Nothing extra is installed for a given job: a machine's whole identity
+is the profile it PXEs, so "give me eight build workers" is *power on
+eight machines on the worker profile*, and "give me an arm64 box to
+compile a kernel on" is *power on an arm64 machine on that profile and
+SSH in*. Whatever the job needs beyond the image's toolchain, the agent
+installs into the tmpfs overlay at run time; it all vanishes on
+power-off.
 
 Why an immutable netboot fleet suits this:
 

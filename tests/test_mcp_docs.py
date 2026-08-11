@@ -126,6 +126,44 @@ def test_server_instructions_tell_agents_to_power_down_when_idle():
     )
 
 
+# ---- Framing: generic compute + permanent vs temporary -----------------
+
+
+def test_docs_frame_fleetboot_as_generic_agent_compute():
+    """An agent must be able to learn from the docs that fleetboot gives
+    it a temporary machine to run arbitrary compute on — compile a
+    kernel, cross-compile, run a job — not merely a fixed 'render pool'."""
+    prose = "\n".join(t.body for t in mcp_docs.TOPICS).lower()
+    assert "generic compute" in prose
+    assert "compile a kernel" in prose
+    assert "cross-compile" in prose
+    # And that the work happens over SSH on a worker you power down after.
+    on_demand = mcp_docs.get_topic("on-demand-compute").body.lower()
+    assert "ssh" in on_demand
+    assert "claude-compute" in on_demand
+
+
+def test_docs_cover_both_permanent_and_temporary_deployments():
+    """Both shapes must be visible: permanently-running fleets (the
+    school use case) and temporary, rent-by-the-job compute."""
+    overview = mcp_docs.get_topic("overview").body.lower()
+    assert "school" in overview
+    assert "permanently-running" in overview
+    assert "temporary" in overview
+
+
+def test_server_instructions_frame_both_use_cases():
+    """The always-on instructions must present both jobs: a permanent
+    school-style deployment and generic on-demand compute."""
+    from fleetboot.server.mcp import SERVER_INSTRUCTIONS
+
+    text = SERVER_INSTRUCTIONS.lower()
+    assert "school" in text
+    assert "generic compute" in text
+    assert "compile a kernel" in text
+    assert "cross-compile" in text
+
+
 # ---- Anti-drift: the prose vs the real server ---------------------------
 
 
