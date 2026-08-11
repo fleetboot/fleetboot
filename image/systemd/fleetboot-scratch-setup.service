@@ -13,11 +13,14 @@ ConditionKernelCommandLine=fleetboot.scratch
 [Service]
 Type=oneshot
 RemainAfterExit=yes
+# The script reports its own outcome to fleetboot — `scratch_mounted`
+# only after a real mount, `scratch_skipped` on every path that
+# knowingly mounts nothing (mode off, no usable disk, a foreign
+# filesystem it won't wipe). We deliberately do NOT report from an
+# ExecStartPost here: that fires on any successful exit, so a machine
+# set to `off` would have claimed `scratch_mounted` for a mount that
+# never happened.
 ExecStart=/usr/local/lib/fleetboot/fleetboot-scratch-setup.sh
-# Report success to fleetboot. Leading `-` so the reporter call
-# failing (e.g. transient network) doesn't mark the unit failed —
-# the next heartbeat re-sends the latest state anyway.
-ExecStartPost=-/usr/bin/python3 -m fleetboot.reporter.report scratch_mounted
 
 [Install]
 WantedBy=multi-user.target

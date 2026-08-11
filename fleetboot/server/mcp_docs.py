@@ -463,9 +463,16 @@ genuinely the furthest a machine got.
 | 3 | `initrd_loaded` | GRUB | Initrd fetched. |
 | 4 | `booting_kernel` | GRUB | Control handed to the kernel. Anything after this is the OS's problem, not the boot chain's. |
 | 5 | `network_up` | in-image reporter | The image is running and has a network. |
-| 6 | `scratch_mounted` | in-image reporter | Local scratch space set up (if `scratch_mode` asks for it). |
+| 6 | `scratch_mounted` | in-image reporter | Local scratch disk formatted/mounted at `/var/scratch`. |
 | 7 | `nfs_mounted` | in-image reporter | Network home/shared storage mounted — only in images that use `fleetid`. |
 | 8 | `login_console` | in-image reporter | The greeter is up and a human could log in. This is "fully booted". |
+
+The scratch step reports one of two things, so its silence is never
+ambiguous: `scratch_mounted` (ranked, above) when it actually formatted
+and mounted a disk, or `scratch_skipped` — an unranked event — when it
+knowingly mounted nothing (`scratch_mode=off`, no usable local disk, or
+a foreign filesystem it refused to wipe). A machine that reports neither
+never reached scratch setup.
 
 There is deliberately **no** `user_logged_in` state: it used to fire
 from a PAM hook, but the display manager's own session tripped it too,

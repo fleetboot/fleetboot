@@ -1,5 +1,6 @@
 """Tests for the FastAPI /status endpoint, exercised via the TestClient."""
 
+import pytest
 from fastapi.testclient import TestClient
 
 from fleetboot.boot_states import BootState
@@ -271,6 +272,36 @@ def test_custom_state_string_is_accepted_and_recorded():
     assert refreshed is not None
     # Ranked latest_state kept at network_up — the custom state is
     # not part of the ordering.
+    assert refreshed.latest_state == BootState.NETWORK_UP
+
+
+def test_scratch_skipped_is_an_unranked_event_not_a_boot_state():
+    """`scratch_skipped` (reported when the machine knowingly mounts no
+    scratch) is deliberately an event, not a ranked lifecycle state: it
+    is an alternative to `scratch_mounted`, not progress past it. So it
+    must be accepted and logged but must not become latest_state."""
+    from fleetboot.boot_states import BootState
+
+    # It stays out of the ranked enum on purpose.
+    with pytest.raises(ValueError):
+        BootState("scratch_skipped")
+
+    client, store = _client_and_store()
+    session = store.mint("aa:bb:cc:dd:ee:ff")
+    client.post(
+        "/status",
+        json={"state": "network_up"},
+        headers={"Authorization": f"Bearer {session.token}"},
+    )
+    response = client.post(
+        "/status",
+        json={"state": "scratch_skipped"},
+        headers={"Authorization": f"Bearer {session.token}"},
+    )
+    assert response.status_code == 200
+    assert response.json()["state"] == "scratch_skipped"
+    refreshed = store.lookup(session.token)
+    assert refreshed is not None
     assert refreshed.latest_state == BootState.NETWORK_UP
 
 

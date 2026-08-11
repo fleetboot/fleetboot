@@ -88,15 +88,38 @@ def test_scratch_service_is_oneshot_with_cmdline_condition():
     assert "ConditionKernelCommandLine=fleetboot.scratch" in text
 
 
-def test_scratch_service_reports_scratch_mounted_on_success():
-    """ExecStartPost calls the reporter so the dashboard sees the
-    scratch_mounted state — visibility into 'did the mount actually
-    happen'."""
-    text = (SYSTEMD_DIR / "fleetboot-scratch-setup.service").read_text()
-    assert "fleetboot.reporter.report scratch_mounted" in text
-    # Leading `-` means a failed reporter call doesn't mark the unit
-    # failed — the next heartbeat will re-send the state.
-    assert "ExecStartPost=-/" in text
+def test_scratch_script_reports_mounted_only_after_a_real_mount():
+    """The `scratch_mounted` state must be reported from the mount path
+    inside the script, not from a blanket ExecStartPost that fires on any
+    clean exit — a machine set to `off` would otherwise claim a mount
+    that never happened."""
+    script = (RUNTIME_DIR / "fleetboot-scratch-setup.sh").read_text()
+    # Reported from within the successful-mount branch.
+    mount_idx = script.find("mount -t ext4")
+    assert mount_idx > 0, "no mount command found"
+    assert "report_state scratch_mounted" in script[mount_idx:]
+    # The service must no longer report the state itself: no reporter
+    # invocation, and no ExecStartPost directive (the word may still
+    # appear in a comment explaining why it was removed).
+    service = (SYSTEMD_DIR / "fleetboot-scratch-setup.service").read_text()
+    assert "reporter.report" not in service
+    assert "\nExecStartPost=" not in service
+
+
+def test_scratch_script_reports_skipped_when_it_mounts_nothing():
+    """The no-op paths (mode off, unknown mode, no usable disk, a foreign
+    filesystem it won't wipe) must emit a distinct `scratch_skipped`
+    event, so the timeline shows the machine reached scratch setup and
+    knowingly mounted nothing — not silence, and never a false
+    `scratch_mounted`."""
+    script = (RUNTIME_DIR / "fleetboot-scratch-setup.sh").read_text()
+    assert "report_state scratch_skipped" in script
+    # The `off` branch specifically reports skipped, not mounted.
+    off_idx = script.find("off)")
+    assert off_idx > 0
+    off_section = script[off_idx:script.find(";;", off_idx)]
+    assert "report_state scratch_skipped" in off_section
+    assert "scratch_mounted" not in off_section
 
 
 def test_scratch_service_waits_for_network():

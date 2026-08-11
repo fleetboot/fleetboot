@@ -26,6 +26,22 @@ LOG_TAG="fleetboot-scratch"
 log() { echo "$LOG_TAG: $*" >&2; }
 warn() { log "WARN: $*"; }
 
+# Report a boot state to fleetboot. This script — not the systemd unit —
+# owns the reporting, because only the script knows whether it actually
+# mounted anything: it reports `scratch_mounted` after a real mount and
+# `scratch_skipped` on every path that knowingly mounts nothing (mode
+# off, no usable disk, a foreign filesystem it won't wipe). That
+# distinction is the whole point — a machine set to `off` used to report
+# `scratch_mounted` and claim a mount that never happened.
+#
+# Best-effort: a failed report (e.g. transient network) must not change
+# the scratch outcome, so we log and carry on. The periodic heartbeat
+# re-sends the latest state anyway.
+report_state() {
+    /usr/bin/python3 -m fleetboot.reporter.report "$1" 2>/dev/null \
+        || warn "state report '$1' failed (non-fatal)"
+}
+
 MOUNTPOINT=/var/scratch
 SIGNATURE_LABEL="fleetboot-scratch"
 
@@ -36,12 +52,14 @@ mode=$(awk -v RS=' ' -F= '/^fleetboot\.scratch=/{print $2}' /proc/cmdline | tr -
 case "$mode" in
     off)
         log "scratch mode=off; not configuring any disk"
+        report_state scratch_skipped
         exit 0
         ;;
     volatile|persistent)
         ;;
     *)
         warn "unknown scratch mode '$mode'; treating as off"
+        report_state scratch_skipped
         exit 0
         ;;
 esac
@@ -73,6 +91,7 @@ done
 
 if [ -z "$candidate" ]; then
     log "no candidate disk found; scratch not configured"
+    report_state scratch_skipped
     exit 0
 fi
 
@@ -124,6 +143,7 @@ case "$mode" in
             fi
         else
             warn "persistent: $candidate has $existing_fs/$existing_label; refusing to wipe — switch to volatile to override"
+            report_state scratch_skipped
             exit 0
         fi
         ;;
@@ -135,6 +155,7 @@ chmod 1777 "$MOUNTPOINT"
 if mount -t ext4 -o noatime "$candidate" "$MOUNTPOINT"; then
     chmod 1777 "$MOUNTPOINT"
     log "mounted $candidate at $MOUNTPOINT (mode=$mode)"
+    report_state scratch_mounted
 else
     warn "mount $candidate at $MOUNTPOINT failed"
     exit 1
