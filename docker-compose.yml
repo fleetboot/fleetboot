@@ -38,6 +38,9 @@ services:
     environment:
       FLEETBOOT_ADMIN_SECRET: ${FLEETBOOT_ADMIN_SECRET:?set FLEETBOOT_ADMIN_SECRET in .env}
       FLEETBOOT_MINT_SECRET: ${FLEETBOOT_MINT_SECRET:?set FLEETBOOT_MINT_SECRET in .env}
+      # Optional agent-scoped MCP token (compute pool only). Unset → the
+      # pool token is disabled and only the admin token authenticates.
+      FLEETBOOT_POOL_SECRET: ${FLEETBOOT_POOL_SECRET:-}
       FLEETBOOT_LOG_LEVEL: ${FLEETBOOT_LOG_LEVEL:-info}
       # Deployment-wide root SSH keys served to ssh-debug images at boot via
       # /enrol/<token>/authorized_keys. Point at a file inside the container;
