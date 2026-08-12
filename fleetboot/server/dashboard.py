@@ -220,6 +220,7 @@ def build_dashboard_router(
         states_by_mac = _states_by_mac(sessions)
         latest_versions = _latest_versions_by_artefact(boot_dir)
         last_seen = _format_last_seen(sessions.last_seen_by_mac())
+        reservations = registry.all_active_reservations()
         return {
             "machines": [
                 {
@@ -233,6 +234,12 @@ def build_dashboard_router(
                     ),
                     "last_seen": last_seen.get(m.mac),
                     "pending_reboot": bool(m.pending_reboot),
+                    # Profile / availability / scratch change when an agent
+                    # reserves or an admin repins a machine — push them so
+                    # the columns don't sit stale until a full reload.
+                    "profile_name": m.profile_name,
+                    "availability": availability_of(reservations.get(m.mac)),
+                    "scratch_mode": m.scratch_mode,
                 }
                 for m in machines
             ],

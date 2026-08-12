@@ -40,7 +40,7 @@
         <br><span class="muted" data-role="last-ip" hidden></span>
         {% endif %}
       </td>
-      <td>
+      <td data-role="profile">
         <form method="post" action="/dashboard/machines/{{ m.mac }}/profile"
               style="display:inline"
               title="Change profile — takes effect on this machine's next boot; nothing else about the row changes">
@@ -262,6 +262,36 @@
     }
     return '<span class="muted">' + label + '</span>';
   }
+  // Availability + scratch cells carry an action form, so we re-render the
+  // whole cell. These mirror the server-side Jinja in machines.html; keep
+  // them in step if that markup changes. Confirm() messages are kept
+  // generic here (the MAC isn't interpolated) to avoid nested quoting.
+  function renderAvailability(m) {
+    const mac = escapeHtml(m.mac);
+    if (m.availability === 'permanent') {
+      return '<span class="muted" title="Permanent fleet machine. Never claimable for compute.">permanent</span>'
+        + '<form method="post" action="/dashboard/machines/' + mac + '/release-to-pool" style="display:inline"'
+        + ' onsubmit="return confirm(\'Put this machine into the compute pool?\');">'
+        + '<button type="submit" title="Drop the permanent hold — opt this machine into the compute pool">&rarr; pool</button></form>';
+    }
+    if (m.availability === 'reserved') {
+      return '<span class="state-network_up" title="Leased for compute">reserved</span>'
+        + '<form method="post" action="/dashboard/machines/' + mac + '/release-lease" style="display:inline"'
+        + ' onsubmit="return confirm(\'End the lease and power it off?\');">'
+        + '<button type="submit" class="danger" title="End the lease early and power off">release</button></form>';
+    }
+    return '<span class="version-current" title="No hold — free to be leased for compute">available</span>'
+      + '<form method="post" action="/dashboard/machines/' + mac + '/pin" style="display:inline"'
+      + ' onsubmit="return confirm(\'Pin this machine permanent (out of the pool)?\');">'
+      + '<button type="submit" title="Take this machine out of the pool — pin it permanent">pin</button></form>';
+  }
+  function renderScratch(m) {
+    if (m.scratch_mode === 'volatile')
+      return '<span class="version-stale" title="Local disk is wiped + reformatted every boot">volatile</span>';
+    if (m.scratch_mode === 'persistent')
+      return '<span class="muted" title="Local disk kept across reboots (fleetboot-scratch label)">persistent</span>';
+    return '<span class="muted" title="Local disk left untouched — no scratch mounted">off</span>';
+  }
   function apply(data) {
     for (const m of data.machines) {
       const row = document.querySelector('tr[data-mac="' + m.mac + '"]');
@@ -271,6 +301,9 @@
         boot: row.querySelector('[data-role="boot-version"]'),
         seen: row.querySelector('[data-role="last-seen"]'),
         ip: row.querySelector('[data-role="last-ip"]'),
+        avail: row.querySelector('[data-role="availability"]'),
+        scratch: row.querySelector('[data-role="scratch"]'),
+        profile: row.querySelector('[data-role="profile"]'),
       };
       if (cells.state) cells.state.innerHTML = renderState(m);
       if (cells.boot) cells.boot.innerHTML = renderBootVersion(m);
@@ -278,6 +311,16 @@
       if (cells.ip) {
         if (m.last_ip) { cells.ip.hidden = false; cells.ip.textContent = m.last_ip; }
         else { cells.ip.hidden = true; cells.ip.textContent = ""; }
+      }
+      if (cells.avail && m.availability) cells.avail.innerHTML = renderAvailability(m);
+      if (cells.scratch && m.scratch_mode) cells.scratch.innerHTML = renderScratch(m);
+      // Profile is a <select>; just move the selection. Don't clobber it
+      // while the operator is actually using the dropdown.
+      if (cells.profile && m.profile_name) {
+        const sel = cells.profile.querySelector('select[name="profile_name"]');
+        if (sel && document.activeElement !== sel && sel.value !== m.profile_name) {
+          sel.value = m.profile_name;
+        }
       }
     }
   }

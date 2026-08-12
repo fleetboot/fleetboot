@@ -933,6 +933,26 @@ def test_release_to_pool_and_pin_routes_flip_availability(dashboard_root: Path):
     assert ">permanent</span>" in _availability_cell(page, "aa:bb:cc:dd:ee:01")
 
 
+def test_machines_snapshot_carries_profile_and_availability(dashboard_root: Path):
+    """The live-view snapshot must include profile_name + availability so
+    the dashboard reflects a reservation (profile flips to the worker,
+    availability to 'reserved') without a full page reload."""
+    client = _client(dashboard_root)
+    _enrol_via_form(client, "aa:bb:cc:dd:ee:01")
+    reg = MachineRegistry(dashboard_root / "machines.sqlite")
+    reg.release_to_pool("aa:bb:cc:dd:ee:01")
+    reg.reserve(profile="default", count=1, holder="agent:x", ttl_seconds=3600)
+    import json as _json
+    snap = _json.loads(
+        client.get("/dashboard/api/machines-snapshot",
+                   headers=_auth_header()).text
+    )
+    row = next(m for m in snap["machines"] if m["mac"] == "aa:bb:cc:dd:ee:01")
+    assert row["profile_name"] == "default"
+    assert row["availability"] == "reserved"
+    assert "scratch_mode" in row
+
+
 def test_release_lease_route_frees_a_reserved_machine(dashboard_root: Path):
     client = _client(dashboard_root)
     _enrol_via_form(client, "aa:bb:cc:dd:ee:01")
