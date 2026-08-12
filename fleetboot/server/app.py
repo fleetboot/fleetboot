@@ -290,6 +290,7 @@ def create_app(
     boot_dir: Path | None = None,
     registry: MachineRegistry | None = None,
     admin_secret: str | None = None,
+    pool_secret: str | None = None,
     dashboard_repo_root: Path | None = None,
     keytabs_dir: Path | None = None,
     authorized_keys_path: Path | None = None,
@@ -326,6 +327,7 @@ def create_app(
     app.state.boot_dir = boot_dir
     app.state.registry = registry
     app.state.admin_secret = admin_secret
+    app.state.pool_secret = pool_secret
 
     # Where profiles live, when the caller told us. Enrolling a machine
     # onto a profile that doesn't exist fails much later and much worse
@@ -947,6 +949,7 @@ def create_app(
                 profiles_root=profiles_root,
                 builds=builds,
                 admin_secret=admin_secret,
+                pool_secret=pool_secret,
                 sessions=store,
             )
         )

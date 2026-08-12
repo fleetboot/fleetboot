@@ -869,6 +869,19 @@ Pass a stable `holder` (your agent name) so `release_machines` /
 `renew_reservation` can find your machines. This is the same
 on-for-work, off-when-done discipline as the `on-demand-compute` topic,
 now with an ownership record so two agents never claim the same machine.
+
+## Your token
+
+If you were handed a **pool-client token**, your access is scoped to
+exactly this loop: read state (`list_machines`, `get_machine`,
+`list_profiles`, `recent_events`, `describe_fleetboot`) and rent compute
+(`reserve_machines`, `release_machines`, `renew_reservation`). The
+admin-only verbs — `pin_machine`, `release_to_pool`, enrolling, deleting,
+repinning, powering arbitrary machines, editing profiles, building — are
+not yours, so you can neither reach the permanent fleet nor reconfigure
+the deployment. That is deliberate: an agent rents from the pool an admin
+has stocked; it never grabs a school desktop. Calling an admin tool with
+a pool token returns an error naming the tools you may use.
 """
 
 

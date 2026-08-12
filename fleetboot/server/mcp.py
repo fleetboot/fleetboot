@@ -8,9 +8,13 @@ Transport: Streamable HTTP in its simplest form — POST /mcp with a
 JSON-RPC 2.0 body, response is a single JSON body (no SSE stream).
 Notifications get a 202 No Body. Batch requests are supported.
 
-Auth: `Authorization: Bearer <admin_secret>` — the same secret that
-gates the dashboard. MCP over HTTP is a Bearer-token protocol in
-practice; matching it here keeps agent config simple.
+Auth: `Authorization: Bearer <token>`. Two roles:
+  - the admin secret (also gates the dashboard) grants the full tool set;
+  - an optional pool secret grants only `POOL_CLIENT_TOOLS` — reserve and
+    return compute plus read-only state. Hand an agent the pool token and
+    it cannot touch the fleet, power arbitrary machines, or build.
+MCP over HTTP is a Bearer-token protocol in practice; matching it here
+keeps agent config simple.
 """
 
 from __future__ import annotations
@@ -194,19 +198,48 @@ def _tool_markdown_result(text: str) -> dict:
     }
 
 
+# Tools a POOL-CLIENT token (an agent) may use: read-only visibility plus
+# the compute-pool lifecycle. Everything else — enrolling, deleting,
+# repinning, powering arbitrary machines, editing profiles, building
+# images, opting machines into the pool — is admin-only, so an agent can
+# rent and return compute but can never touch the permanent (school)
+# fleet or reconfigure the deployment. Enforced at auth, not by
+# convention. `release_to_pool`/`pin_machine` being admin-only is what
+# keeps a school desktop out of an agent's reach.
+POOL_CLIENT_TOOLS = frozenset({
+    "describe_fleetboot",
+    "list_machines",
+    "get_machine",
+    "list_profiles",
+    "get_profile",
+    "recent_events",
+    "reserve_machines",
+    "release_machines",
+    "renew_reservation",
+})
+
+
 def build_mcp_router(
     *,
     registry: MachineRegistry,
     profiles_root: Path,
     builds: BuildJobManager,
     admin_secret: str,
+    pool_secret: Optional[str] = None,
     sessions: Optional[BootSessionStore] = None,
 ) -> APIRouter:
-    """Construct the /mcp router."""
+    """Construct the /mcp router.
+
+    Two token roles authenticate here. The ``admin_secret`` grants the
+    full tool set. The optional ``pool_secret`` grants a pool client
+    (an agent) only ``POOL_CLIENT_TOOLS`` — reserve/return compute and
+    read state. If ``pool_secret`` is unset, only the admin token works.
+    """
 
     router = APIRouter()
 
-    def check_auth(authorization: Optional[str]) -> None:
+    def check_auth(authorization: Optional[str]) -> str:
+        """Return the caller's role: 'admin' or 'pool'. Raises 401."""
         if not authorization or not authorization.lower().startswith(
             "bearer "
         ):
@@ -216,11 +249,14 @@ def build_mcp_router(
                 headers={"WWW-Authenticate": "Bearer"},
             )
         token = authorization[len("Bearer "):].strip()
-        if not hmac.compare_digest(token, admin_secret):
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="unauthorised",
-            )
+        if hmac.compare_digest(token, admin_secret):
+            return "admin"
+        if pool_secret and hmac.compare_digest(token, pool_secret):
+            return "pool"
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="unauthorised",
+        )
 
     tools = _tool_catalogue()
     tool_impls = _build_tool_impls(
@@ -244,7 +280,7 @@ def build_mcp_router(
         request: Request,
         authorization: Optional[str] = Header(default=None),
     ) -> Response:
-        check_auth(authorization)
+        role = check_auth(authorization)
         try:
             raw = await request.body()
             payload = json.loads(raw) if raw else None
@@ -262,14 +298,14 @@ def build_mcp_router(
         if isinstance(payload, list):
             out: list[dict] = []
             for entry in payload:
-                resp = _dispatch(entry, tools, tool_impls)
+                resp = _dispatch(entry, tools, tool_impls, role)
                 if resp is not None:
                     out.append(resp)
             if not out:
                 return Response(status_code=status.HTTP_202_ACCEPTED)
             return _json_response(out)
 
-        resp = _dispatch(payload, tools, tool_impls)
+        resp = _dispatch(payload, tools, tool_impls, role)
         if resp is None:
             return Response(status_code=status.HTTP_202_ACCEPTED)
         return _json_response(resp)
@@ -288,8 +324,14 @@ def _dispatch(
     req: Any,
     tools: list[dict],
     tool_impls: dict[str, Callable[[dict], Any]],
+    role: str = "admin",
 ) -> Optional[dict]:
-    """Handle one JSON-RPC request. Returns None for notifications."""
+    """Handle one JSON-RPC request. Returns None for notifications.
+
+    ``role`` is 'admin' (full tool set) or 'pool' (restricted to
+    ``POOL_CLIENT_TOOLS``): a pool client only sees its tools in
+    tools/list and is refused any others in tools/call.
+    """
     if not isinstance(req, dict):
         return _rpc_error(None, _INVALID_REQUEST, "not a JSON object")
     id_ = req.get("id")
@@ -320,7 +362,11 @@ def _dispatch(
         elif method == "ping":
             result = {}
         elif method == "tools/list":
-            result = {"tools": tools}
+            visible = (
+                tools if role == "admin"
+                else [t for t in tools if t["name"] in POOL_CLIENT_TOOLS]
+            )
+            result = {"tools": visible}
         elif method == "resources/list":
             result = {"resources": mcp_docs.resource_descriptors()}
         elif method == "resources/templates/list":
@@ -358,6 +404,14 @@ def _dispatch(
                 return None if is_notification else _rpc_error(
                     id_, _METHOD_NOT_FOUND,
                     f"unknown tool: {name!r}",
+                )
+            if role != "admin" and name not in POOL_CLIENT_TOOLS:
+                # A pool-client token may only reserve/return compute and
+                # read state — never touch the fleet or the deployment.
+                return None if is_notification else _rpc_error(
+                    id_, _METHOD_NOT_FOUND,
+                    f"tool {name!r} requires an admin token; a pool-client "
+                    "token may only use: " + ", ".join(sorted(POOL_CLIENT_TOOLS)),
                 )
             if not isinstance(arguments, dict):
                 return None if is_notification else _rpc_error(

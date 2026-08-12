@@ -12,6 +12,12 @@ Env vars:
   FLEETBOOT_REPO_ROOT           default /app (drives make image / build UI)
   FLEETBOOT_ADMIN_SECRET        REQUIRED for dashboard access
   FLEETBOOT_MINT_SECRET         REQUIRED for tftpjail /sessions endpoint
+  FLEETBOOT_POOL_SECRET         optional agent-scoped MCP token. Bearer
+                                this and the MCP exposes only the
+                                compute-pool tools (reserve/return + read
+                                state); it cannot touch the fleet, power
+                                arbitrary machines, or build. Unset ->
+                                only the admin token works.
   FLEETBOOT_AUTHORIZED_KEYS     optional path to a keys file to serve
   FLEETBOOT_CLIENT_BASE_URL     optional; baked into grub.cfg. If unset,
                                 clients use whatever URL they resolved via
@@ -72,6 +78,11 @@ def main() -> None:
 
     admin_secret = _require_env("FLEETBOOT_ADMIN_SECRET")
     mint_secret = _require_env("FLEETBOOT_MINT_SECRET")
+    # Optional pool-client token: an agent-scoped secret that may only
+    # reserve/return compute and read state via MCP (never touch the
+    # fleet, power arbitrary machines, or build). Unset -> only the admin
+    # token works.
+    pool_secret = os.environ.get("FLEETBOOT_POOL_SECRET") or None
 
     authorized_keys_env = os.environ.get("FLEETBOOT_AUTHORIZED_KEYS")
     authorized_keys_path = (
@@ -85,6 +96,7 @@ def main() -> None:
         sessions=sessions,
         registry=registry,
         admin_secret=admin_secret,
+        pool_secret=pool_secret,
         mint_secret=mint_secret,
         boot_dir=boot_dir,
         dashboard_repo_root=repo_root,
