@@ -87,6 +87,16 @@ def test_recipe_enables_systemd_networkd_and_resolved():
     assert "/run/systemd/resolve/stub-resolv.conf /etc/resolv.conf" in recipe
 
 
+def test_recipe_installs_and_enables_time_sync():
+    """Every image must keep accurate time: machines boot on whatever
+    their RTC says, and Kerberos/FreeIPA refuses logins once a clock
+    drifts more than 5 minutes. timesyncd is a separate package in
+    trixie, so it has to be installed as well as enabled."""
+    recipe = (REPO_ROOT / "image" / "fleetboot-base.yaml").read_text()
+    assert "\n      - systemd-timesyncd\n" in recipe
+    assert "systemctl enable systemd-timesyncd.service" in recipe
+
+
 def test_recipe_overlays_base_overlay_at_root():
     """The recipe must include an overlay action sourcing base-overlay/
     onto /. Without it the sysctl drop-in never reaches the image."""

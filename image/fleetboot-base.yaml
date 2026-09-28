@@ -94,6 +94,11 @@ actions:
       # Without it, our /etc/resolv.conf symlink is dangling and DNS
       # resolution stops working entirely.
       - systemd-resolved
+      # systemd-timesyncd keeps the clock right. Machines boot with
+      # whatever their RTC says (a worker was seen 2 hours fast), and
+      # Kerberos/FreeIPA refuses logins once a clock drifts >5 minutes.
+      # It uses NTP servers from DHCP via networkd, else the Debian pool.
+      - systemd-timesyncd
       # No desktop, display manager, audio stack, or graphics drivers
       # in the base image. The default profile inherits this thin Debian
       # and adds nothing; example desktop profiles (xfce-desktop,
@@ -215,6 +220,7 @@ actions:
       # libc-level name lookups use the DHCP-supplied DNS server.
       systemctl enable systemd-networkd.service
       systemctl enable systemd-resolved.service
+      systemctl enable systemd-timesyncd.service
       ln -sf /run/systemd/resolve/stub-resolv.conf /etc/resolv.conf
 
       # ---- Dev test account ----------------------------------------
