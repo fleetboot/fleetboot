@@ -1166,6 +1166,33 @@ class PowerResult:
     deleted: bool = False
 
 
+# How long a power command (a machine's own command, or the curl to
+# pdudaemon) may run before it is reported as timed out. Real PDUs are
+# slow: pdudaemon drives an APC's telnet menu before it answers, which
+# alone can take ~8s, so the old fixed 10s tripped on healthy hardware.
+# Override with FLEETBOOT_POWER_TIMEOUT (seconds).
+DEFAULT_POWER_COMMAND_TIMEOUT_SECONDS = 60
+
+
+def power_command_timeout_seconds() -> float:
+    """Seconds a power command may run, from FLEETBOOT_POWER_TIMEOUT.
+
+    Falls back to the default when unset, unparsable, or not positive,
+    so a typo in the environment can never make power control hang
+    forever or fail instantly.
+    """
+    import os
+
+    raw = os.environ.get("FLEETBOOT_POWER_TIMEOUT", "").strip()
+    try:
+        seconds = float(raw)
+    except ValueError:
+        return DEFAULT_POWER_COMMAND_TIMEOUT_SECONDS
+    if seconds <= 0:
+        return DEFAULT_POWER_COMMAND_TIMEOUT_SECONDS
+    return seconds
+
+
 def power_machine(
     registry: MachineRegistry,
     mac: str,
@@ -1233,10 +1260,11 @@ def power_machine(
             )
 
     succeeded = False
+    timeout_seconds = power_command_timeout_seconds()
     if command:
         try:
             result = subprocess.run(
-                command, shell=True, timeout=10,
+                command, shell=True, timeout=timeout_seconds,
                 stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT,
             )
             succeeded = result.returncode == 0
@@ -1245,7 +1273,7 @@ def power_machine(
                 else f"{method} exited {result.returncode}"
             )
         except subprocess.TimeoutExpired:
-            detail = f"{method} timed out after 10s"
+            detail = f"{method} timed out after {timeout_seconds:g}s"
 
     if then_delete:
         registry.remove(mac)

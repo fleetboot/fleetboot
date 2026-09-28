@@ -241,6 +241,82 @@ def test_a_refused_reboot_falls_back_to_the_soft_signal(
     assert registry.lookup(MAC).pending_reboot is True
 
 
+class TimeoutRecordingRun(RecordingRun):
+    """RecordingRun that also remembers the timeout each command got."""
+
+    def __init__(self, returncode: int = 0) -> None:
+        super().__init__(returncode)
+        self.timeouts: list[float] = []
+
+    def __call__(self, command, **kwargs):
+        self.timeouts.append(kwargs.get("timeout"))
+        return super().__call__(command, **kwargs)
+
+
+def test_power_commands_get_a_generous_default_timeout(
+    registry: MachineRegistry, monkeypatch,
+):
+    """pdudaemon answers only after driving the PDU's telnet menu, which
+    takes several seconds on a healthy APC — the default must allow it."""
+    monkeypatch.delenv("FLEETBOOT_POWER_TIMEOUT", raising=False)
+    runner = TimeoutRecordingRun()
+    monkeypatch.setattr(subprocess, "run", runner)
+    registry.set_setting("pdudaemon_host", "prowl:16421")
+    registry.update_hostname(MAC, "node-07")
+
+    power_machine(registry, MAC, "on")
+
+    assert runner.timeouts == [60]
+
+
+def test_power_timeout_can_be_set_from_the_environment(
+    registry: MachineRegistry, monkeypatch,
+):
+    monkeypatch.setenv("FLEETBOOT_POWER_TIMEOUT", "90")
+    runner = TimeoutRecordingRun()
+    monkeypatch.setattr(subprocess, "run", runner)
+    registry.set_setting("pdudaemon_host", "prowl:16421")
+    registry.update_hostname(MAC, "node-07")
+
+    power_machine(registry, MAC, "on")
+
+    assert runner.timeouts == [90]
+
+
+@pytest.mark.parametrize("bad_value", ["", "soon", "0", "-5"])
+def test_a_nonsense_power_timeout_falls_back_to_the_default(
+    registry: MachineRegistry, monkeypatch, bad_value: str,
+):
+    """A typo must not make power control hang forever or fail instantly."""
+    monkeypatch.setenv("FLEETBOOT_POWER_TIMEOUT", bad_value)
+    runner = TimeoutRecordingRun()
+    monkeypatch.setattr(subprocess, "run", runner)
+    registry.set_setting("pdudaemon_host", "prowl:16421")
+    registry.update_hostname(MAC, "node-07")
+
+    power_machine(registry, MAC, "on")
+
+    assert runner.timeouts == [60]
+
+
+def test_a_timed_out_power_command_reports_the_timeout_it_used(
+    registry: MachineRegistry, monkeypatch,
+):
+    monkeypatch.setenv("FLEETBOOT_POWER_TIMEOUT", "45")
+
+    def slow_pdu(command, **kwargs):
+        raise subprocess.TimeoutExpired(command, kwargs["timeout"])
+
+    monkeypatch.setattr(subprocess, "run", slow_pdu)
+    registry.set_setting("pdudaemon_host", "prowl:16421")
+    registry.update_hostname(MAC, "node-07")
+
+    result = power_machine(registry, MAC, "on")
+
+    assert result.ok is False
+    assert result.detail == "pdudaemon timed out after 45s"
+
+
 def test_reboot_machine_still_deletes_when_asked(
     registry: MachineRegistry, no_real_subprocess: RecordingRun,
 ):
