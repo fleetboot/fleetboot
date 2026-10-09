@@ -125,6 +125,16 @@ Typical workflows an agent can drive here:
       delete_after=true only when you also want the registry row gone
       (a soft-reboot cannot deliver to a deleted row).
 
+  Find a machine's IP address
+    - Ask fleetboot, don't scan the network. `list_machines` and
+      `get_machine` give each machine's `last_ip` — the address the
+      server itself saw it report from — and `last_ip_at`. No ping
+      sweep, ARP scan or port scan is needed to find a machine you
+      powered on, and scanning a school network is noisy and can't
+      tell you which host is which MAC anyway.
+    - `last_ip` is null until a machine has booted and stale once it
+      is off, so wait for `online` to be true and read it then.
+
   Reserve machines for compute
     - `list_machines` reports each machine's `availability`: `permanent`
       (a fixed fleet machine — never claim it), `reserved` (leased), or
@@ -495,8 +505,14 @@ def _tool_catalogue() -> list[dict]:
             "name": "list_machines",
             "description": (
                 "List every enrolled machine — MAC, hostname, profile, "
-                "architecture, last observed IP, boot version, power "
+                "architecture, boot version, power "
                 "wiring, and whether a soft-reboot signal is armed. "
+                "`last_ip` is the address the machine last reported "
+                "from, as observed by the server, and `last_ip_at` "
+                "when; it is null until a machine has booted and goes "
+                "stale once it is off, so trust it only while `online` "
+                "is true. Read addresses from here rather than "
+                "scanning the network. "
                 "Also carries the live view: `state` (how far the "
                 "current boot got), `last_seen`, and `online` (it has "
                 "heartbeated in the last 6 minutes). Use `online` and "
@@ -1129,6 +1145,7 @@ def _build_tool_impls(
             "architecture": m.architecture,
             "platform": m.platform,
             "last_ip": m.last_ip,
+            "last_ip_at": m.last_ip_at,
             "boot_version": m.boot_version,
             "pending_reboot": bool(m.pending_reboot),
             "reboot_command": m.reboot_command,

@@ -223,6 +223,43 @@ def test_docs_tell_agents_the_worker_login_needs_no_key():
     assert "ssh fleetboot@" in reservations
 
 
+def test_docs_tell_agents_how_to_find_a_machine_address():
+    """An agent has to reach a machine it powered on. The docs must say
+    the address is `last_ip`, and that it is only a last-known value —
+    empty before a first boot, stale once the machine is off."""
+    def _flat(text: str) -> str:
+        return " ".join(text.lower().split())
+
+    services = _flat(mcp_docs.get_topic("services").body)
+    assert "`last_ip`" in services
+    assert "`last_ip_at`" in services
+    assert "never booted" in services
+    assert "only while `online` is true" in services
+    # The compute walkthrough points at it where the agent needs it.
+    assert "`last_ip`" in _flat(mcp_docs.get_topic("on-demand-compute").body)
+
+
+def test_agents_are_told_to_ask_fleetboot_rather_than_scan_the_network():
+    """An agent that can't find its worker tends to reach for a ping
+    sweep or port scan. Everywhere it might look first — the server
+    instructions, the docs, the tool description — must point it at
+    `last_ip` instead."""
+    from fleetboot.server.mcp import SERVER_INSTRUCTIONS
+
+    def _flat(text: str) -> str:
+        return " ".join(text.lower().split())
+
+    instructions = _flat(SERVER_INSTRUCTIONS)
+    assert "don't scan the network" in instructions
+    assert "`last_ip`" in instructions
+
+    services = _flat(mcp_docs.get_topic("services").body)
+    assert "do not scan the network" in services
+
+    on_demand = _flat(mcp_docs.get_topic("on-demand-compute").body)
+    assert "scanning the network" in on_demand
+
+
 # ---- Anti-drift: the prose vs the real server ---------------------------
 
 

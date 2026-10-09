@@ -193,6 +193,26 @@ registry fields: `state` (how far the current boot got — see
 more than "it spoke to us recently" — from the control plane, a
 powered-off machine and a wedged one look the same.
 
+## Finding a machine's address
+
+**Ask fleetboot; do not scan the network.** A ping sweep, ARP scan or
+port scan is never needed to find a machine: fleetboot already knows
+the address of everything it booted, tied to the right MAC, which a
+scan cannot tell you. Scanning is also slow and noisy on a network
+other people are using.
+
+Every machine record carries `last_ip` and `last_ip_at`: the address
+the machine's most recent `/status` report came from, and when (UTC).
+fleetboot reads it off the connection itself, so it is what the server
+observed, not something the machine claimed.
+
+It is a *last known* address, not a live one. It is `null` for a
+machine that has never booted, and for a machine that is off it is
+still the address from its previous boot — DHCP may hand out a
+different one next time. Trust `last_ip` only while `online` is true;
+after powering a machine on, wait for it to come `online` and read
+`last_ip` again rather than reusing the value you saw before.
+
 ## To machines, over HTTP
 
 These rails are not for you to call — they are the fleet's plumbing —
@@ -583,7 +603,9 @@ You almost never need a bespoke image for a task, and you never need to
 provision an SSH key. The shipped `claude-compute` profile is a
 **generic worker** — a compute toolchain (build tools, Python, git,
 podman) plus a ready login: `ssh fleetboot@<worker>`, password
-**`fleetboot`**, with passwordless sudo. Anything else the job needs you
+**`fleetboot`**, with passwordless sudo. `<worker>` is the machine's
+`last_ip` from `list_machines`, read once it is `online` — never go
+looking for it by scanning the network. Anything else the job needs you
 install *at run time*, straight onto the running machine: `sudo apt-get
 install`, `pip install`, `git clone`, download a tarball. It lands in the
 tmpfs overlay and vanishes on power-off, so the next boot is clean again.
@@ -682,7 +704,9 @@ The reply reports what it could supply — `reserved`, `short_by`, and the
 PDU accepts, not when the machines are ready; a cold boot is a minute or
 two. Poll `list_machines` for your leased machines reaching `online:
 true` and the `compute_ready` state; `recent_events` shows the boots
-unfolding. For a job longer than the lease, `renew_reservation` before
+unfolding. Read each machine's address from `last_ip` at that point —
+the value in the `reserve_machines` reply predates this boot and may be
+stale or `null`. For a job longer than the lease, `renew_reservation` before
 it expires — otherwise the reaper reclaims the machine.
 
 **5. Give the hardware back** with `release_machines`.

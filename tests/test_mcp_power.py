@@ -188,6 +188,28 @@ def test_list_machines_reports_liveness(tmp_path: Path):
     assert machines["aa:bb:cc:dd:ee:02"]["state"] is None
 
 
+def test_list_machines_reports_the_last_observed_address(tmp_path: Path):
+    """`last_ip` is how an agent reaches a machine; `last_ip_at` lets it
+    judge how old that address is. A machine that never booted has
+    neither."""
+    client, reg, _ = _fleet(tmp_path)
+    reg.enroll(mac=MAC, profile_name="render-node",
+               architecture="x86_64", platform="efi")
+    reg.enroll(mac="aa:bb:cc:dd:ee:02", profile_name="render-node",
+               architecture="x86_64", platform="efi")
+    reg.update_last_ip(mac=MAC, ip="192.168.25.184")
+
+    machines = {
+        m["mac"]: m
+        for m in _call_tool(client, "list_machines", {})["payload"]["machines"]
+    }
+
+    assert machines[MAC]["last_ip"] == "192.168.25.184"
+    assert machines[MAC]["last_ip_at"] is not None
+    assert machines["aa:bb:cc:dd:ee:02"]["last_ip"] is None
+    assert machines["aa:bb:cc:dd:ee:02"]["last_ip_at"] is None
+
+
 # ---- On-demand compute: power_fleet -------------------------------------
 
 
