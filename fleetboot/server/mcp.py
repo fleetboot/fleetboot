@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Any, Callable, Optional
 
 from fastapi import APIRouter, Header, HTTPException, Request, Response, status
+from fastapi.concurrency import run_in_threadpool
 
 from fleetboot.server.build_jobs import (
     BuildAlreadyRunningError,
@@ -38,6 +39,7 @@ from fleetboot.server.dashboard import (
     _safe_overlay_path,
     _safe_profile_dir,
     power_machine,
+    power_machines,
     reboot_machine,
 )
 from fleetboot.server import mcp_docs
@@ -293,19 +295,28 @@ def build_mcp_router(
                 _rpc_error(None, _INVALID_REQUEST, "empty body"),
             )
 
+        # Tools block: a power command waits on a PDU for seconds, and
+        # the registry is synchronous SQLite. Run every dispatch on a
+        # worker thread so the event loop keeps serving the dashboard,
+        # heartbeats and other MCP calls in the meantime.
+
         # Batch: array of requests → array of responses (notifications
         # drop out of the response array).
         if isinstance(payload, list):
             out: list[dict] = []
             for entry in payload:
-                resp = _dispatch(entry, tools, tool_impls, role)
+                resp = await run_in_threadpool(
+                    _dispatch, entry, tools, tool_impls, role,
+                )
                 if resp is not None:
                     out.append(resp)
             if not out:
                 return Response(status_code=status.HTTP_202_ACCEPTED)
             return _json_response(out)
 
-        resp = _dispatch(payload, tools, tool_impls, role)
+        resp = await run_in_threadpool(
+            _dispatch, payload, tools, tool_impls, role,
+        )
         if resp is None:
             return Response(status_code=status.HTTP_202_ACCEPTED)
         return _json_response(resp)
@@ -1294,8 +1305,10 @@ def _build_tool_impls(
         selected = candidates if count is None else candidates[:count]
 
         results = [
-            _power_result_dict(power_machine(registry, m.mac, action))
-            for m in selected
+            _power_result_dict(result)
+            for result in power_machines(
+                registry, [m.mac for m in selected], action,
+            )
         ]
         succeeded = sum(1 for r in results if r["ok"])
         shortfall = (
@@ -1572,8 +1585,10 @@ def _build_tool_impls(
         )
         # The reservation owns power: switch each leased machine on.
         results = [
-            _power_result_dict(power_machine(registry, m.mac, "on"))
-            for m in leased
+            _power_result_dict(result)
+            for result in power_machines(
+                registry, [m.mac for m in leased], "on",
+            )
         ]
         liveness = _liveness_by_mac(sessions)
         reservations = registry.all_active_reservations()
@@ -1605,8 +1620,8 @@ def _build_tool_impls(
         freed = registry.release(macs=macs, holder=holder)
         # Power the freed machines off — the lease is done with them.
         results = [
-            _power_result_dict(power_machine(registry, mac, "off"))
-            for mac in freed
+            _power_result_dict(result)
+            for result in power_machines(registry, freed, "off")
         ]
         return _tool_text_result({
             "released": freed,

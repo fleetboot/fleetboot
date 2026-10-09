@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import base64
 import subprocess
+import threading
 from pathlib import Path
 
 import pytest
@@ -17,7 +18,9 @@ from fastapi.testclient import TestClient
 
 from fleetboot.server.app import create_app
 from fleetboot.server.boot_sessions import BootSessionStore
-from fleetboot.server.dashboard import power_machine, reboot_machine
+from fleetboot.server.dashboard import (
+    power_machine, power_machines, reboot_machine,
+)
 from fleetboot.server.registry import MachineRegistry
 
 
@@ -334,6 +337,59 @@ def test_powering_an_unknown_mac_reports_failure(
     result = power_machine(registry, "ff:ff:ff:ff:ff:ff", "on")
     assert result.ok is False
     assert "no machine" in result.detail
+
+
+# ---- Several machines at once ---------------------------------------------
+
+
+SECOND_MAC = "aa:bb:cc:dd:ee:02"
+
+
+def test_power_machines_runs_the_commands_side_by_side(
+    registry: MachineRegistry, monkeypatch,
+):
+    """A PDU takes seconds to answer. Two machines must be waiting on
+    their PDUs at the same moment, not one after the other — the fake
+    command only returns once both are in flight together."""
+    registry.enroll(mac=SECOND_MAC, profile_name="render-node",
+                    architecture="x86_64", platform="efi")
+    registry.set_power_command(MAC, "on", "switch-on-first.sh")
+    registry.set_power_command(SECOND_MAC, "on", "switch-on-second.sh")
+    both_in_flight = threading.Barrier(2, timeout=5)
+
+    def wait_for_the_other_command(command, **kwargs):
+        both_in_flight.wait()
+        return subprocess.CompletedProcess(command, 0)
+
+    monkeypatch.setattr(subprocess, "run", wait_for_the_other_command)
+
+    results = power_machines(registry, [MAC, SECOND_MAC], "on")
+
+    assert [result.ok for result in results] == [True, True]
+
+
+def test_power_machines_reports_results_in_the_order_asked(
+    registry: MachineRegistry, no_real_subprocess: RecordingRun,
+):
+    registry.enroll(mac=SECOND_MAC, profile_name="render-node",
+                    architecture="x86_64", platform="efi")
+    registry.set_power_command(MAC, "off", "switch-off.sh")
+
+    results = power_machines(
+        registry, [SECOND_MAC, "ff:ff:ff:ff:ff:ff", MAC], "off",
+    )
+
+    assert [result.mac for result in results] == [
+        SECOND_MAC, "ff:ff:ff:ff:ff:ff", MAC,
+    ]
+    assert [result.ok for result in results] == [False, False, True]
+
+
+def test_power_machines_with_nothing_to_switch_runs_nothing(
+    registry: MachineRegistry, no_real_subprocess: RecordingRun,
+):
+    assert power_machines(registry, [], "off") == []
+    assert no_real_subprocess.commands == []
 
 
 def test_power_machine_rejects_an_unknown_action(

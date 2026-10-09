@@ -6,6 +6,7 @@ profile and count, and has to be able to tell what it actually got.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import subprocess
 from pathlib import Path
@@ -105,6 +106,32 @@ def test_power_machine_tool_reports_the_route_taken(
         "mac": MAC, "action": "on", "method": "pdudaemon",
         "ok": True, "detail": "pdudaemon succeeded", "deleted": False,
     }
+
+
+def test_power_tool_runs_off_the_event_loop(tmp_path: Path, monkeypatch):
+    """A power command waits on a PDU for seconds. If it ran on the
+    server's event loop, the dashboard, heartbeats and every other MCP
+    call would freeze until the PDU answered — so it must run on a
+    worker thread, where no event loop is running."""
+    client, reg, _ = _fleet(tmp_path)
+    reg.enroll(mac=MAC, profile_name="render-node",
+               architecture="x86_64", platform="efi")
+    reg.set_power_command(MAC, "on", "switch-on.sh")
+    ran_on_the_event_loop: list[bool] = []
+
+    def note_where_the_command_runs(command, **kwargs):
+        try:
+            asyncio.get_running_loop()
+            ran_on_the_event_loop.append(True)
+        except RuntimeError:
+            ran_on_the_event_loop.append(False)
+        return subprocess.CompletedProcess(command, 0)
+
+    monkeypatch.setattr(subprocess, "run", note_where_the_command_runs)
+
+    _call_tool(client, "power_machine", {"mac": MAC, "action": "on"})
+
+    assert ran_on_the_event_loop == [False]
 
 
 def test_power_machine_tool_rejects_bad_input(tmp_path: Path):

@@ -15,7 +15,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Form, HTTPException, Request, status
+from fastapi import (
+    APIRouter, BackgroundTasks, Depends, Form, HTTPException, Request, status,
+)
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.templating import Jinja2Templates
@@ -763,9 +765,16 @@ def build_dashboard_router(
         response_class=HTMLResponse,
         dependencies=[Depends(require_admin)],
     )
-    def delete_and_reboot(mac: str) -> RedirectResponse:
-        """Reboot the host, then delete its row if PDU accepted."""
-        _reboot_machine(mac, then_delete=True)
+    def delete_and_reboot(
+        mac: str, background_tasks: BackgroundTasks,
+    ) -> RedirectResponse:
+        """Reboot the host, then delete its row.
+
+        The power command runs after the redirect is sent, so the row
+        may still be listed for the few seconds the PDU takes."""
+        background_tasks.add_task(
+            reboot_machine, registry, mac, then_delete=True,
+        )
         return RedirectResponse(
             url="/dashboard", status_code=status.HTTP_303_SEE_OTHER,
         )
@@ -775,17 +784,18 @@ def build_dashboard_router(
         response_class=HTMLResponse,
         dependencies=[Depends(require_admin)],
     )
-    def reboot_machine_route(mac: str) -> RedirectResponse:
+    def reboot_machine_route(
+        mac: str, background_tasks: BackgroundTasks,
+    ) -> RedirectResponse:
         """Reboot but keep the row. Useful when the admin wants the
         machine power-cycled (or soft-rebooted via the in-image
         reporter) without re-triggering auto-enrolment."""
-        _reboot_machine(mac, then_delete=False)
+        background_tasks.add_task(
+            reboot_machine, registry, mac, then_delete=False,
+        )
         return RedirectResponse(
             url="/dashboard", status_code=status.HTTP_303_SEE_OTHER,
         )
-
-    def _reboot_machine(mac: str, *, then_delete: bool) -> None:
-        reboot_machine(registry, mac, then_delete=then_delete)
 
     @router.post(
         "/dashboard/machines/{mac}/profile",
@@ -823,19 +833,24 @@ def build_dashboard_router(
         response_class=HTMLResponse,
         dependencies=[Depends(require_admin)],
     )
-    def power_machine_route(mac: str, action: str) -> RedirectResponse:
+    def power_machine_route(
+        mac: str, action: str, background_tasks: BackgroundTasks,
+    ) -> RedirectResponse:
         """Switch a machine on or off from its detail page.
 
         Unlike reboot there is no soft fallback — power needs a
         per-machine command or a pdudaemon alias, so an unwired machine
         fails visibly rather than silently doing nothing.
+
+        The power command runs after the redirect is sent: a PDU can
+        take many seconds to answer and the page must not hang on it.
         """
         if action not in POWER_ACTIONS:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"action must be one of {', '.join(POWER_ACTIONS)}",
             )
-        power_machine(registry, mac, action)
+        background_tasks.add_task(power_machine, registry, mac, action)
         return RedirectResponse(
             url=f"/dashboard/machines/{mac}",
             status_code=status.HTTP_303_SEE_OTHER,
@@ -882,12 +897,14 @@ def build_dashboard_router(
         response_class=HTMLResponse,
         dependencies=[Depends(require_admin)],
     )
-    def release_lease_route(mac: str) -> RedirectResponse:
+    def release_lease_route(
+        mac: str, background_tasks: BackgroundTasks,
+    ) -> RedirectResponse:
         """End an active compute lease early and power the machine off —
-        it returns to the pool as available."""
+        it returns to the pool as available. The lease is released
+        before the redirect; the power-off follows in the background."""
         freed = registry.release(macs=[mac])
-        for freed_mac in freed:
-            power_machine(registry, freed_mac, "off")
+        background_tasks.add_task(power_machines, registry, freed, "off")
         return RedirectResponse(
             url="/dashboard", status_code=status.HTTP_303_SEE_OTHER,
         )
@@ -1308,6 +1325,36 @@ def reboot_machine(
     speak in terms of rebooting. See `power_machine` for the routes.
     """
     return power_machine(registry, mac, "reboot", then_delete=then_delete)
+
+
+# How many power commands may run at once when several machines are
+# switched together. Each one mostly waits on a PDU, so running them
+# side by side turns "sum of every PDU's delay" into "the slowest
+# one" — but the cap keeps a whole-fleet request from opening dozens
+# of connections to pdudaemon at the same moment.
+MAXIMUM_CONCURRENT_POWER_COMMANDS = 8
+
+
+def power_machines(
+    registry: MachineRegistry, macs: list[str], action: str,
+) -> list[PowerResult]:
+    """Switch several machines at once; results match the order of `macs`.
+
+    Each machine is handled exactly as `power_machine` would handle it
+    alone, just concurrently, so one slow or dead PDU port delays only
+    its own result rather than every machine queued behind it.
+    """
+    from concurrent.futures import ThreadPoolExecutor
+
+    if not macs:
+        return []
+    worker_count = min(len(macs), MAXIMUM_CONCURRENT_POWER_COMMANDS)
+    with ThreadPoolExecutor(
+        max_workers=worker_count, thread_name_prefix="power-command",
+    ) as executor:
+        return list(
+            executor.map(lambda mac: power_machine(registry, mac, action), macs)
+        )
 
 
 def _machine_power_command(machine, action: str) -> Optional[str]:

@@ -185,7 +185,11 @@ stray reserve. A machine joins the pool only when an admin calls
 holder, ttl)` picks free machines, writes leases, switches each to the
 worker profile, and the MCP/dashboard layer powers them on. `release`
 powers off and frees. The registry stays pure-DB; power lives in the
-dashboard layer, as everywhere else. Decisions and API live in the
+dashboard layer, as everywhere else. Power commands wait on a PDU for
+seconds, so they never run on the server's event loop: MCP tool calls are
+dispatched on worker threads, several machines are switched concurrently
+(`power_machines`), and dashboard buttons run the command after the
+redirect is sent. Decisions and API live in the
 `reservations` docs topic (`describe_fleetboot`).
 
 ```
