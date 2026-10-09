@@ -239,6 +239,17 @@ def test_docs_tell_agents_how_to_find_a_machine_address():
     assert "`last_ip`" in _flat(mcp_docs.get_topic("on-demand-compute").body)
 
 
+def test_docs_describe_every_section_of_the_hardware_inventory():
+    """The inventory is only useful if an agent knows what is in it.
+    Every section the reporter collects must be named in the docs."""
+    services = mcp_docs.get_topic("services").body
+    for section in (
+        "cpu_model", "cpu_count", "mem_total_mb", "mem_available_mb",
+        "disks", "mounts", "pci", "usb_devices", "hardware_reported_at",
+    ):
+        assert f"`{section}`" in services, section
+
+
 def test_agents_are_told_to_ask_fleetboot_rather_than_scan_the_network():
     """An agent that can't find its worker tends to reach for a ping
     sweep or port scan. Everywhere it might look first — the server

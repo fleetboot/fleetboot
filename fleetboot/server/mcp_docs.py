@@ -193,6 +193,28 @@ registry fields: `state` (how far the current boot got — see
 more than "it spoke to us recently" — from the control plane, a
 powered-off machine and a wedged one look the same.
 
+## Knowing what a machine is made of
+
+Every machine record carries `hardware` — the full inventory the
+machine reported about itself on its last heartbeat — and
+`hardware_reported_at`. Use it to choose a machine by what it has
+(enough memory, a GPU, a scratch disk) instead of logging in to look.
+
+| Field | What it holds |
+|-------|---------------|
+| `cpu_model`, `cpu_count` | CPU model string and logical CPU count. |
+| `mem_total_mb`, `mem_available_mb` | Memory in MB. Available is a snapshot from the last report. |
+| `disks` | Physical block devices: `name`, `size_gb`, `model`, `removable`. |
+| `mounts` | Free space on `/`, and on `/var/scratch` and `/home` when really mounted: `path`, `total_gb`, `free_gb`. |
+| `pci` | PCI devices by kind: `gpu`, `network`, `usb`, `storage`. Empty kinds are left out. |
+| `usb_devices` | USB devices currently plugged in (root hubs skipped). |
+
+The inventory is passed through exactly as reported, so it may grow
+fields not listed here. It is `null` until a machine has booted an
+image and reported, and it describes the machine as of
+`hardware_reported_at` — sizes and devices rarely change, but free
+memory and free space are only as fresh as that timestamp.
+
 ## Finding a machine's address
 
 **Ask fleetboot; do not scan the network.** A ping sweep, ARP scan or

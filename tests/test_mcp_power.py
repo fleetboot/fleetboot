@@ -210,6 +210,80 @@ def test_list_machines_reports_the_last_observed_address(tmp_path: Path):
     assert machines["aa:bb:cc:dd:ee:02"]["last_ip_at"] is None
 
 
+FULL_HARDWARE_INVENTORY = {
+    "cpu_model": "Intel(R) Core(TM) i5-7500T CPU @ 2.70GHz",
+    "cpu_count": 4,
+    "mem_total_mb": 15891,
+    "mem_available_mb": 14012,
+    "disks": [
+        {"name": "sda", "size_gb": 238, "model": "SAMSUNG MZ7LN256",
+         "removable": False},
+    ],
+    "mounts": [
+        {"path": "/", "total_gb": 7, "free_gb": 6},
+        {"path": "/var/scratch", "total_gb": 234, "free_gb": 220},
+    ],
+    "pci": {
+        "gpu": ["Intel Corporation HD Graphics 630"],
+        "network": ["Intel Corporation Ethernet Connection (5) I219-LM"],
+        "usb": ["Intel Corporation 200 Series PCH USB 3.0 xHCI Controller"],
+        "storage": ["Intel Corporation 200 Series PCH SATA controller"],
+    },
+    "usb_devices": ["046d:c31c Logitech, Inc. Keyboard K120"],
+}
+
+
+def test_machine_tools_expose_the_whole_hardware_inventory(tmp_path: Path):
+    """An agent picks a machine by what it has, so every section the
+    machine reported — not a chosen few — must come back, from both the
+    fleet listing and the single-machine lookup."""
+    client, reg, _ = _fleet(tmp_path)
+    reg.enroll(mac=MAC, profile_name="render-node",
+               architecture="x86_64", platform="efi")
+    reg.update_hardware(MAC, json.dumps(FULL_HARDWARE_INVENTORY))
+
+    listed = _call_tool(client, "list_machines", {})["payload"]["machines"][0]
+    fetched = _call_tool(client, "get_machine", {"mac": MAC})["payload"]
+
+    for record in (listed, fetched):
+        assert record["hardware"] == FULL_HARDWARE_INVENTORY
+        assert record["hardware_reported_at"] is not None
+
+
+def test_hardware_inventory_passes_through_fields_added_later(tmp_path: Path):
+    """The reporter owns the inventory's shape. A section it starts
+    sending tomorrow must reach agents without the server being taught
+    about it."""
+    client, reg, _ = _fleet(tmp_path)
+    reg.enroll(mac=MAC, profile_name="render-node",
+               architecture="x86_64", platform="efi")
+    reg.update_hardware(MAC, json.dumps({"firmware_version": "N1CET92W"}))
+
+    fetched = _call_tool(client, "get_machine", {"mac": MAC})["payload"]
+
+    assert fetched["hardware"] == {"firmware_version": "N1CET92W"}
+
+
+def test_machine_without_a_usable_inventory_reports_none(tmp_path: Path):
+    """Never booted means no inventory; a corrupt stored blob must read
+    as "none" too rather than breaking the whole listing."""
+    client, reg, _ = _fleet(tmp_path)
+    reg.enroll(mac=MAC, profile_name="render-node",
+               architecture="x86_64", platform="efi")
+    reg.enroll(mac="aa:bb:cc:dd:ee:02", profile_name="render-node",
+               architecture="x86_64", platform="efi")
+    reg.update_hardware("aa:bb:cc:dd:ee:02", "{not json")
+
+    machines = {
+        m["mac"]: m
+        for m in _call_tool(client, "list_machines", {})["payload"]["machines"]
+    }
+
+    assert machines[MAC]["hardware"] is None
+    assert machines[MAC]["hardware_reported_at"] is None
+    assert machines["aa:bb:cc:dd:ee:02"]["hardware"] is None
+
+
 # ---- On-demand compute: power_fleet -------------------------------------
 
 

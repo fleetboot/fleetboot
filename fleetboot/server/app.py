@@ -124,9 +124,11 @@ class StatusReport(BaseModel):
         default=None,
         description=(
             "Hardware inventory: cpu_model, cpu_count, mem_total_mb, "
-            "mem_available_mb, disks[], mounts[]. Stored as JSON; the "
-            "dashboard parses for display. No server-side validation of "
-            "the inner shape — best-effort telemetry."
+            "mem_available_mb, disks[], mounts[], pci{gpu, network, usb, "
+            "storage}, usb_devices[]. Stored as JSON; the dashboard "
+            "parses for display and the MCP machine tools return it "
+            "whole. No server-side validation of the inner shape — "
+            "best-effort telemetry."
         ),
     )
 

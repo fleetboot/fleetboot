@@ -512,7 +512,13 @@ def _tool_catalogue() -> list[dict]:
                 "when; it is null until a machine has booted and goes "
                 "stale once it is off, so trust it only while `online` "
                 "is true. Read addresses from here rather than "
-                "scanning the network. "
+                "scanning the network. `hardware` is the machine's "
+                "full self-reported inventory — CPU model and count, "
+                "memory, disks, mounts with free space, PCI devices "
+                "(GPU, network, USB, storage) and attached USB devices "
+                "— with `hardware_reported_at`; null until the machine "
+                "has booted an image and reported. Use it to pick a "
+                "machine by what it has. "
                 "Also carries the live view: `state` (how far the "
                 "current boot got), `last_seen`, and `online` (it has "
                 "heartbeated in the last 6 minutes). Use `online` and "
@@ -527,7 +533,9 @@ def _tool_catalogue() -> list[dict]:
             "name": "get_machine",
             "description": (
                 "Return the full record for a single MAC, including its "
-                "live boot state and whether it is currently online."
+                "live boot state, whether it is currently online, and "
+                "its full `hardware` inventory (CPU, memory, disks, "
+                "mounts, PCI and USB devices)."
             ),
             "inputSchema": {
                 "type": "object",
@@ -1126,6 +1134,19 @@ def _build_tool_impls(
             "expires_at": res.expires_at,
         }
 
+    def _hardware_inventory(m) -> Optional[dict]:
+        """The machine's latest hardware inventory, exactly as its
+        reporter sent it — every section, with nothing picked out, so a
+        field the reporter grows later reaches agents without a change
+        here. None until the machine has reported one."""
+        if not m.last_hardware:
+            return None
+        try:
+            inventory = json.loads(m.last_hardware)
+        except json.JSONDecodeError:
+            return None
+        return inventory if isinstance(inventory, dict) else None
+
     def _machine_dict(
         m,
         liveness: Optional[dict] = None,
@@ -1146,6 +1167,9 @@ def _build_tool_impls(
             "platform": m.platform,
             "last_ip": m.last_ip,
             "last_ip_at": m.last_ip_at,
+            # What the machine is made of, and when it last told us.
+            "hardware": _hardware_inventory(m),
+            "hardware_reported_at": m.last_hardware_at,
             "boot_version": m.boot_version,
             "pending_reboot": bool(m.pending_reboot),
             "reboot_command": m.reboot_command,
