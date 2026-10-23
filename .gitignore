@@ -29,3 +29,6 @@ image/profiles_resolved/
 image/profiles/*/overlay/etc/krb5.keytab
 image/profiles/*/overlay/etc/fleetboot/enrol.keytab
 image/custom/authorized_keys
+
+# Bug reports agents file through the MCP — deployment data, not source.
+bug-reports/

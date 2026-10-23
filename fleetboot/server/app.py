@@ -298,6 +298,7 @@ def create_app(
     dashboard_repo_root: Path | None = None,
     keytabs_dir: Path | None = None,
     authorized_keys_path: Path | None = None,
+    bug_reports_dir: Path | None = None,
 ) -> FastAPI:
     """Build the FastAPI app.
 
@@ -317,6 +318,8 @@ def create_app(
     `keytabs_dir` — directory holding per-MAC FreeIPA enrolment keytabs at
         `<keytabs_dir>/<mac>.keytab`. Served via /enrol/{token}/keytab.
         If None, /enrol/* returns 503 (keytab delivery disabled).
+    `bug_reports_dir` — where agents' MCP bug reports are written.
+        Defaults to `<dashboard_repo_root>/bug-reports`.
     """
     store = sessions if sessions is not None else BootSessionStore()
     app = FastAPI(title="Fleetboot control plane")
@@ -903,6 +906,7 @@ def create_app(
         and registry is not None
         and admin_secret is not None
     ):
+        from fleetboot.server.bug_reports import BugReportStore
         from fleetboot.server.build_jobs import BuildJob, BuildJobManager
         from fleetboot.server.dashboard import build_dashboard_router
         from fleetboot.server.mcp import build_mcp_router
@@ -955,6 +959,11 @@ def create_app(
                 admin_secret=admin_secret,
                 pool_secret=pool_secret,
                 sessions=store,
+                bug_reports=BugReportStore(
+                    bug_reports_dir
+                    if bug_reports_dir is not None
+                    else dashboard_repo_root / "bug-reports"
+                ),
             )
         )
         app.state.builds = builds

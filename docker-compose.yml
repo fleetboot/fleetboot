@@ -64,6 +64,10 @@ services:
       - ../fleetboot/image/profiles:/app/image/profiles:rw
       # Admin overlays / customisations.
       - ../fleetboot/image/custom:/app/image/custom:rw
+      # Bug reports agents file through the MCP's report_bug tool, one
+      # Markdown file each, so a maintainer or a later agent can read
+      # them on the host (bug-reports/open/) and fix them.
+      - ../fleetboot/bug-reports:/app/bug-reports:rw
       # Optional: admin-supplied TLS material. Empty by default so
       # the mount is a no-op. Point FLEETBOOT_TLS_CERT + _KEY at
       # /tls/<file>.pem to enable HTTPS.

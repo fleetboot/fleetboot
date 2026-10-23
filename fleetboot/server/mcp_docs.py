@@ -150,6 +150,7 @@ Everything below is a tool on this endpoint.
 | Image authoring | `list_profiles`, `get_profile`, `save_profile`, `write_profile_overlay` |
 | Image builds | `start_build`, `list_builds`, `get_build` |
 | Observability | `recent_events` |
+| Bug reports | `report_bug` (any token), `list_bug_reports`, `get_bug_report`, `resolve_bug_report` |
 | Self-documentation | `describe_fleetboot` |
 
 Two of these do fleet-scale work in one call. `start_build` with
@@ -192,6 +193,19 @@ registry fields: `state` (how far the current boot got — see
 `online` (heartbeated within the last 6 minutes). `online` claims no
 more than "it spoke to us recently" — from the control plane, a
 powered-off machine and a wedged one look the same.
+
+## Reporting a bug
+
+If fleetboot fails, misbehaves, or contradicts these docs, call
+`report_bug`: a one-line `title`, a `description` of what you did, what
+you expected and what happened (exact error text, MACs, times, tool
+results), and optionally `severity` (`low`, `medium`, `high`,
+`critical`), `component` and `reporter`. Both the admin and the pool
+token may file. Each report is saved as a Markdown file on the
+fleetboot host for a maintainer or a later agent to pick up; the
+admin token can `list_bug_reports`, `get_bug_report` and
+`resolve_bug_report`. Report a problem even when you found a way
+around it — the next agent may not.
 
 ## Knowing what a machine is made of
 
