@@ -195,6 +195,57 @@ def test_machine_detail_page_shows_all_fields(dashboard_root: Path):
     assert "Recent boot events" in body
 
 
+def test_machine_detail_page_shows_the_hardware_spec(dashboard_root: Path):
+    """RAM, CPU cores and threads, motherboard and each disk's
+    connection and speed sit in the registry summary at the top."""
+    import json
+
+    client = _client(dashboard_root)
+    registry = MachineRegistry(dashboard_root / "machines.sqlite")
+    registry.enroll(mac="aa:bb:cc:dd:ee:ff", profile_name="school",
+                    architecture="x86_64", platform="efi")
+    registry.update_hardware("aa:bb:cc:dd:ee:ff", json.dumps({
+        "mem_total_mb": 16384,
+        "cpu": {"model": "Intel(R) Core(TM) i7-7700", "sockets": 1,
+                "cores": 4, "threads": 8, "max_mhz": 4200},
+        "motherboard": {"system_vendor": "Dell Inc.",
+                        "system_product": "OptiPlex 7050",
+                        "board_name": "0NW6H5", "bios_vendor": "Dell Inc.",
+                        "bios_version": "1.8.3"},
+        "disks": [{"name": "sda", "size_bytes": 1000204886016,
+                   "connection": "sata", "media": "hdd",
+                   "link_speed": "6.0 Gbps", "model": "WDC WD10EZEX-08W",
+                   "firmware": "1A01"}],
+    }))
+
+    body = client.get(
+        "/dashboard/machines/aa:bb:cc:dd:ee:ff", headers=_auth_header(),
+    ).text
+    flat = " ".join(body.split())
+
+    assert "16.0 GiB" in flat
+    assert "4 cores, 8 threads" in flat
+    assert "OptiPlex 7050" in flat
+    assert "0NW6H5" in flat
+    assert "BIOS Dell Inc. 1.8.3" in flat
+    assert "1000 GB HDD via SATA" in flat
+    assert "at 6.0 Gbps" in flat
+    assert "firmware 1A01" in flat
+
+
+def test_machine_detail_page_says_when_no_spec_is_reported(dashboard_root: Path):
+    client = _client(dashboard_root)
+    registry = MachineRegistry(dashboard_root / "machines.sqlite")
+    registry.enroll(mac="aa:bb:cc:dd:ee:ff", profile_name="school",
+                    architecture="x86_64", platform="efi")
+
+    body = client.get(
+        "/dashboard/machines/aa:bb:cc:dd:ee:ff", headers=_auth_header(),
+    ).text
+
+    assert body.count("not reported yet") == 4
+
+
 def test_set_reboot_command_and_then_clear(dashboard_root: Path):
     """The detail page's form persists / clears the reboot_command."""
     client = _client(dashboard_root)

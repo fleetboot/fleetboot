@@ -195,25 +195,51 @@ powered-off machine and a wedged one look the same.
 
 ## Knowing what a machine is made of
 
-Every machine record carries `hardware` — the full inventory the
-machine reported about itself on its last heartbeat — and
-`hardware_reported_at`. Use it to choose a machine by what it has
-(enough memory, a GPU, a scratch disk) instead of logging in to look.
+Every machine record carries three views of its hardware. Use them to
+choose a machine by what it has — enough memory, enough cores, an NVMe
+scratch disk, a GPU — instead of logging in to look.
+
+- `ram_total_mb` — total RAM in MB. The quick filter.
+- `hardware_spec` — the stable spec: what the box is made of. Kept on
+  the machine record across re-enrolment, and a section is only
+  replaced when a report carries it, so a patchy report never blanks it.
+- `hardware` with `hardware_reported_at` — the full latest inventory
+  snapshot, exactly as the machine reported it. Adds the live parts:
+  free memory, mounts with free space, PCI and USB devices.
+
+All three are `null` until a machine has booted an image and reported.
+
+`hardware_spec` sections:
+
+| Section | What it holds |
+|---------|---------------|
+| `ram_total_mb` | Total RAM in MB. |
+| `cpu` | `model`, `vendor`, `sockets`, `cores` (physical), `threads` (hardware threads), `max_mhz`. |
+| `motherboard` | `system_vendor`, `system_product`, `system_version`, `board_vendor`, `board_name`, `board_version`, `bios_vendor`, `bios_version`, `bios_date`. arm64 boards without DMI give just `system_product` from the device tree. |
+| `disks` | Per disk: `name`, `size_bytes`, `size_gb` (GiB), `vendor`, `model`, `firmware`, `connection` (`nvme`, `sata`, `usb`, `sas_or_scsi`, `mmc`, `virtio`), `media` (`ssd`, `hdd`, `flash`, `virtual`), `link_speed` (e.g. `6.0 Gbps`, `PCIe 8.0 GT/s x4`, `USB 5000 Mbps`), `removable`. |
+
+Spindle speed and rated throughput are not reported — no kernel
+interface gives them. Look the drive up by `vendor`, `model` and
+`firmware` if you need them.
+
+Machines running an image built before these details existed report
+only `cpu.model`, `cpu.threads`, RAM and each disk's `name`, `size_gb`,
+`model` and `removable`; the rest appears once they boot a rebuilt
+image.
+
+`hardware` (the full snapshot) additionally has:
 
 | Field | What it holds |
 |-------|---------------|
-| `cpu_model`, `cpu_count` | CPU model string and logical CPU count. |
+| `cpu_model`, `cpu_count` | CPU model string and logical CPU count (older field names, still sent). |
 | `mem_total_mb`, `mem_available_mb` | Memory in MB. Available is a snapshot from the last report. |
-| `disks` | Physical block devices: `name`, `size_gb`, `model`, `removable`. |
 | `mounts` | Free space on `/`, and on `/var/scratch` and `/home` when really mounted: `path`, `total_gb`, `free_gb`. |
 | `pci` | PCI devices by kind: `gpu`, `network`, `usb`, `storage`. Empty kinds are left out. |
 | `usb_devices` | USB devices currently plugged in (root hubs skipped). |
 
-The inventory is passed through exactly as reported, so it may grow
-fields not listed here. It is `null` until a machine has booted an
-image and reported, and it describes the machine as of
-`hardware_reported_at` — sizes and devices rarely change, but free
-memory and free space are only as fresh as that timestamp.
+The snapshot is passed through exactly as reported, so it may grow
+fields not listed here, and its live values are only as fresh as
+`hardware_reported_at`.
 
 ## Finding a machine's address
 

@@ -250,6 +250,35 @@ def test_machine_tools_expose_the_whole_hardware_inventory(tmp_path: Path):
         assert record["hardware_reported_at"] is not None
 
 
+def test_machine_tools_expose_the_hardware_spec(tmp_path: Path):
+    """RAM sits at the top level for quick filtering; the spec carries
+    CPU cores and threads, motherboard and disk details."""
+    client, reg, _ = _fleet(tmp_path)
+    reg.enroll(mac=MAC, profile_name="render-node",
+               architecture="x86_64", platform="efi")
+    reg.update_hardware(MAC, json.dumps({
+        **FULL_HARDWARE_INVENTORY,
+        "cpu": {"model": "i5-7500T", "sockets": 1, "cores": 4, "threads": 4},
+        "motherboard": {"system_vendor": "HP", "board_name": "829A"},
+        "disks": [{"name": "sda", "size_bytes": 256060514304,
+                   "connection": "sata", "media": "ssd",
+                   "link_speed": "6.0 Gbps", "model": "SAMSUNG MZ7LN256"}],
+    }))
+
+    listed = _call_tool(client, "list_machines", {})["payload"]["machines"][0]
+    fetched = _call_tool(client, "get_machine", {"mac": MAC})["payload"]
+
+    for record in (listed, fetched):
+        assert record["ram_total_mb"] == 15891
+        spec = record["hardware_spec"]
+        assert spec["ram_total_mb"] == 15891
+        assert spec["cpu"]["cores"] == 4
+        assert spec["cpu"]["threads"] == 4
+        assert spec["motherboard"]["board_name"] == "829A"
+        assert spec["disks"][0]["connection"] == "sata"
+        assert spec["disks"][0]["link_speed"] == "6.0 Gbps"
+
+
 def test_hardware_inventory_passes_through_fields_added_later(tmp_path: Path):
     """The reporter owns the inventory's shape. A section it starts
     sending tomorrow must reach agents without the server being taught
@@ -281,6 +310,8 @@ def test_machine_without_a_usable_inventory_reports_none(tmp_path: Path):
 
     assert machines[MAC]["hardware"] is None
     assert machines[MAC]["hardware_reported_at"] is None
+    assert machines[MAC]["ram_total_mb"] is None
+    assert machines[MAC]["hardware_spec"] is None
     assert machines["aa:bb:cc:dd:ee:02"]["hardware"] is None
 
 

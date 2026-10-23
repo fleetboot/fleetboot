@@ -13,11 +13,14 @@ the API has anyway (lookups dominate; enrolment is rare).
 
 from __future__ import annotations
 
+import json
 import sqlite3
 import threading
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
+
+from fleetboot.server.hardware_spec import merge_spec, spec_from_inventory
 
 
 # Schema lives here so tests and migrations have one place to look. We use
@@ -41,6 +44,10 @@ CREATE TABLE IF NOT EXISTS machines (
     last_diagnostics_at TEXT,
     last_hardware    TEXT,
     last_hardware_at TEXT,
+    -- The machine's hardware spec (RAM, CPU, motherboard, disks) as
+    -- JSON, distilled from its inventory reports by hardware_spec.py.
+    -- NULL until the machine has reported an inventory.
+    hardware_spec    TEXT,
     last_ip          TEXT,
     last_ip_at       TEXT,
     reboot_command   TEXT,
@@ -224,6 +231,36 @@ def _add_power_columns_if_missing(connection: sqlite3.Connection) -> None:
             pass
 
 
+def _add_hardware_spec_column_if_missing(connection: sqlite3.Connection) -> None:
+    """Migration: the hardware spec as its own column, filled in from any
+    inventory already stored so existing machines show their spec
+    straight away rather than after their next heartbeat."""
+    try:
+        connection.execute("ALTER TABLE machines ADD COLUMN hardware_spec TEXT")
+    except sqlite3.OperationalError:
+        return  # Already there — and already backfilled when it was added.
+    rows = connection.execute(
+        "SELECT mac, last_hardware FROM machines "
+        "WHERE last_hardware IS NOT NULL"
+    ).fetchall()
+    for mac, hardware_json in rows:
+        spec = spec_from_inventory(_parse_json_object(hardware_json))
+        if spec:
+            connection.execute(
+                "UPDATE machines SET hardware_spec = ? WHERE mac = ?",
+                (json.dumps(spec), mac),
+            )
+
+
+def _parse_json_object(text: Optional[str]) -> Optional[dict]:
+    """A stored JSON object, or None when it is missing or unreadable."""
+    try:
+        value = json.loads(text or "")
+    except json.JSONDecodeError:
+        return None
+    return value if isinstance(value, dict) else None
+
+
 def _pin_existing_machines_once(connection: sqlite3.Connection) -> None:
     """Migration: give every pre-reservation machine a permanent hold.
 
@@ -313,6 +350,11 @@ class Machine:
     # reporter, rendered as a table on the machine detail page.
     last_hardware: Optional[str] = None
     last_hardware_at: Optional[str] = None
+    # What the box is made of — RAM, CPU, motherboard, disks — built up
+    # from its inventory reports (see hardware_spec.py). Physical, so it
+    # survives re-enrolment like the power wiring does. Left out of
+    # hashing because a dict can't be hashed.
+    hardware_spec: Optional[dict] = field(default=None, hash=False)
     # Last IP the machine was seen reporting from (server-side observed,
     # not client-claimed). Updated on every /status post.
     last_ip: Optional[str] = None
@@ -335,6 +377,11 @@ class Machine:
     # PDU power-cycle has failed (or no PDU is configured); cleared
     # implicitly when the machine re-enrols on its next PXE.
     pending_reboot: bool = False
+
+    @property
+    def ram_total_mb(self) -> Optional[int]:
+        """Total RAM in MB from the hardware spec, or None if unknown."""
+        return (self.hardware_spec or {}).get("ram_total_mb")
 
 
 @dataclass(frozen=True)
@@ -409,6 +456,7 @@ class MachineRegistry:
             _add_scratch_mode_columns_if_missing(connection)
             _add_diagnostics_columns_if_missing(connection)
             _add_power_columns_if_missing(connection)
+            _add_hardware_spec_column_if_missing(connection)
             # Must run after the machines table exists and its columns are
             # migrated: it reads profile_name/enrolled_by off every row.
             _pin_existing_machines_once(connection)
@@ -462,14 +510,16 @@ class MachineRegistry:
         # Re-enrolling replaces the row wholesale, which would throw away
         # how this machine is powered — and a machine you can no longer
         # switch on is a machine you've lost. Power wiring is physical
-        # and survives a profile change, so carry it across.
-        power_columns = (
+        # and survives a profile change, so carry it across. So is what
+        # the box is made of.
+        carried_columns = (
             "reboot_command", "power_on_command",
             "power_off_command", "pdu_alias",
+            "hardware_spec",
         )
         with self._write_lock, self._connect() as connection:
             previous = connection.execute(
-                f"SELECT {', '.join(power_columns)} FROM machines "
+                f"SELECT {', '.join(carried_columns)} FROM machines "
                 "WHERE mac = ?",
                 (normalised_mac,),
             ).fetchone()
@@ -485,10 +535,10 @@ class MachineRegistry:
                 ),
             )
             if previous is not None:
-                assignments = ", ".join(f"{c} = ?" for c in power_columns)
+                assignments = ", ".join(f"{c} = ?" for c in carried_columns)
                 connection.execute(
                     f"UPDATE machines SET {assignments} WHERE mac = ?",
-                    (*(previous[c] for c in power_columns), normalised_mac),
+                    (*(previous[c] for c in carried_columns), normalised_mac),
                 )
             else:
                 # Brand-new machine: pin it permanently by default so it
@@ -920,19 +970,31 @@ class MachineRegistry:
     def update_hardware(self, mac: str, hardware_json: str) -> None:
         """Replace the machine row's latest hardware inventory blob.
 
-        Stored as a JSON string; the dashboard parses on render.
+        Stored as a JSON string; the dashboard parses on render. The
+        stable facts are also folded into `hardware_spec`, section by
+        section — a section this report doesn't carry keeps its earlier
+        value, since one patchy report doesn't mean the disk has gone.
         """
         normalised_mac = _normalise_mac(mac)
         cleaned = (hardware_json or "").strip()
         if not cleaned:
             return
+        latest_spec = spec_from_inventory(_parse_json_object(cleaned))
         with self._write_lock, self._connect() as connection:
+            row = connection.execute(
+                "SELECT hardware_spec FROM machines WHERE mac = ?",
+                (normalised_mac,),
+            ).fetchone()
+            if row is None:
+                return
+            spec = merge_spec(_parse_json_object(row[0]), latest_spec)
             connection.execute(
                 "UPDATE machines "
                 "SET last_hardware = ?, "
-                "    last_hardware_at = datetime('now') "
+                "    last_hardware_at = datetime('now'), "
+                "    hardware_spec = ? "
                 "WHERE mac = ?",
-                (cleaned, normalised_mac),
+                (cleaned, json.dumps(spec) if spec else None, normalised_mac),
             )
 
     def update_diagnostics(self, mac: str, diagnostics: str) -> None:
@@ -972,6 +1034,7 @@ class MachineRegistry:
         "scratch_mode",
         "last_diagnostics", "last_diagnostics_at",
         "last_hardware", "last_hardware_at",
+        "hardware_spec",
         "last_ip", "last_ip_at",
         "reboot_command",
         "power_on_command", "power_off_command", "pdu_alias",
@@ -1406,6 +1469,7 @@ def _row_to_machine(row: sqlite3.Row) -> Machine:
         last_diagnostics_at=row["last_diagnostics_at"],
         last_hardware=row["last_hardware"],
         last_hardware_at=row["last_hardware_at"],
+        hardware_spec=_parse_json_object(_optional_column(row, "hardware_spec")),
         last_ip=row["last_ip"],
         last_ip_at=row["last_ip_at"],
         reboot_command=row["reboot_command"],

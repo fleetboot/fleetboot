@@ -123,12 +123,14 @@ class StatusReport(BaseModel):
     hardware: Optional[dict] = Field(
         default=None,
         description=(
-            "Hardware inventory: cpu_model, cpu_count, mem_total_mb, "
-            "mem_available_mb, disks[], mounts[], pci{gpu, network, usb, "
-            "storage}, usb_devices[]. Stored as JSON; the dashboard "
-            "parses for display and the MCP machine tools return it "
-            "whole. No server-side validation of the inner shape — "
-            "best-effort telemetry."
+            "Hardware inventory: cpu_model, cpu_count, cpu{model, "
+            "vendor, sockets, cores, threads, max_mhz}, motherboard{...}, "
+            "mem_total_mb, mem_available_mb, disks[], mounts[], "
+            "pci{gpu, network, usb, storage}, usb_devices[]. Stored as "
+            "JSON; the stable parts are also kept as the machine's "
+            "hardware spec. The dashboard parses for display and the "
+            "MCP machine tools return it whole. No server-side "
+            "validation of the inner shape — best-effort telemetry."
         ),
     )
 

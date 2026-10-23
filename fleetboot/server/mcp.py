@@ -512,13 +512,17 @@ def _tool_catalogue() -> list[dict]:
                 "when; it is null until a machine has booted and goes "
                 "stale once it is off, so trust it only while `online` "
                 "is true. Read addresses from here rather than "
-                "scanning the network. `hardware` is the machine's "
-                "full self-reported inventory — CPU model and count, "
-                "memory, disks, mounts with free space, PCI devices "
-                "(GPU, network, USB, storage) and attached USB devices "
-                "— with `hardware_reported_at`; null until the machine "
-                "has booted an image and reported. Use it to pick a "
-                "machine by what it has. "
+                "scanning the network. `ram_total_mb` and "
+                "`hardware_spec` describe what the machine is made of — "
+                "RAM, CPU (model, sockets, physical cores, threads, max "
+                "MHz), motherboard and BIOS, and each disk's size, "
+                "connection (nvme/sata/usb/...), media (ssd/hdd), link "
+                "speed, vendor, model and firmware. `hardware` is the "
+                "full latest inventory snapshot (adds free memory, "
+                "mounts with free space, PCI and USB devices) with "
+                "`hardware_reported_at`. All are null until the "
+                "machine has booted an image and reported. Use them to "
+                "pick a machine by what it has. "
                 "Also carries the live view: `state` (how far the "
                 "current boot got), `last_seen`, and `online` (it has "
                 "heartbeated in the last 6 minutes). Use `online` and "
@@ -534,8 +538,10 @@ def _tool_catalogue() -> list[dict]:
             "description": (
                 "Return the full record for a single MAC, including its "
                 "live boot state, whether it is currently online, and "
-                "its full `hardware` inventory (CPU, memory, disks, "
-                "mounts, PCI and USB devices)."
+                "its `ram_total_mb`, `hardware_spec` (RAM, CPU cores "
+                "and threads, motherboard/BIOS, disks with connection, "
+                "media and link speed) and full `hardware` inventory "
+                "(adds mounts, PCI and USB devices)."
             ),
             "inputSchema": {
                 "type": "object",
@@ -1167,7 +1173,11 @@ def _build_tool_impls(
             "platform": m.platform,
             "last_ip": m.last_ip,
             "last_ip_at": m.last_ip_at,
-            # What the machine is made of, and when it last told us.
+            # What the machine is made of: the stable spec (kept across
+            # re-enrolment) with RAM pulled up for quick filtering, then
+            # the full latest inventory snapshot and when it was taken.
+            "ram_total_mb": m.ram_total_mb,
+            "hardware_spec": m.hardware_spec,
             "hardware": _hardware_inventory(m),
             "hardware_reported_at": m.last_hardware_at,
             "boot_version": m.boot_version,

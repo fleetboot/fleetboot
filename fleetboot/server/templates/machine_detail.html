@@ -51,6 +51,64 @@
         nothing else about the row changes</span>
     </td></tr>
     <tr><th>Arch / platform</th><td>{{ machine.architecture }} / {{ machine.platform }}</td></tr>
+    {% set spec = machine.hardware_spec or {} %}
+    <tr><th>RAM</th><td data-role="ram-total">
+      {% if spec.ram_total_mb %}
+        {{ "%.1f"|format(spec.ram_total_mb / 1024) }} GiB
+        <span class="muted">({{ spec.ram_total_mb }} MB)</span>
+      {% else %}
+        <span class="muted">— not reported yet</span>
+      {% endif %}
+    </td></tr>
+    <tr><th>CPU</th><td data-role="cpu-spec">
+      {% if spec.cpu %}
+        {{ spec.cpu.model or "unknown model" }}
+        <span class="muted">—
+          {% if spec.cpu.cores %}{{ spec.cpu.cores }} cores, {% endif %}
+          {% if spec.cpu.threads %}{{ spec.cpu.threads }} threads{% endif %}
+          {% if spec.cpu.sockets and spec.cpu.sockets > 1 %}, {{ spec.cpu.sockets }} sockets{% endif %}
+          {% if spec.cpu.max_mhz %}, up to {{ spec.cpu.max_mhz }} MHz{% endif %}
+        </span>
+      {% else %}
+        <span class="muted">— not reported yet</span>
+      {% endif %}
+    </td></tr>
+    <tr><th>Motherboard</th><td data-role="motherboard-spec">
+      {% if spec.motherboard %}
+        {% set board = spec.motherboard %}
+        {{ board.system_vendor or "" }} {{ board.system_product or "" }}
+        {% if board.board_name %}
+          <span class="muted">— board {{ board.board_vendor or "" }} {{ board.board_name }}
+            {% if board.board_version %}({{ board.board_version }}){% endif %}</span>
+        {% endif %}
+        {% if board.bios_version %}
+          <br><span class="muted">BIOS {{ board.bios_vendor or "" }} {{ board.bios_version }}
+            {% if board.bios_date %}({{ board.bios_date }}){% endif %}</span>
+        {% endif %}
+      {% else %}
+        <span class="muted">— not reported yet</span>
+      {% endif %}
+    </td></tr>
+    <tr><th>Disks</th><td data-role="disk-spec">
+      {% if spec.disks %}
+        <ul style="margin: 0; padding-left: 20px;">
+          {% for d in spec.disks %}
+          <li>
+            <code>{{ d.name }}</code> —
+            {% if d.size_bytes %}{{ (d.size_bytes / 1000000000)|round|int }} GB{% else %}{{ d.size_gb }} GiB{% endif %}
+            {% if d.media %}{{ d.media|upper }}{% endif %}
+            {% if d.connection %}via {{ d.connection|upper }}{% endif %}
+            {% if d.link_speed %}<span class="muted">at {{ d.link_speed }}</span>{% endif %}
+            <br><span class="muted">{{ d.vendor or "" }} {{ d.model or "" }}
+              {% if d.firmware %}— firmware {{ d.firmware }}{% endif %}
+              {% if d.removable %}[removable]{% endif %}</span>
+          </li>
+          {% endfor %}
+        </ul>
+      {% else %}
+        <span class="muted">— not reported yet</span>
+      {% endif %}
+    </td></tr>
     <tr><th>Source</th><td>
       {% if machine.enrolled_by == "manual" %}
         <span class="muted">manual enrolment</span>
@@ -117,13 +175,13 @@
   <tbody>
     {% if hardware.cpu_model %}
     <tr><th>CPU</th><td>{{ hardware.cpu_model }}
-      {% if hardware.cpu_count %}<span class="muted">({{ hardware.cpu_count }} cores)</span>{% endif %}
+      {% if hardware.cpu_count %}<span class="muted">({{ hardware.cpu_count }} threads)</span>{% endif %}
     </td></tr>
     {% endif %}
     {% if hardware.mem_total_mb %}
     <tr><th>Memory</th><td>
       {{ "%.1f"|format(hardware.mem_total_mb / 1024) }} GiB total
-      {% if hardware.mem_available_mb is not none %}
+      {% if hardware.mem_available_mb is defined and hardware.mem_available_mb is not none %}
         / {{ "%.1f"|format(hardware.mem_available_mb / 1024) }} GiB available
       {% endif %}
     </td></tr>

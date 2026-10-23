@@ -246,8 +246,16 @@ def test_docs_describe_every_section_of_the_hardware_inventory():
     for section in (
         "cpu_model", "cpu_count", "mem_total_mb", "mem_available_mb",
         "disks", "mounts", "pci", "usb_devices", "hardware_reported_at",
+        "ram_total_mb", "hardware_spec", "cpu", "motherboard",
     ):
         assert f"`{section}`" in services, section
+    # And every fact in the spec sections, so an agent can filter on it.
+    for fact in (
+        "cores", "threads", "sockets", "max_mhz", "board_name",
+        "bios_version", "connection", "media", "link_speed", "firmware",
+        "size_bytes",
+    ):
+        assert f"`{fact}`" in services, fact
 
 
 def test_agents_are_told_to_ask_fleetboot_rather_than_scan_the_network():

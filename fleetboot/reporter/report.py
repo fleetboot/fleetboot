@@ -122,38 +122,24 @@ def _collect_hardware() -> Optional[dict]:
     except (OSError, ValueError):
         pass
 
-    # Block devices from /sys/block. Skip loop/ram/sr/dm/zram entries
-    # since they're not physical disks.
-    disks = []
+    # CPU topology and the motherboard/firmware identity, plus every
+    # physical disk with how it is attached and how fast its link is.
+    # See hardware_details for what each section holds.
+    from fleetboot.reporter import hardware_details
+
     try:
-        for sysblk in Path("/sys/block").iterdir():
-            name = sysblk.name
-            if name.startswith(("loop", "ram", "sr", "fd", "dm-", "zram")):
-                continue
-            try:
-                size_sectors = int((sysblk / "size").read_text().strip())
-                size_gb = (size_sectors * 512) // (1024 ** 3)
-            except (OSError, ValueError):
-                continue
-            removable = False
-            try:
-                removable = (sysblk / "removable").read_text().strip() == "1"
-            except OSError:
-                pass
-            model = ""
-            try:
-                model = (sysblk / "device/model").read_text().strip()
-            except OSError:
-                pass
-            disks.append({
-                "name": name,
-                "size_gb": size_gb,
-                "model": model,
-                "removable": removable,
-            })
+        cpuinfo_text = Path("/proc/cpuinfo").read_text()
     except OSError:
-        pass
-    info["disks"] = disks
+        cpuinfo_text = ""
+    cpu = hardware_details.cpu_details(_run(["lscpu"]), cpuinfo_text)
+    if cpu:
+        info["cpu"] = cpu
+    motherboard = hardware_details.motherboard_details(
+        Path("/sys/class/dmi/id"), Path("/proc/device-tree/model"),
+    )
+    if motherboard:
+        info["motherboard"] = motherboard
+    info["disks"] = hardware_details.disk_details(Path("/sys"))
 
     # Mount-point free space. /var/scratch is the canonical fleetboot
     # scratch mountpoint, /home is the autofs root for FreeIPA user homes.
