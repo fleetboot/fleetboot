@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 import time
 from pathlib import Path
 
@@ -133,6 +134,35 @@ def test_on_success_callback_errors_dont_fail_the_build(tmp_path: Path):
     assert finished.state == JobState.SUCCEEDED
     log = manager.tail_log(job.job_id)
     assert any("on_success callback failed" in line for line in log)
+
+
+def test_a_job_reads_as_finished_only_after_on_success_has_run(tmp_path: Path):
+    """An agent polling get_build stops at the first terminal state, so
+    what the callback records must already be there by then."""
+    callback_entered = threading.Event()
+    callback_may_finish = threading.Event()
+
+    def slow_sweep(job):
+        callback_entered.set()
+        callback_may_finish.wait(timeout=5)
+        job.auto_reboot_armed = 3
+
+    (tmp_path / "Makefile").write_text(".PHONY: image\nimage:\n\techo ok\n")
+    manager = BuildJobManager(repo_root=tmp_path, on_success=slow_sweep)
+    job = manager.start(profile="default", architecture="amd64")
+
+    assert callback_entered.wait(timeout=5)
+    try:
+        mid_sweep = manager.get(job.job_id)
+        assert mid_sweep.state == JobState.RUNNING
+        assert mid_sweep.finished_at is None
+    finally:
+        callback_may_finish.set()
+
+    finished = _wait_finished(manager, job.job_id)
+    assert finished.state == JobState.SUCCEEDED
+    assert finished.auto_reboot_armed == 3
+    assert finished.finished_at is not None
 
 
 def test_only_one_build_at_a_time(tmp_path: Path):

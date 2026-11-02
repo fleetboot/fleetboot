@@ -306,15 +306,13 @@ class BuildJobManager:
                     job.recent_lines.append(line)
                 return_code = process.wait()
             job.exit_code = return_code
-            job.state = (
+            outcome = (
                 JobState.SUCCEEDED if return_code == 0 else JobState.FAILED
             )
         except Exception as exc:  # noqa: BLE001 — surface every error
             job.recent_lines.append(f"build job crashed: {exc!r}")
-            job.state = JobState.FAILED
+            outcome = JobState.FAILED
             job.exit_code = -1
-        finally:
-            job.finished_at = time.time()
         # The running lock is owned by the caller (_run_single releases
         # after this one build; _run_cascade after the whole sequence),
         # so we do NOT release it here. The success callback still fires
@@ -323,13 +321,17 @@ class BuildJobManager:
         # swallowed into the job log — a fleet-wide reboot failure
         # shouldn't retroactively "fail" a build that produced a valid
         # artifact.
-        if job.state == JobState.SUCCEEDED and self._on_success is not None:
+        if outcome == JobState.SUCCEEDED and self._on_success is not None:
             try:
                 self._on_success(job)
             except Exception as exc:  # noqa: BLE001
                 job.recent_lines.append(
                     f"on_success callback failed: {exc!r}"
                 )
+        # Published last: pollers stop at the first terminal state, so
+        # whatever the callback recorded must already be on the job.
+        job.finished_at = time.time()
+        job.state = outcome
 
 
 def _make_id() -> str:
